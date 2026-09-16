@@ -1113,6 +1113,36 @@ CREATE INDEX idx_log_auditoria_usuario ON log_auditoria (usuario_id, criado_em D
 CREATE INDEX idx_log_auditoria_criado_em ON log_auditoria (criado_em DESC);
 
 -- ============================================================================
+-- 23. VERSÕES DO CRONOGRAMA (histórico sob demanda — migração 024)
+-- ============================================================================
+-- Cada linha é uma "foto" completa e independente do cronograma do projeto
+-- num instante escolhido pelo usuário — NUNCA gerada automaticamente por uma
+-- edição normal (criar/alterar/excluir atividade ou marco): só quando o
+-- usuário clica no botão "Gerar versão" na tela de Cronograma. As edições do
+-- dia a dia continuam apenas sobrepondo `atividades`/`marcos`, sem tocar
+-- nesta tabela.
+--
+-- `dados` guarda o conteúdo já RESOLVIDO (nomes de etapa/frente/recursos,
+-- não só os ids) para que a versão continue fazendo sentido mesmo que uma
+-- etapa/frente/recurso seja depois renomeado ou excluído — ver
+-- backend/app/cronograma_versoes.py, que monta esse jsonb reaproveitando o
+-- mesmo ATIVIDADE_SELECT usado no resto do sistema.
+CREATE TABLE cronograma_versoes (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  projeto_id        uuid NOT NULL REFERENCES projetos(id) ON DELETE CASCADE,
+  numero_versao     integer NOT NULL,   -- sequencial por projeto (1, 2, 3...), não reaproveitado
+  rotulo            text,               -- rótulo opcional dado pelo usuário ao gerar (ex.: "Linha de base", "Antes da reunião de 10/09")
+  dados             jsonb NOT NULL,     -- {atividades: [...], marcos: [...], dependencias: [...]} — já resolvido, ver acima
+  total_atividades  integer NOT NULL DEFAULT 0,   -- contagens denormalizadas, só para listar sem carregar o jsonb inteiro
+  total_marcos      integer NOT NULL DEFAULT 0,
+  criado_em         timestamptz NOT NULL DEFAULT now(),
+  criado_por        text,               -- nome do usuário logado que gerou (snapshot — ver X-Usuario)
+  UNIQUE (projeto_id, numero_versao)
+);
+CREATE INDEX idx_cronograma_versoes_projeto ON cronograma_versoes (projeto_id, numero_versao DESC);
+COMMENT ON TABLE cronograma_versoes IS 'Fotos completas do cronograma, geradas só sob ação explícita do usuário (botão "Gerar versão"). Nunca criadas automaticamente por CRUD de atividades/marcos.';
+
+-- ============================================================================
 -- Views de apoio a relatórios
 -- ============================================================================
 

@@ -1,0 +1,35 @@
+-- ============================================================================
+-- Migração 020a — vocabulário novo do enum de Status (29ª rodada)
+-- PASSO 1 DE 2. Rode este script SOZINHO no SQL Editor do Supabase, execute,
+-- confirme que terminou sem erro — SÓ DEPOIS abra e rode o script
+-- migration_020b_views_status_conclusao.sql, numa execução SEPARADA.
+-- ============================================================================
+--
+-- Por que dois arquivos: o script original (migration_020_classificacao_
+-- conclusao.sql) juntava o ALTER TYPE com as views que já usam os valores
+-- novos, e isso deu erro no Supabase:
+--   ERROR: 55P04: unsafe use of new value "Concluída com atraso" of enum
+--   type status_atividade_enum
+--   HINT: New enum values must be committed before they can be used.
+-- O SQL Editor do Supabase roda o texto colado inteiro como um único bloco
+-- de transação — então o ALTER TYPE ... ADD VALUE (que precisa "assentar" a
+-- posição do valor novo no catálogo) e a CREATE VIEW que já compara uma
+-- coluna desse enum contra o valor recém-criado (ex.: "status NOT IN
+-- ('Concluída com atraso', ...)") acabam caindo na mesma transação — e o
+-- Postgres recusa usar um valor de enum ainda não commitado numa comparação
+-- de coluna (reproduzi isso isoladamente num tipo descartável antes de
+-- corrigir, pra confirmar a causa exata). Rodando o ALTER TYPE numa execução
+-- separada (que commita sozinha ao terminar) e só depois a CREATE VIEW numa
+-- segunda execução, o valor novo já está commitado quando a view é criada.
+--
+-- Os três ficam ancorados em 'Concluída' (valor já existente antes desta
+-- migração), nunca uns nos outros, para não esbarrar na restrição do
+-- Postgres de não poder referenciar, na mesma transação, um valor de enum
+-- que também acabou de ser adicionado nela — executados em ordem inversa à
+-- desejada (atraso e esforço maior → esforço maior → atraso) para que cada
+-- inserção sucessiva "empurre" a anterior, resultando na ordem final certa:
+-- Concluída, Concluída com atraso, Concluída com esforço maior,
+-- Concluída com atraso e esforço maior, Cancelada.
+ALTER TYPE status_atividade_enum ADD VALUE IF NOT EXISTS 'Concluída com atraso e esforço maior' AFTER 'Concluída';
+ALTER TYPE status_atividade_enum ADD VALUE IF NOT EXISTS 'Concluída com esforço maior' AFTER 'Concluída';
+ALTER TYPE status_atividade_enum ADD VALUE IF NOT EXISTS 'Concluída com atraso' AFTER 'Concluída';

@@ -1,12 +1,12 @@
 -- ============================================================================
--- Dados de exemplo — Implantação Ergon
+-- Dados de exemplo — Implantação do Sistema
 -- Datas de referência: "hoje" = 2026-09-03 (data em que este exemplo foi montado)
 -- ============================================================================
 
 -- 1. Projeto -------------------------------------------------------------
 INSERT INTO projetos (id, nome, cliente, descricao, data_inicio, data_fim_prevista, horas_dia_util) VALUES
-('11111111-0000-0000-0000-000000000001', 'Implantação Ergon', 'Prefeitura Exemplo',
- 'Implantação do sistema Ergon (RH e Folha de Pagamento) — Etapa 1: folha completa.',
+('11111111-0000-0000-0000-000000000001', 'Implantação do Sistema', 'Prefeitura Exemplo',
+ 'Implantação do sistema (RH e Folha de Pagamento) — Etapa 1: folha completa.',
  '2026-06-01', '2027-09-30', 8.0);
 
 -- 2. Etapas ----------------------------------------------------------------
@@ -51,12 +51,12 @@ INSERT INTO tipos_atividade_elementar (id, nome, ordem) VALUES
 
 -- 5. Recursos ----------------------------------------------------------------
 INSERT INTO recursos (id, nome, tipo_vinculo, empresa, cargo, email) VALUES
-('11111111-0000-0000-0000-000000000401', 'Ana Techne', 'Techne', 'Techne', 'Consultora de Parametrização', 'ana@techne.example'),
-('11111111-0000-0000-0000-000000000402', 'Bruno FSW', 'Techne', 'Techne', 'Desenvolvedor Fábrica de Software', 'bruno@techne.example'),
-('11111111-0000-0000-0000-000000000403', 'Carla Folha', 'Techne', 'Techne', 'Consultora de Folha de Pagamento', 'carla@techne.example'),
-('11111111-0000-0000-0000-000000000404', 'Diego Fábrica', 'Techne', 'Techne', 'Desenvolvedor de Integrações', 'diego@techne.example'),
-('11111111-0000-0000-0000-000000000405', 'Eduardo CT', 'Techne', 'Techne', 'Consultor de Contagem de Tempo', 'eduardo@techne.example'),
-('11111111-0000-0000-0000-000000000406', 'Fernanda BI', 'Techne', 'Techne', 'Consultora de BI', 'fernanda@techne.example'),
+('11111111-0000-0000-0000-000000000401', 'Ana Consultoria', 'Consultoria', 'Consultoria', 'Consultora de Parametrização', 'ana@consultoria.example'),
+('11111111-0000-0000-0000-000000000402', 'Bruno FSW', 'Consultoria', 'Consultoria', 'Desenvolvedor Fábrica de Software', 'bruno@consultoria.example'),
+('11111111-0000-0000-0000-000000000403', 'Carla Folha', 'Consultoria', 'Consultoria', 'Consultora de Folha de Pagamento', 'carla@consultoria.example'),
+('11111111-0000-0000-0000-000000000404', 'Diego Fábrica', 'Consultoria', 'Consultoria', 'Desenvolvedor de Integrações', 'diego@consultoria.example'),
+('11111111-0000-0000-0000-000000000405', 'Eduardo CT', 'Consultoria', 'Consultoria', 'Consultor de Contagem de Tempo', 'eduardo@consultoria.example'),
+('11111111-0000-0000-0000-000000000406', 'Fernanda BI', 'Consultoria', 'Consultoria', 'Consultora de BI', 'fernanda@consultoria.example'),
 ('11111111-0000-0000-0000-000000000407', 'Gestora de RH (Cliente)', 'Cliente', 'Cliente', 'Gestora de Recursos Humanos', 'rh@cliente.example'),
 ('11111111-0000-0000-0000-000000000408', 'Analista de TI (Cliente)', 'Cliente', 'Cliente', 'Analista de Sistemas', 'ti@cliente.example');
 
@@ -65,13 +65,13 @@ INSERT INTO recursos (id, nome, tipo_vinculo, empresa, cargo, email) VALUES
 INSERT INTO atividades (id, projeto_id, etapa_id, frente_trabalho_id, tipo_atividade_elementar_id, codigo_wbs, nome, descricao,
                          prazo_horas, horas_realizadas, dtini_prev, dtfim_prev, dtini_real, dtfim_real, percentual_concluido, status, prioridade) VALUES
 ('11111111-0000-0000-0000-000000000501','11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','11111111-0000-0000-0000-000000000201','11111111-0000-0000-0000-000000000301','1.1','Levantamento de Tipos de Vínculo','Levantamento das regras de vínculo do cliente (efetivo, comissionado, temporário...).',24,22,'2026-06-01','2026-06-05','2026-06-01','2026-06-04',100,'Concluída','Alta'),
-('11111111-0000-0000-0000-000000000502','11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','11111111-0000-0000-0000-000000000201','11111111-0000-0000-0000-000000000302','1.2','Parametrização de Tipos de Vínculo','Cadastro dos tipos de vínculo e validações no Ergon.',32,38,'2026-06-08','2026-06-19','2026-06-08','2026-06-22',100,'Concluída','Alta'),
+('11111111-0000-0000-0000-000000000502','11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','11111111-0000-0000-0000-000000000201','11111111-0000-0000-0000-000000000302','1.2','Parametrização de Tipos de Vínculo','Cadastro dos tipos de vínculo e validações no sistema.',32,38,'2026-06-08','2026-06-19','2026-06-08','2026-06-22',100,'Concluída','Alta'),
 ('11111111-0000-0000-0000-000000000503','11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','11111111-0000-0000-0000-000000000201','11111111-0000-0000-0000-000000000301','1.3','Levantamento Grupo de Vencimento','Levantamento das regras de vencimentos e referências.',20,19,'2026-07-06','2026-07-10','2026-07-06','2026-07-09',100,'Concluída','Alta'),
 ('11111111-0000-0000-0000-000000000504','11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','11111111-0000-0000-0000-000000000201','11111111-0000-0000-0000-000000000302','1.4','Parametrização de Vagas Numeradas','Controle de ocupação de vagas individuais por cargo.',40,28,'2026-08-25','2026-09-05','2026-08-25',NULL,70,'Em andamento','Alta'),
 ('11111111-0000-0000-0000-000000000505','11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','11111111-0000-0000-0000-000000000201','11111111-0000-0000-0000-000000000302','1.5','Parametrização de Atributos','Atributos dependentes das regras de cálculo da folha (gratificações, adicionais).',48,NULL,'2026-09-08','2026-09-19',NULL,NULL,0,'Não iniciada','Alta'),
 
 ('11111111-0000-0000-0000-000000000506','11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','11111111-0000-0000-0000-000000000202','11111111-0000-0000-0000-000000000303','2.1','Extração de Pessoas (legado)','Extração dos dados cadastrais de pessoas do sistema legado.',16,16,'2026-06-15','2026-06-17','2026-06-15','2026-06-17',100,'Concluída','Alta'),
-('11111111-0000-0000-0000-000000000507','11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','11111111-0000-0000-0000-000000000202','11111111-0000-0000-0000-000000000304','2.2','Carga de Pessoas','Carga e validação de pessoas no ambiente Ergon.',20,23,'2026-06-18','2026-06-24','2026-06-18','2026-06-25',100,'Concluída','Alta'),
+('11111111-0000-0000-0000-000000000507','11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','11111111-0000-0000-0000-000000000202','11111111-0000-0000-0000-000000000304','2.2','Carga de Pessoas','Carga e validação de pessoas no ambiente do sistema.',20,23,'2026-06-18','2026-06-24','2026-06-18','2026-06-25',100,'Concluída','Alta'),
 ('11111111-0000-0000-0000-000000000508','11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','11111111-0000-0000-0000-000000000202','11111111-0000-0000-0000-000000000303','2.3','Extração de Eventos de Cargos','Extração de nomeações, progressões e demais eventos funcionais do legado.',24,15,'2026-08-18','2026-08-28','2026-08-18',NULL,60,'Em andamento','Alta'),
 ('11111111-0000-0000-0000-000000000509','11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','11111111-0000-0000-0000-000000000202','11111111-0000-0000-0000-000000000304','2.4','Carga de Eventos de Cargos','Carga das tabelas espelho de eventos de cargos.',24,NULL,'2026-09-04','2026-09-10',NULL,NULL,0,'Não iniciada','Alta'),
 ('11111111-0000-0000-0000-000000000510','11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','11111111-0000-0000-0000-000000000202','11111111-0000-0000-0000-000000000305','2.5','Análise de Rejeição de Vínculos','Análise semanal das rejeições de carga de vínculos.',16,NULL,'2026-09-11','2026-09-16',NULL,NULL,0,'Não iniciada','Média'),
@@ -79,13 +79,13 @@ INSERT INTO atividades (id, projeto_id, etapa_id, frente_trabalho_id, tipo_ativi
 ('11111111-0000-0000-0000-000000000511','11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','11111111-0000-0000-0000-000000000203','11111111-0000-0000-0000-000000000301','3.1','Levantamento de Regras de Vencimentos','Levantamento detalhado das rubricas de vencimento e unificação de códigos.',60,72,'2026-07-13','2026-08-07','2026-07-13','2026-08-12',100,'Concluída','Alta'),
 ('11111111-0000-0000-0000-000000000512','11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','11111111-0000-0000-0000-000000000203','11111111-0000-0000-0000-000000000307','3.2','Programação Grupo Vencimentos Básicos','Programação C++ das rubricas do grupo de vencimentos básicos.',160,NULL,'2026-09-17','2026-10-08',NULL,NULL,0,'Não iniciada','Alta'),
 ('11111111-0000-0000-0000-000000000513','11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','11111111-0000-0000-0000-000000000203','11111111-0000-0000-0000-000000000311','3.3','Testes Grupo Vencimentos Básicos','Testes unitários e liberação do grupo para comparação.',40,NULL,'2026-10-09','2026-10-16',NULL,NULL,0,'Não iniciada','Alta'),
-('11111111-0000-0000-0000-000000000514','11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','11111111-0000-0000-0000-000000000203','11111111-0000-0000-0000-000000000312','3.4','Comparação de Folha — ciclo 1','Primeira comparação Ergon x legado do grupo de vencimentos básicos.',16,NULL,'2026-10-19','2026-10-23',NULL,NULL,0,'Não iniciada','Alta'),
+('11111111-0000-0000-0000-000000000514','11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','11111111-0000-0000-0000-000000000203','11111111-0000-0000-0000-000000000312','3.4','Comparação de Folha — ciclo 1','Primeira comparação Sistema x legado do grupo de vencimentos básicos.',16,NULL,'2026-10-19','2026-10-23',NULL,NULL,0,'Não iniciada','Alta'),
 
 ('11111111-0000-0000-0000-000000000515','11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','11111111-0000-0000-0000-000000000204','11111111-0000-0000-0000-000000000306','4.1','Especificação Customização Bloco 1 (Contracheque QR)','Especificação funcional do QR Code de autenticação no contracheque.',30,26,'2026-08-20','2026-09-02','2026-08-20',NULL,80,'Em andamento','Média'),
 ('11111111-0000-0000-0000-000000000516','11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','11111111-0000-0000-0000-000000000204','11111111-0000-0000-0000-000000000307','4.2','Desenvolvimento Customização Bloco 1','Desenvolvimento e testes internos da customização do contracheque.',60,NULL,'2026-09-07','2026-09-25',NULL,NULL,0,'Não iniciada','Média'),
 ('11111111-0000-0000-0000-000000000517','11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','11111111-0000-0000-0000-000000000206','11111111-0000-0000-0000-000000000309','4.3','Entrega da Integração com Sistema Contábil','Entrega e homologação da integração de empenho/liquidação com o sistema contábil.',80,NULL,'2026-11-02','2026-11-20',NULL,NULL,0,'Não iniciada','Alta'),
 
-('11111111-0000-0000-0000-000000000518','11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','11111111-0000-0000-0000-000000000211','11111111-0000-0000-0000-000000000310','5.1','Treinamento Inicial Gestores e TI','Treinamento inicial de conceitos do Ergon para gestores e equipe de TI.',16,15,'2026-06-01','2026-06-03','2026-06-01','2026-06-03',100,'Concluída','Alta'),
+('11111111-0000-0000-0000-000000000518','11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','11111111-0000-0000-0000-000000000211','11111111-0000-0000-0000-000000000310','5.1','Treinamento Inicial Gestores e TI','Treinamento inicial de conceitos do Sistema para gestores e equipe de TI.',16,15,'2026-06-01','2026-06-03','2026-06-01','2026-06-03',100,'Concluída','Alta'),
 ('11111111-0000-0000-0000-000000000519','11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','11111111-0000-0000-0000-000000000211','11111111-0000-0000-0000-000000000310','5.2','Treinamento Final Usuários da Folha','Treinamento dos usuários finais antes do paralelo real.',24,NULL,'2026-10-26','2026-10-30',NULL,NULL,0,'Não iniciada','Média'),
 
 ('11111111-0000-0000-0000-000000000520','11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','11111111-0000-0000-0000-000000000207','11111111-0000-0000-0000-000000000307','6.1','Programação Conector eSocial S-2200','Conector do evento de admissão (S-2200).',40,34,'2026-08-03','2026-08-21','2026-08-03','2026-08-19',100,'Concluída','Alta'),
@@ -96,7 +96,7 @@ INSERT INTO atividades (id, projeto_id, etapa_id, frente_trabalho_id, tipo_ativi
 
 -- 6b. Responsáveis por atividade (N:N — ver atividade_recurso) -----------------
 -- A reunião de status (8.1) é o exemplo de atividade com múltiplos
--- participantes de ambos os lados (Techne e cliente), como no caso de uso
+-- participantes de ambos os lados (consultoria e cliente), como no caso de uso
 -- que motivou a mudança: previsto/realizado da atividade continuam sendo um
 -- número único (3h), independente de cada um dos 3 participantes apontar
 -- suas próprias horas em "Minhas atividades".
@@ -183,7 +183,7 @@ INSERT INTO atividade_requisito (atividade_id, requisito_id) VALUES
 INSERT INTO marcos (projeto_id, etapa_id, nome, descricao, data_prevista, data_real) VALUES
 ('11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','Fim da Parametrização Base','Todos os temas base de parametrização concluídos.','2026-09-19',NULL),
 ('11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','Início da Programação da Folha','Kernel carregado e primeiras rubricas em programação.','2026-09-17',NULL),
-('11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','Primeira Comparação de Folha','Primeiro ciclo de comparação Ergon x legado.','2026-10-23',NULL),
+('11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','Primeira Comparação de Folha','Primeiro ciclo de comparação Sistema x legado.','2026-10-23',NULL),
 ('11111111-0000-0000-0000-000000000001','11111111-0000-0000-0000-000000000101','Migração Definitiva','Carga final de dados antes da virada em produção.','2027-05-15',NULL);
 
 -- 12. Riscos --------------------------------------------------------------------
