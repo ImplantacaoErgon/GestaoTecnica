@@ -511,6 +511,7 @@
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
         <button class="btn secondary small" id="btn-import-cronograma">Importar Cronograma (Excel/CSV)</button>
         <button class="btn secondary small" id="btn-versoes-cronograma" title="Gera e consulta fotos completas do cronograma ao longo do tempo">🕘 Versões do cronograma</button>
+        <button class="btn secondary small" id="btn-replanejar-cronograma" title="Recalcula as datas previstas das atividades incompletas, respeitando as dependências">🔄 Replanejar cronograma</button>
         <button class="btn danger small" id="btn-remover-cronograma" title="Apaga todas as atividades e marcos deste projeto">Remover cronograma inteiro</button>
         <button class="btn small" id="btn-new-atividade">+ Nova atividade</button>
       </div>
@@ -1353,6 +1354,52 @@
   </div>
 </div>
 
+<!-- ================= MODAL: REPLANEJAR CRONOGRAMA ================= -->
+<div class="overlay" id="overlay-replanejar-cronograma" hidden>
+  <div class="modal" style="max-width:920px;">
+    <div class="modal-head"><h2>🔄 Replanejar cronograma</h2><button class="btn ghost" id="rp-close">✕</button></div>
+    <div class="modal-body single-col">
+      <p class="muted" style="margin-bottom:10px;">Recalcula as <strong>datas previstas</strong> das atividades que ainda não foram concluídas (e de marcos vencidos e não realizados), a partir de uma data-âncora, respeitando as dependências entre atividades e o quanto já foi executado — atividades concluídas ou canceladas nunca são tocadas. Atividades parcialmente feitas usam só a duração <strong>restante</strong>. Isto sobrepõe as datas previstas atuais, exatamente como editar uma atividade manualmente — não gera histórico sozinho.</p>
+      <div class="field full" style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px;">
+        <div>
+          <label>Replanejar a partir de</label>
+          <input type="date" id="rp-ancora">
+        </div>
+        <button class="btn secondary" id="rp-analisar">Analisar</button>
+      </div>
+      <div class="field full" style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+        <input type="checkbox" id="rp-gerar-versao" checked style="width:auto;">
+        <label for="rp-gerar-versao" style="margin:0;">Gerar uma versão do cronograma atual antes de aplicar (recomendado)</label>
+      </div>
+      <div class="field full" id="rp-rotulo-wrap" style="margin-bottom:14px;">
+        <input type="text" id="rp-rotulo-versao" placeholder="Rótulo da versão (opcional) — ex.: Antes do replanejamento de ..." autocomplete="off">
+      </div>
+      <div id="rp-resultado" hidden>
+        <div id="rp-resumo" class="muted" style="margin-bottom:10px;"></div>
+        <div id="rp-vazio" class="muted" hidden>Nenhuma atividade ou marco precisa mudar de data a partir desta âncora — o cronograma já está compatível.</div>
+        <div class="table-wrap" id="rp-tabela-wrap" style="margin-bottom:14px;"><table>
+          <thead><tr><th>Código</th><th>Atividade</th><th>Status</th><th>% Concl.</th><th>Início prev. (atual → novo)</th><th>Fim prev. (atual → novo)</th></tr></thead>
+          <tbody id="rp-atividades-tbody"></tbody>
+        </table></div>
+        <div id="rp-marcos-wrap" hidden>
+          <h3 style="margin:0 0 8px;">Marcos vencidos e ainda não realizados</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Marco</th><th>Data prevista (atual → nova)</th></tr></thead>
+            <tbody id="rp-marcos-tbody"></tbody>
+          </table></div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <span></span>
+      <div style="display:flex;gap:8px;">
+        <button class="btn secondary" id="rp-cancelar">Cancelar</button>
+        <button class="btn" id="rp-confirmar" disabled>Confirmar replanejamento</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ================= MODAL: RELATÓRIO EXECUTIVO (IA) ================= -->
 <div class="overlay" id="overlay-relatorio-executivo" hidden>
   <div class="modal" style="max-width:820px;">
@@ -1831,7 +1878,7 @@ async function afterProjetoReady(){
   ]);
   aplicarMarcaNoTopo();
   fillStaticSelects();
-  wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireRemoverCronograma(); wireVersoesCronograma();
+  wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireRemoverCronograma(); wireVersoesCronograma(); wireReplanejarCronograma();
   wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane();
   setupCsvTemplateLink();
   await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas()]);
@@ -3749,6 +3796,114 @@ async function abrirVersaoDetalhe(id){
     </tr>`).join("") : `<tr class="empty-row"><td colspan="3">Nenhum marco nesta versão.</td></tr>`;
 }
 function fecharVersaoDetalheModal(){ $("overlay-versao-detalhe").hidden = true; }
+
+// ================= REPLANEJAR CRONOGRAMA =================
+// Recalcula as datas PREVISTAS das atividades incompletas (e de marcos
+// vencidos não realizados) a partir de uma data-âncora, respeitando
+// dependências e a duração restante — ver backend/app/cronograma_replanejamento.py
+// para a regra completa. Sempre passa por "Analisar" (prévia, não grava
+// nada) antes de liberar "Confirmar" — e invalida a prévia se a
+// data-âncora for trocada depois de analisar, pra nunca confirmar um
+// cálculo que não corresponde mais ao que está na tela.
+let rpAnalisando = false, rpConfirmando = false, rpUltimaAncoraAnalisada = null;
+
+function wireReplanejarCronograma(){
+  $("btn-replanejar-cronograma").addEventListener("click", abrirReplanejarModal);
+  $("rp-close").addEventListener("click", fecharReplanejarModal);
+  $("rp-cancelar").addEventListener("click", fecharReplanejarModal);
+  $("overlay-replanejar-cronograma").addEventListener("click", e=>{ if(e.target.id==="overlay-replanejar-cronograma") fecharReplanejarModal(); });
+  $("rp-analisar").addEventListener("click", analisarReplanejamento);
+  $("rp-ancora").addEventListener("change", ()=>{ rpUltimaAncoraAnalisada = null; $("rp-confirmar").disabled = true; $("rp-resultado").hidden = true; });
+  $("rp-gerar-versao").addEventListener("change", ()=>{ $("rp-rotulo-wrap").hidden = !$("rp-gerar-versao").checked; });
+  $("rp-confirmar").addEventListener("click", confirmarReplanejamento);
+}
+
+function abrirReplanejarModal(){
+  const hoje = new Date().toISOString().slice(0,10);
+  $("rp-ancora").value = hoje;
+  $("rp-gerar-versao").checked = true;
+  $("rp-rotulo-wrap").hidden = false;
+  $("rp-rotulo-versao").value = `Antes do replanejamento de ${new Date().toLocaleDateString('pt-BR')}`;
+  $("rp-resultado").hidden = true;
+  $("rp-confirmar").disabled = true;
+  rpUltimaAncoraAnalisada = null;
+  $("overlay-replanejar-cronograma").hidden = false;
+}
+function fecharReplanejarModal(){ $("overlay-replanejar-cronograma").hidden = true; }
+
+async function analisarReplanejamento(){
+  if(rpAnalisando) return;
+  const ancora = $("rp-ancora").value;
+  if(!ancora){ toast("Informe a data-âncora.", true); return; }
+  rpAnalisando = true;
+  $("rp-analisar").disabled = true; $("rp-analisar").textContent = "Analisando…";
+  try{
+    const r = await api("/cronograma/replanejar/preview", {
+      method: "POST",
+      body: JSON.stringify({ projeto_id: PROJETO.id, data_ancora: ancora }),
+    });
+    renderReplanejarPreview(r);
+    rpUltimaAncoraAnalisada = ancora;
+    $("rp-confirmar").disabled = (r.total_atividades_alteradas + r.total_marcos_alterados) === 0;
+  }catch(e){}
+  rpAnalisando = false;
+  $("rp-analisar").disabled = false; $("rp-analisar").textContent = "Analisar";
+}
+
+function renderReplanejarPreview(r){
+  $("rp-resultado").hidden = false;
+  const semMudanca = (r.total_atividades_alteradas + r.total_marcos_alterados) === 0;
+  $("rp-vazio").hidden = !semMudanca;
+  $("rp-tabela-wrap").hidden = r.itens.length === 0;
+  $("rp-resumo").textContent = `Data-âncora normalizada para o próximo dia útil: ${fmtDate(r.data_ancora_normalizada)}. `
+    + `${r.total_atividades_alteradas} de ${r.total_atividades} atividade(s) incompleta(s) terão a data prevista recalculada`
+    + (r.total_marcos_alterados ? `, e ${r.total_marcos_alterados} marco(s) vencido(s) serão empurrados para essa data.` : ".");
+  $("rp-atividades-tbody").innerHTML = r.itens.map(i=>`
+    <tr>
+      <td class="mono">${esc(i.codigo_wbs||"—")}</td>
+      <td>${esc(i.nome)}</td>
+      <td>${pill(i.status, STATUS_COLOR[i.status]||"faint")}</td>
+      <td class="mono">${i.percentual_concluido}%</td>
+      <td class="mono">${fmtDate(i.dtini_prev_atual)} → <strong>${fmtDate(i.dtini_prev_novo)}</strong></td>
+      <td class="mono">${fmtDate(i.dtfim_prev_atual)} → <strong>${fmtDate(i.dtfim_prev_novo)}</strong></td>
+    </tr>`).join("");
+  $("rp-marcos-wrap").hidden = r.marcos.length === 0;
+  $("rp-marcos-tbody").innerHTML = r.marcos.map(m=>`
+    <tr>
+      <td>${esc(m.nome)}</td>
+      <td class="mono">${fmtDate(m.data_prevista_atual)} → <strong>${fmtDate(m.data_prevista_nova)}</strong></td>
+    </tr>`).join("");
+}
+
+async function confirmarReplanejamento(){
+  if(rpConfirmando) return;
+  const ancora = $("rp-ancora").value;
+  if(!ancora || ancora !== rpUltimaAncoraAnalisada){
+    toast("Analise novamente antes de confirmar — a data-âncora mudou desde a última análise.", true);
+    return;
+  }
+  rpConfirmando = true;
+  $("rp-confirmar").disabled = true; $("rp-confirmar").textContent = "Aplicando…";
+  try{
+    if($("rp-gerar-versao").checked){
+      await api("/cronograma/versoes", {
+        method: "POST",
+        body: JSON.stringify({ projeto_id: PROJETO.id, rotulo: $("rp-rotulo-versao").value.trim() || null }),
+      });
+    }
+    const r = await api("/cronograma/replanejar/confirmar", {
+      method: "POST",
+      body: JSON.stringify({ projeto_id: PROJETO.id, data_ancora: ancora }),
+    });
+    toast(`Cronograma replanejado: ${r.atividades_alteradas} atividade(s) e ${r.marcos_alterados} marco(s) com data nova.`);
+    await Promise.all([loadAtividades(), loadRiscosMarcos()]);
+    renderDashboard(); renderCronograma(); renderRiscosMarcos();
+    fecharReplanejarModal();
+  }catch(e){}
+  rpConfirmando = false;
+  $("rp-confirmar").textContent = "Confirmar replanejamento";
+  $("rp-confirmar").disabled = false;
+}
 
 // ================= RELATÓRIO EXECUTIVO (IA) =================
 // Conversor bem pequeno, NÃO é um parser de markdown genérico — só entende o
