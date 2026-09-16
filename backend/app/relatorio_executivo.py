@@ -32,7 +32,7 @@ Duas partes:
 
 Nenhum dado de folha de pagamento real (dados de servidores do órgão
 público) passa por aqui — só metadados do PROJETO DE IMPLANTAÇÃO (nomes de
-atividades, prazos, status, nomes de recursos Techne/cliente). Ainda
+atividades, prazos, status, nomes de recursos da consultoria/cliente). Ainda
 assim, isso sai do ambiente do cliente rumo à API da Anthropic — só chame
 isso se o cliente já autorizou (ver README).
 """
@@ -370,9 +370,9 @@ def coletar_dados_projeto(projeto_id):
 
 PROMPT_TEMPLATE = """\
 Você é um consultor sênior de PMO (gestão de projetos) escrevendo um relatório executivo
-para a diretoria de um órgão público e para a diretoria da empresa Techne, sobre um
-projeto de implantação de sistema de Gestão de Pessoas e Folha de Pagamento (sistema
-Ergon). O público-alvo NÃO é técnico em cronograma — é gestor público e gestor de
+para a diretoria de um órgão público e para a diretoria da empresa de consultoria, sobre um
+projeto de implantação de sistema de Gestão de Pessoas e Folha de Pagamento. O público-alvo
+NÃO é técnico em cronograma — é gestor público e gestor de
 projeto. Escreva em português do Brasil, tom profissional e direto, sem jargão técnico
 desnecessário.
 

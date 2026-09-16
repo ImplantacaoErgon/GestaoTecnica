@@ -19,8 +19,8 @@ import subprocess
 PGHOST = os.environ.get("PGHOST", "localhost")
 PGPORT = os.environ.get("PGPORT", "5432")
 PGUSER = os.environ.get("PGUSER", "postgres")
-PGPASSWORD = os.environ.get("PGPASSWORD", "ergon")
-PGDATABASE = os.environ.get("PGDATABASE", "ergon_pm")
+PGPASSWORD = os.environ.get("PGPASSWORD", "app")
+PGDATABASE = os.environ.get("PGDATABASE", "app_db")
 
 
 class DbError(Exception):

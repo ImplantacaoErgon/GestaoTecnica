@@ -8,7 +8,7 @@ from datetime import datetime, date, timedelta
 
 from flask import Flask, request, jsonify, send_from_directory, send_file, abort, session
 
-from . import db, cpm, tr_parser, cronograma_import, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria
+from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 FRONTEND_DIR = os.environ.get(
@@ -1725,6 +1725,112 @@ def create_app():
             detalhes={"atividades_removidas": contagem["atividades"], "marcos_removidos": contagem["marcos"]},
         )
         return jsonify({"ok": True})
+
+    # --------------------------------------------------- versões do cronograma
+    # Histórico sob demanda (34ª rodada): NENHUMA rota de atividade/marco acima
+    # toca em `cronograma_versoes` — edições normais (mudar data, criar,
+    # excluir) sempre só sobrepõem os dados ao vivo, nunca geram versão
+    # sozinhas. Uma versão só nasce quando o usuário clica no botão dedicado,
+    # que chama o POST abaixo. Ver backend/app/cronograma_versoes.py.
+    @app.get("/api/cronograma/versoes")
+    def cronograma_listar_versoes():
+        projeto_id = request.args.get("projeto_id")
+        if not projeto_id:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        return jsonify(cronograma_versoes.listar_versoes(projeto_id))
+
+    @app.get("/api/cronograma/versoes/<id>")
+    def cronograma_obter_versao(id):
+        versao = cronograma_versoes.obter_versao(id)
+        if not versao:
+            abort(404)
+        return jsonify(versao)
+
+    @app.post("/api/cronograma/versoes")
+    def cronograma_gerar_versao():
+        """Gera uma nova versão (foto completa e independente) do cronograma
+        do projeto no instante atual — ação explícita, disparada só pelo
+        botão "Gerar versão" da tela de Cronograma. Não apaga nem altera
+        nada em `atividades`/`marcos`; é puramente um INSERT numa tabela à
+        parte."""
+        data = request.get_json(force=True) or {}
+        projeto_id = data.get("projeto_id")
+        if not projeto_id:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        projeto = db.fetch_one(f"SELECT nome FROM projetos WHERE id = {db.q(projeto_id)}")
+        if not projeto:
+            abort(404)
+        rotulo = (data.get("rotulo") or "").strip() or None
+        usuario = request.headers.get("X-Usuario", "")
+        versao = cronograma_versoes.criar_versao(projeto_id, rotulo, usuario, ATIVIDADE_SELECT)
+        auditoria.registrar_evento_manual(
+            "criacao",
+            f'Gerou a versão {versao["numero_versao"]} do cronograma do projeto "{projeto["nome"]}"'
+            + (f' — "{rotulo}"' if rotulo else "")
+            + f' ({versao["total_atividades"]} atividade(s), {versao["total_marcos"]} marco(s))',
+            entidade="cronograma_versoes", entidade_id=str(versao["id"]), entidade_rotulo=projeto["nome"],
+            projeto_id=projeto_id,
+            detalhes={"numero_versao": versao["numero_versao"], "rotulo": rotulo},
+        )
+        return jsonify(versao), 201
+
+    # ------------------------------------------------- replanejamento do cronograma
+    # Recalcula as datas PREVISTAS das atividades incompletas a partir de uma
+    # data-âncora, respeitando dependências e o quanto já foi executado — ver
+    # backend/app/cronograma_replanejamento.py para a regra completa. Como
+    # qualquer outra sobreposição de dado ao vivo, isso não gera versão
+    # sozinho: quem quiser preservar o estado atual usa POST /cronograma/versoes
+    # antes de confirmar (o front-end oferece isso no mesmo modal).
+    @app.post("/api/cronograma/replanejar/preview")
+    def cronograma_replanejar_preview():
+        data = request.get_json(force=True) or {}
+        projeto_id = data.get("projeto_id")
+        data_ancora = data.get("data_ancora")
+        if not (projeto_id and data_ancora):
+            return jsonify({"erro": "projeto_id e data_ancora são obrigatórios"}), 400
+        try:
+            resultado = cronograma_replanejamento.calcular(projeto_id, data_ancora, STATUS_FAMILIA_CONCLUIDA)
+        except ValueError as e:
+            return jsonify({"erro": str(e)}), 400
+        itens = resultado["itens"]
+        alteradas = [i for i in itens if i["mudou"]]
+        return jsonify({
+            "data_ancora_normalizada": resultado["data_ancora_normalizada"],
+            "total_atividades": len(itens),
+            "total_atividades_alteradas": len(alteradas),
+            "total_marcos_alterados": len(resultado["marcos"]),
+            "itens": alteradas,
+            "marcos": resultado["marcos"],
+        })
+
+    @app.post("/api/cronograma/replanejar/confirmar")
+    def cronograma_replanejar_confirmar():
+        data = request.get_json(force=True) or {}
+        projeto_id = data.get("projeto_id")
+        data_ancora = data.get("data_ancora")
+        if not (projeto_id and data_ancora):
+            return jsonify({"erro": "projeto_id e data_ancora são obrigatórios"}), 400
+        projeto = db.fetch_one(f"SELECT nome FROM projetos WHERE id = {db.q(projeto_id)}")
+        if not projeto:
+            abort(404)
+        try:
+            resultado = cronograma_replanejamento.aplicar(projeto_id, data_ancora, STATUS_FAMILIA_CONCLUIDA)
+        except ValueError as e:
+            return jsonify({"erro": str(e)}), 400
+        auditoria.registrar_evento_manual(
+            "edicao",
+            f'Replanejou o cronograma do projeto "{projeto["nome"]}" a partir de '
+            f'{resultado["data_ancora_normalizada"]} '
+            f'({resultado["atividades_alteradas"]} atividade(s), {resultado["marcos_alterados"]} marco(s) alterados)',
+            entidade="cronograma", entidade_id=str(projeto_id), entidade_rotulo=projeto["nome"],
+            projeto_id=projeto_id, sensivel=True,
+            detalhes={
+                "data_ancora": resultado["data_ancora_normalizada"],
+                "atividades_alteradas": resultado["atividades_alteradas"],
+                "marcos_alterados": resultado["marcos_alterados"],
+            },
+        )
+        return jsonify(resultado)
 
     # ------------------------------------------------------------------ riscos
     @app.get("/api/riscos")

@@ -177,13 +177,13 @@ def esqueci_a_senha(email):
     senha_nova = gerar_senha_temporaria()
     corpo = (
         f"Olá, {usuario['nome']}!\n\n"
-        "Uma nova senha foi gerada para o seu acesso ao Ergon PM:\n\n"
+        "Uma nova senha foi gerada para o seu acesso à Gestão de Projetos:\n\n"
         f"    {senha_nova}\n\n"
         "Use-a para entrar e, se quiser, troque por uma de sua preferência em "
         "\"Meu perfil > Alterar senha\" depois de logado.\n\n"
         "Se você não pediu essa troca, avise quem administra o sistema.\n"
     )
-    enviar_email(usuario["email"], "Ergon PM — nova senha de acesso", corpo)
+    enviar_email(usuario["email"], "Gestão de Projetos — nova senha de acesso", corpo)
     # só grava o novo hash DEPOIS do envio dar certo — se o SMTP falhar
     # (enviar_email levanta AuthError), a senha antiga continua valendo.
     db.execute(

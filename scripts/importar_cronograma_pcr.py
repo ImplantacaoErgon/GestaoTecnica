@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Importador do cronograma real da PCR (export .xlsx do MS Project) para o Ergon PM.
+Importador do cronograma real da PCR (export .xlsx do MS Project) para o Gestão de Projetos.
 
 O QUE ESTE SCRIPT FAZ
 ----------------------
 Lê um arquivo .xlsx exportado do MS Project (colunas: EDT, Id, Nome da tarefa,
 Início, Término, Duração, % concluída, Início/Término da Linha de Base,
 Predecessoras, Nomes dos recursos, Variação do término) e recria a mesma
-estrutura no Ergon PM via a API REST do backend: cria o projeto, as Etapas,
+estrutura no Gestão de Projetos via a API REST do backend: cria o projeto, as Etapas,
 as Frentes de Trabalho, os Recursos (responsáveis), os Tipos de Atividade que
 faltarem, todas as Atividades (preservando a hierarquia WBS via
 atividade_pai_id), as Dependências entre elas, e extrai a única tarefa de
@@ -30,7 +30,7 @@ DECISÕES JÁ COMBINADAS (não pedem confirmação ao rodar):
   só atividades-folha, pra não inflar relatórios que somam horas.
 - A única tarefa com duração "0 hrs" vira um Marco, não uma Atividade.
 - Toda atividade que o Excel mostra "em andamento" ganha um relato automático
-  de importação antes de ter o status alterado (o Ergon PM exige isso).
+  de importação antes de ter o status alterado (o Gestão de Projetos exige isso).
 
 ANTES DE RODAR
 ---------------
@@ -38,7 +38,7 @@ ANTES DE RODAR
    veja db/migration_006_relatos_e_requisito_tr_atividade.sql. Sem isso a
    importação falha logo no início (o script confere isso sozinho).
 2. Instale as dependências:  pip install openpyxl requests
-3. Tenha o backend do Ergon PM rodando e acessível (ex: docker compose up).
+3. Tenha o backend do Gestão de Projetos rodando e acessível (ex: docker compose up).
 
 COMO RODAR
 -----------
@@ -135,7 +135,7 @@ TIPO_KEYWORDS = [
 STATUS_EXIGE_RELATO = {"Em andamento", "Bloqueada", "Cancelada"}
 TIPO_DEPENDENCIA_CODE = {"": "FS", "TI": "FS", "II": "SS", "TT": "FF", "IT": "SF"}
 
-PROJETO_NOME_PADRAO = "Implantação Sistema Ergon"
+PROJETO_NOME_PADRAO = "Implantação do Sistema"
 PROJETO_CLIENTE_PADRAO = "PCR"
 
 
@@ -153,7 +153,7 @@ class ApiClient:
         except requests.exceptions.ConnectionError as e:
             raise SystemExit(
                 f"\nNão consegui conectar em {url}.\n"
-                f"Confirme que o backend do Ergon PM está rodando e acessível nesse endereço "
+                f"Confirme que o backend do Gestão de Projetos está rodando e acessível nesse endereço "
                 f"(use --api-url para apontar pra outro). Detalhe técnico: {e}"
             )
         if not r.ok:
@@ -265,8 +265,11 @@ def parse_recursos(txt, recurso_info):
         if nome_limpo not in recurso_info:
             if nome_limpo.startswith("PCR"):
                 recurso_info[nome_limpo] = {"nome": nome_limpo, "tipo_vinculo": "Cliente", "empresa": "PCR"}
-            elif nome_limpo.startswith("Techne"):
-                recurso_info[nome_limpo] = {"nome": nome_limpo, "tipo_vinculo": "Techne", "empresa": "Techne"}
+            elif nome_limpo.startswith("Consultoria") or nome_limpo.startswith("Techne"):
+                # Aceita os dois prefixos (ver mesma observação em cronograma_import.py):
+                # planilhas antigas ainda nomeiam os recursos da consultoria como
+                # "Techne - <nome>".
+                recurso_info[nome_limpo] = {"nome": nome_limpo, "tipo_vinculo": "Consultoria", "empresa": "Consultoria"}
             else:
                 recurso_info[nome_limpo] = {"nome": nome_limpo, "tipo_vinculo": "Terceirizado", "empresa": None}
     return out
@@ -386,7 +389,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--xlsx", required=True, help="Caminho do arquivo .xlsx exportado do MS Project.")
     parser.add_argument("--sheet", default="Plan1", help="Nome da aba com os dados (padrão: Plan1).")
-    parser.add_argument("--api-url", default="http://localhost:8000/api", help="URL base da API do Ergon PM.")
+    parser.add_argument("--api-url", default="http://localhost:8000/api", help="URL base da API do Gestão de Projetos.")
     parser.add_argument("--projeto-nome", default=PROJETO_NOME_PADRAO)
     parser.add_argument("--projeto-cliente", default=PROJETO_CLIENTE_PADRAO)
     parser.add_argument("--yes", action="store_true", help="Não pede confirmação interativa (uso não-interativo).")
@@ -516,9 +519,9 @@ def main():
             horas_aproximadas += 1
 
         recursos = parse_recursos(node.recursos_txt, recurso_info)
-        techne = next((r for r in recursos if r.startswith("Techne")), None)
+        consultoria = next((r for r in recursos if r.startswith("Consultoria") or r.startswith("Techne")), None)
         cliente = next((r for r in recursos if r.startswith(args.projeto_cliente)), None)
-        extras = [r for r in recursos if r not in (techne, cliente)]
+        extras = [r for r in recursos if r not in (consultoria, cliente)]
 
         pct = round((node.pct or 0) * 100)
         if pct >= 100:
@@ -537,7 +540,7 @@ def main():
             "atividade_pai_id": pai_atividade_id,
             "codigo_wbs": node.edt, "nome": node.nome[:250],
             "tipo_atividade_elementar_id": classificar_tipo(node.nome),
-            "responsavel_techne_id": recurso_id_by_nome.get(techne) if techne else None,
+            "responsavel_consultoria_id": recurso_id_by_nome.get(consultoria) if consultoria else None,
             "responsavel_cliente_id": recurso_id_by_nome.get(cliente) if cliente else None,
             "prazo_horas": horas,
             "dtini_prev": node.dtini.isoformat() if node.dtini else None,
@@ -644,7 +647,7 @@ def main():
     }
     Path(args.relatorio).write_text(json.dumps(summary, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     print(f"\nRelatório salvo em {args.relatorio}")
-    print("\nOK — importação concluída. Abra o Ergon PM e confira o projeto criado.")
+    print("\nOK — importação concluída. Abra o Gestão de Projetos e confira o projeto criado.")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 """
 Importação de cronograma (Excel ou CSV, exportado do MS Project) direto pela
-interface do Ergon PM — botão "Importar Cronograma" na aba Cronograma.
+interface da Gestão de Projetos — botão "Importar Cronograma" na aba Cronograma.
 
 Fluxo de duas etapas (mesmo padrão da importação de requisitos do TR pelo
 documento): `preview()` lê a planilha e devolve um resumo + a lista de
@@ -313,8 +313,14 @@ def parse_recursos(txt, recurso_info, cliente_sigla):
         if nome_limpo not in recurso_info:
             if cliente_sigla and nome_limpo.startswith(cliente_sigla):
                 recurso_info[nome_limpo] = {"nome": nome_limpo, "tipo_vinculo": "Cliente", "empresa": cliente_sigla}
-            elif nome_limpo.startswith("Techne"):
-                recurso_info[nome_limpo] = {"nome": nome_limpo, "tipo_vinculo": "Techne", "empresa": "Techne"}
+            elif nome_limpo.startswith("Consultoria") or nome_limpo.startswith("Techne"):
+                # Aceita os dois prefixos de propósito: arquivos de cronograma já
+                # existentes, exportados antes desta rodada de genericização, ainda
+                # nomeiam os recursos da consultoria como "Techne - <nome>" — trocar
+                # esse `startswith` por só "Consultoria" quebraria a importação
+                # deles. Uma reimportação futura, feita a partir de um MS Project já
+                # renomeado para "Consultoria - <nome>", também é reconhecida.
+                recurso_info[nome_limpo] = {"nome": nome_limpo, "tipo_vinculo": "Consultoria", "empresa": "Consultoria"}
             else:
                 recurso_info[nome_limpo] = {"nome": nome_limpo, "tipo_vinculo": "Terceirizado", "empresa": None}
     return out
@@ -803,7 +809,7 @@ def confirmar(token, projeto_id, mapeamento_etapas, mapeamento_frentes):
             horas_aproximadas += 1
 
         # Desde a migração 012, TODOS os recursos encontrados na planilha para esta
-        # tarefa (não mais só "o primeiro Techne" e "o primeiro do cliente") viram
+        # tarefa (não mais só "o primeiro da consultoria" e "o primeiro do cliente") viram
         # participantes da atividade em atividade_recurso — ver mais abaixo.
         recursos = parse_recursos(n.recursos_txt, recurso_info, cliente_sigla)
 
