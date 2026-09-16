@@ -3,9 +3,9 @@ services:
     image: postgres:16
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${PGDATABASE:-ergon_pm}
+      POSTGRES_DB: ${PGDATABASE:-app_db}
       POSTGRES_USER: ${PGUSER:-postgres}
-      POSTGRES_PASSWORD: ${PGPASSWORD:-ergon}
+      POSTGRES_PASSWORD: ${PGPASSWORD:-app}
     volumes:
       - db_data:/var/lib/postgresql/data
       # Só roda automaticamente na PRIMEIRA vez que o volume é criado (banco vazio).
@@ -32,8 +32,8 @@ services:
       PGHOST: db
       PGPORT: 5432
       PGUSER: ${PGUSER:-postgres}
-      PGPASSWORD: ${PGPASSWORD:-ergon}
-      PGDATABASE: ${PGDATABASE:-ergon_pm}
+      PGPASSWORD: ${PGPASSWORD:-app}
+      PGDATABASE: ${PGDATABASE:-app_db}
       # Relatório Executivo (IA) do Dashboard — opcional. Sem isso configurado, o
       # resto do sistema funciona normalmente; só o botão de gerar relatório
       # devolve um erro explicando o que falta. Veja o README, seção

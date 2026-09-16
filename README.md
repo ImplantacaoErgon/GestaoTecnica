@@ -1,14 +1,14 @@
-# Ergon PM — Gestão Técnica da Implantação
+# Gestão de Projetos — Acompanhamento da Implantação
 
 Banco de dados Postgres + backend (Flask) + frontend web para acompanhar
-tecnicamente a implantação do sistema Ergon: cronograma por etapa/frente de
+tecnicamente a implantação do sistema: cronograma por etapa/frente de
 trabalho, requisitos do Termo de Referência, caminho crítico (CPM), riscos,
 marcos, ciclos de migração e anexos.
 
 Este projeto substitui o protótipo anterior (feito como site publicado pelo
 Claude, com banco embutido de uso interno) por uma aplicação própria, com um
 Postgres completo, para ser hospedada onde você quiser e acessada por toda a
-equipe — Techne e cliente.
+equipe — Consultoria e cliente.
 
 ## Arquitetura
 
@@ -38,7 +38,7 @@ O site fica em `http://localhost:8000`. Na primeira subida o Postgres roda
 carregar os dados de exemplo (útil para conhecer a ferramenta):
 
 ```bash
-docker compose exec -T db psql -U postgres -d ergon_pm < db/seed.sql
+docker compose exec -T db psql -U postgres -d app_db < db/seed.sql
 ```
 
 ## Usando Supabase como banco
@@ -83,7 +83,7 @@ na ordem do número, no SQL Editor do Supabase:
   Referência (ver seção **Importação automática de requisitos a partir do
   documento do TR** abaixo).
 - `db/migration_004_configuracoes_e_responsaveis.sql` — adiciona a prioridade
-  "Urgente", separa Responsável Techne de Responsável cliente no cronograma,
+  "Urgente", separa Responsável Consultoria de Responsável cliente no cronograma,
   e prepara Responsáveis/Frentes/Tipos de Atividade para terem CRUD completo
   na nova tela de **Configurações** (ver seção dedicada abaixo).
 - `db/migration_005_horas_realizadas_e_alertas.sql` — adiciona o campo de
@@ -122,14 +122,14 @@ docker compose -f docker-compose.supabase.yml up -d --build --force-recreate
 Requer Postgres 14+ e `psql` no PATH.
 
 ```bash
-createdb ergon_pm
-psql -d ergon_pm -f db/schema.sql
-psql -d ergon_pm -f db/seed.sql        # opcional, dados de exemplo
+createdb app_db
+psql -d app_db -f db/schema.sql
+psql -d app_db -f db/seed.sql        # opcional, dados de exemplo
 
 cd backend
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-export PGHOST=localhost PGUSER=postgres PGPASSWORD=... PGDATABASE=ergon_pm
+export PGHOST=localhost PGUSER=postgres PGPASSWORD=... PGDATABASE=app_db
 python run.py    # http://localhost:8000
 ```
 
@@ -163,7 +163,7 @@ serviço externo de autenticação.
   direito, já logado).
 - **Tabela `usuarios` é independente de `recursos`** — `recursos` continua
   sendo só as pessoas responsáveis por atividades no cronograma (usado nos
-  campos "Responsável Techne"/"Responsável cliente"); `usuarios` é quem tem
+  campos "Responsável Consultoria"/"Responsável cliente"); `usuarios` é quem tem
   login no sistema. Um usuário de login não precisa ser um recurso do
   cronograma, e vice-versa — são cadastros e telas separados de propósito.
 - **Telefone e "recebe notificação WhatsApp" são só cadastro por enquanto**
@@ -218,7 +218,7 @@ Aba **Configurações > Parâmetros**, com dois blocos independentes:
 - **Aparência (tema da página)** — **decisão explícita**: ao contrário do
   logo/nome, o tema (Automático / Claro / Escuro) é uma **preferência
   pessoal de cada usuário**, salva só no navegador dela
-  (`localStorage`, chave `ergonTema`) — não fica no banco de dados e não
+  (`localStorage`, chave `appTema`) — não fica no banco de dados e não
   afeta o que os outros usuários veem. "Automático" (padrão) segue a
   preferência de claro/escuro do próprio sistema operacional/navegador,
   exatamente como o sistema já se comportava antes desta rodada; "Claro"
@@ -296,12 +296,12 @@ papel. Resumo:
 
 | Tabela | O que guarda |
 |---|---|
-| `projetos` | Um projeto de implantação (permite reuso em outros clientes da Techne) |
+| `projetos` | Um projeto de implantação (permite reuso em outros clientes da Consultoria) |
 | `etapas` | Etapa 1/2/3 da metodologia — CRUD em Configurações |
 | `frentes_trabalho` | Parametrização, Migração de Dados, Folha de Pagamento, Treinamentos... — CRUD em Configurações, com campo `ativo` |
 | `tipos_atividade_elementar` | Vocabulário controlado do tipo de trabalho (Levantamento, Extração, Carga, Especificação...) — CRUD em Configurações, com campo `ativo` |
-| `recursos` | Responsáveis (pessoas) — nome, `tipo_vinculo` (Techne/Cliente/Terceirizado), empresa, cargo, e-mail, telefone, ativo — CRUD em Configurações |
-| `atividades` | O cronograma em si — WBS hierárquica, `responsavel_techne_id`/`responsavel_cliente_id`, datas previstas/reais, `prazo_horas`/`horas_realizadas` (previsto x realizado), % concluído, resultado do CPM, `requisito_tr_id` (vínculo opcional e único com um item do TR, herdado nativamente por subatividades) |
+| `recursos` | Responsáveis (pessoas) — nome, `tipo_vinculo` (Consultoria/Cliente/Terceirizado), empresa, cargo, e-mail, telefone, ativo — CRUD em Configurações |
+| `atividades` | O cronograma em si — WBS hierárquica, `responsavel_consultoria_id`/`responsavel_cliente_id`, datas previstas/reais, `prazo_horas`/`horas_realizadas` (previsto x realizado), % concluído, resultado do CPM, `requisito_tr_id` (vínculo opcional e único com um item do TR, herdado nativamente por subatividades) |
 | `atividade_relato` | Log temporal (append-only) de relatos de andamento por atividade; obrigatório ter ao menos um quando o status não é "Não iniciada"/"Concluída"; pode marcar pendência com responsável, prazo possível e data limite |
 | `atividade_dependencia` | Grafo de precedência entre atividades (FS/SS/FF/SF + lag), usado no caminho crítico |
 | `atividade_recurso` | Alocação de pessoas em atividades (N:N) |
@@ -339,9 +339,9 @@ ajusta manualmente considerando disponibilidade de equipe, férias etc.
 ## O que a interface cobre hoje
 
 - **Login e cadastro de usuários** — o acesso ao site exige login (ver seção **Login e cadastro de usuários** abaixo). Tela de "Primeiro acesso" para autocadastro, "Esqueci a senha" (gera e envia uma nova senha por e-mail), "Alterar minha senha" (logado) e uma tela em **Configurações > Usuários** para editar dados/desativar acesso de qualquer usuário cadastrado.
-- **Cadastro do projeto** — na primeira vez que o site abre sem nenhum projeto no banco, ele pede o cadastro completo (sigla, nome, instituição, fiscal, gestor, gerentes de projeto do cliente e da Techne, líder da Techne, datas de abertura/início previsto/início real, prazo total em meses, jornada padrão) antes de liberar o resto da navegação. Depois de criado, os dados ficam acessíveis a qualquer momento pelo botão **⚙ Dados do projeto** no topo da tela, inclusive para anexar arquivos ao projeto (ex: o próprio Termo de Referência, contrato).
+- **Cadastro do projeto** — na primeira vez que o site abre sem nenhum projeto no banco, ele pede o cadastro completo (sigla, nome, instituição, fiscal, gestor, gerentes de projeto do cliente e da Consultoria, líder da Consultoria, datas de abertura/início previsto/início real, prazo total em meses, jornada padrão) antes de liberar o resto da navegação. Depois de criado, os dados ficam acessíveis a qualquer momento pelo botão **⚙ Dados do projeto** no topo da tela, inclusive para anexar arquivos ao projeto (ex: o próprio Termo de Referência, contrato).
 - **Dashboard** — KPIs gerais, progresso por frente, próximos marcos, atividades atrasadas, alerta de atividades Urgente/Alta sem responsável ou sem prazo, relatório de horas por responsável (ver seções **Horas previstas x realizadas** e **Alertas de prioridade sem dono/prazo** abaixo), botão **"↻ Atualizar"** para recarregar os números sem precisar dar F5 na página inteira, e o botão **"🧠 Gerar Relatório Executivo (IA)"** (ver seção **Relatório Executivo (IA)** abaixo).
-- **Cronograma** — Gantt + tabela, filtros por período (semana/mês/trimestre ou datas), etapa, frente, status, **Responsável Techne** e **Responsável cliente** (dois campos separados — ver seção **Configurações** abaixo); cadastro de atividades com dependências, requisitos vinculados, anexos, **horas previstas/realizadas**, e a marcação **★ Atividade master** (usada pelo Relatório Executivo (IA) do Dashboard — ver seção dedicada). No formulário de atividade, Etapa e Frente de Trabalho aparecem primeiro, antes dos demais campos, já que definem onde a atividade se encaixa na estrutura do projeto.
+- **Cronograma** — Gantt + tabela, filtros por período (semana/mês/trimestre ou datas), etapa, frente, status, **Responsável Consultoria** e **Responsável cliente** (dois campos separados — ver seção **Configurações** abaixo); cadastro de atividades com dependências, requisitos vinculados, anexos, **horas previstas/realizadas**, e a marcação **★ Atividade master** (usada pelo Relatório Executivo (IA) do Dashboard — ver seção dedicada). No formulário de atividade, Etapa e Frente de Trabalho aparecem primeiro, antes dos demais campos, já que definem onde a atividade se encaixa na estrutura do projeto.
 - **Caminho crítico** — lista calculada via CPM, com botão de recálculo.
 - **Requisitos do TR** — a mesma gestão do protótipo anterior, agora em Postgres, com filtros (inclusive por tipo Funcional/Não Funcional) e vínculo a atividades. Além do **cadastro manual** e da **importação por planilha CSV** (botão "Importar CSV" — há um botão "Baixar modelo CSV" ao lado com as colunas esperadas), dá para **importar direto do documento do Termo de Referência** (botão "Importar do TR (documento)") — ver seção dedicada abaixo. Reimportar (CSV ou documento) com um código já existente **atualiza** o requisito em vez de duplicar.
 - **Riscos & Marcos** — leitura rápida (edição via API por enquanto — ver backlog abaixo).
@@ -364,11 +364,11 @@ Aba nova (**⚙ Configurações** no menu do topo) com CRUD completo — criar,
 editar e excluir pela própria interface, sem precisar mexer no banco — para
 os quatro cadastros base do projeto:
 
-- **Responsáveis** — nome, **vínculo** (Techne / Cliente / Terceirizado — um
+- **Responsáveis** — nome, **vínculo** (Consultoria / Cliente / Terceirizado — um
   vocabulário fechado, usado para filtrar quem aparece como "Responsável
-  Techne" x "Responsável cliente" no cronograma), **empresa** (texto livre —
-  o nome real da empresa/instituição, por exemplo "Techne", o nome do órgão,
-  ou de uma terceirizada — não é mais só "Techne"/"Cliente"), **cargo**,
+  Consultoria" x "Responsável cliente" no cronograma), **empresa** (texto livre —
+  o nome real da empresa/instituição, por exemplo "Consultoria", o nome do órgão,
+  ou de uma terceirizada — não é mais só "Consultoria"/"Cliente"), **cargo**,
   e-mail, telefone e um marcador **ativo/inativo**.
 - **Etapas** — número, nome, descrição, datas previstas de início/fim.
 - **Frentes de Trabalho** — nome, descrição, cor (usada no Gantt), ordem de
@@ -387,10 +387,10 @@ qualquer atividade antiga que já apontava pra ele. Exclusão de verdade (o
 botão "Excluir" no cadastro) só funciona pra itens que nunca foram usados em
 nenhuma atividade.
 
-### Responsável Techne e Responsável cliente no cronograma
+### Responsável Consultoria e Responsável cliente no cronograma
 
 Cada atividade agora tem dois campos de responsável, não um só:
-**Responsável Techne** (quem da consultoria executa/acompanha) e
+**Responsável Consultoria** (quem da consultoria executa/acompanha) e
 **Responsável cliente** (a contraparte do órgão que valida/participa) — os
 dois usam o mesmo cadastro de Responsáveis, então dá pra escolher qualquer
 pessoa cadastrada nos dois campos (o sistema não trava a escolha pelo
@@ -419,7 +419,7 @@ abaixo. Nenhum dos dois campos é obrigatório — uma atividade sem horas
 lançadas simplesmente aparece com "—" ou só o valor previsto.
 
 No Dashboard, o card **"Horas por responsável (previsto x realizado)"**
-soma essas horas por pessoa (olhando tanto o campo Responsável Techne
+soma essas horas por pessoa (olhando tanto o campo Responsável Consultoria
 quanto Responsável cliente de cada atividade), mostrando quantas atividades
 a pessoa tem, o total de horas previstas, o total já realizado, e a
 diferença. Um detalhe importante: a **diferença só é calculada sobre as
@@ -454,7 +454,7 @@ continua editável depois, independente do pai). A tabela do Cronograma
 mostra o código do item logo abaixo do nome da atividade quando há vínculo.
 
 **Relatos de andamento** — nova aba "Relatos" no formulário da atividade.
-Qualquer pessoa (consultor Techne ou do cliente) pode registrar um relato
+Qualquer pessoa (consultor da consultoria ou do cliente) pode registrar um relato
 de texto livre a qualquer momento; os relatos ficam num **log temporal —
 não podem ser editados nem apagados depois de criados**, só um novo relato
 pode ser adicionado por cima. Regra de negócio: **toda atividade cujo
@@ -482,7 +482,7 @@ que a base de relatos tiver volume suficiente para ser analisada.
 
 O Dashboard mostra um card de atenção (some automaticamente quando não há
 nada a reportar) listando atividades de prioridade **Urgente** ou **Alta**,
-ainda não concluídas/canceladas, que estão **sem Responsável Techne** ou
+ainda não concluídas/canceladas, que estão **sem Responsável Consultoria** ou
 **sem data fim prevista**. A ideia é pegar esse tipo de atividade antes que
 ela vire um problema — diferente do card de "Atividades atrasadas", que só
 acusa depois que a data já passou (e nem acusa nada se a atividade não tem
@@ -550,7 +550,7 @@ casos os avisos da etapa de análise apontam o que não foi reconhecido.
 
 Botão **"Importar Cronograma (Excel/CSV)"** na aba Cronograma — pensado para
 o fluxo de reelaborar o cronograma no MS Project (replanejamento, ajuste de
-datas, novas tarefas) e trazer a versão atualizada para dentro do Ergon PM
+datas, novas tarefas) e trazer a versão atualizada para dentro da Gestão de Projetos
 sem precisar rodar nenhum script. Aceita a exportação em `.xlsx` do MS
 Project ou um `.csv` com as mesmas colunas (`EDT, Id, Nome da tarefa,
 Início, Término, Duração, % concluída, Predecessoras, Nomes dos
@@ -681,7 +681,7 @@ Ao clicar em "Gerar relatório", os seguintes dados do **projeto de
 implantação** (não da folha de pagamento real dos servidores do órgão) são
 enviados à API da Anthropic para gerar o texto: nomes e códigos de
 atividades, prazos, status, percentuais concluídos, nomes de responsáveis
-Techne/cliente, descrições de riscos abertos. Isso é necessariamente
+Consultoria/cliente, descrições de riscos abertos. Isso é necessariamente
 externo ao seu ambiente (Docker/Supabase) — só configure a chave da API se
 esse envio já estiver autorizado pelo cliente. Cada relatório gerado fica
 salvo (texto + retrato exato dos dados enviados) na tabela
@@ -758,7 +758,7 @@ vez de criar um novo a cada vez, e deixa você conferir a classificação de
 Etapa/Frente antes de gravar.
 
 `scripts/importar_cronograma_pcr.py` lê a exportação em Excel (`.xlsx`) de um
-cronograma do MS Project e cria, via chamadas HTTP na própria API do Ergon
+cronograma do MS Project e cria, via chamadas HTTP na própria API do Sistema
 PM (não escreve direto no banco), o projeto inteiro: etapas, frentes de
 trabalho, responsáveis, tipos de atividade elementar, atividades (com
 hierarquia e dependências) e marcos.
@@ -804,7 +804,7 @@ frente de trabalho corresponde a cada ramo do nível 2 do WBS).
 pip install openpyxl requests
 ```
 
-- O backend do Ergon PM precisa estar rodando e acessível por HTTP.
+- O backend da Gestão de Projetos precisa estar rodando e acessível por HTTP.
 - O banco precisa já ter `db/migration_006_relatos_e_requisito_tr_atividade.sql`
   aplicada — o script confere isso sozinho antes de importar (ver abaixo) e
   para com uma mensagem clara se faltar.
@@ -826,7 +826,7 @@ python3 scripts/importar_cronograma_pcr.py \
 ```
 
 Outras opções: `--sheet` (nome da aba, padrão `"Plan1"`), `--projeto-nome` /
-`--projeto-cliente` (padrão "Implantação Sistema Ergon" / "PCR"), `--yes`
+`--projeto-cliente` (padrão "Implantação do Sistema" / "PCR"), `--yes`
 (pula as confirmações interativas — útil em automação, mas use com cuidado),
 `--relatorio` (caminho do JSON de resumo gerado ao final, padrão
 `import_result.json`).
@@ -863,7 +863,7 @@ em quando pelo gestor.
 usuário de login e o seu cadastro de Responsável (`recursos`) é feito **por
 e-mail** — se o e-mail com que você loga bate (sem diferenciar
 maiúsculas/minúsculas) com o e-mail cadastrado em algum Responsável, todas
-as atividades em que esse Responsável aparece como **Responsável Techne OU
+as atividades em que esse Responsável aparece como **Responsável Consultoria OU
 Responsável cliente** aparecem aqui. Não existe um campo novo de "usuário x
 responsável" pra cadastrar manualmente — é automático a partir do e-mail. Se
 o seu e-mail de login não bate com nenhum Responsável, a tela avisa e
@@ -946,7 +946,7 @@ inflar demais o escopo sem uma conversa antes):
   é só o total acumulado da atividade inteira) — se fizer falta pra
   identificar sobrealocação numa semana específica, dá pra evoluir depois
   usando `atividade_recurso.horas_alocadas` junto com lançamentos por data.
-- ✅ **Alerta de atividade "Urgente"/"Alta" sem Responsável Techne ou sem
+- ✅ **Alerta de atividade "Urgente"/"Alta" sem Responsável Consultoria ou sem
   data prevista** — card dedicado no Dashboard, ver seção **Alertas de
   prioridade sem dono/prazo** acima.
 - ✅ **Relatos de andamento (log temporal) + vínculo opcional com item do
@@ -993,6 +993,6 @@ inflar demais o escopo sem uma conversa antes):
 dependências formando um caminho crítico de verdade), 10 requisitos, 3
 riscos, 4 marcos, alguns vínculos de atividade com item do TR e alguns
 relatos de andamento (incluindo uma pendência de exemplo) — todos com nomes
-plausíveis para o contexto do Ergon, mas fictícios. Apague-os (`DELETE FROM projetos;` — os `ON DELETE CASCADE`
+plausíveis para o contexto do sistema, mas fictícios. Apague-os (`DELETE FROM projetos;` — os `ON DELETE CASCADE`
 cuidam do resto) antes de começar a cadastrar os dados reais, ou simplesmente
 não rode `seed.sql` num banco de produção.
