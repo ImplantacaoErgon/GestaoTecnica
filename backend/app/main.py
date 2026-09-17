@@ -47,8 +47,23 @@ AUTH_ROTAS_PUBLICAS = {
 PROJETO_FIELDS = [
     "sigla", "nome", "cliente", "descricao", "fiscal_projeto", "gestor_projeto",
     "gerente_projeto_cliente", "gerente_projeto_consultoria", "lider_projeto_consultoria",
+    "fiscal_projeto_recurso_id", "gestor_projeto_recurso_id", "gerente_projeto_cliente_recurso_id",
+    "gerente_projeto_consultoria_recurso_id", "lider_projeto_consultoria_recurso_id",
     "data_abertura", "data_inicio", "data_inicio_real", "data_fim_prevista",
     "prazo_total_meses", "valor_global_contrato", "horas_dia_util",
+]
+
+# Os 5 interlocutores do projeto (36ª rodada, migração 025): cada par
+# (campo de texto, campo de id) pode apontar pra um recurso cadastrado, do
+# lado esperado (cliente/terceirizado ou Consultoria) — mesmo padrão já
+# usado em faturas.responsavel_recebimento_recurso_id, ver preparar_fatura.
+PROJETO_INTERLOCUTORES = [
+    # (campo_texto, campo_recurso_id, lado_esperado, rótulo)
+    ("fiscal_projeto", "fiscal_projeto_recurso_id", "cliente", "Fiscal do projeto"),
+    ("gestor_projeto", "gestor_projeto_recurso_id", "cliente", "Gestor do projeto"),
+    ("gerente_projeto_cliente", "gerente_projeto_cliente_recurso_id", "cliente", "Gerente de projeto do cliente"),
+    ("gerente_projeto_consultoria", "gerente_projeto_consultoria_recurso_id", "consultoria", "Gerente de projeto da Consultoria"),
+    ("lider_projeto_consultoria", "lider_projeto_consultoria_recurso_id", "consultoria", "Líder de projeto da Consultoria"),
 ]
 
 # Parâmetros do site (Configurações > Parâmetros): logo + nome da empresa,
@@ -296,6 +311,36 @@ def preparar_fatura(data, projeto_id):
             raise ValueError(
                 "Informe o responsável pelo recebimento: um recurso cadastrado ou o nome de uma pessoa do cliente."
             )
+
+
+def preparar_projeto_interlocutores(data):
+    """Valida e normaliza (in place) os 5 campos de interlocutores do
+    projeto que podem apontar pra um recurso cadastrado (36ª rodada,
+    migração 025 — mesmo padrão de preparar_fatura acima): quando um
+    *_recurso_id é informado, o nome (campo de texto) é sempre
+    sobrescrito com o nome cadastrado no recurso — qualquer texto enviado
+    pelo front-end nesse caso é ignorado — e o recurso precisa ser do lado
+    certo (Cliente/Terceirizado para Fiscal/Gestor/Gerente do cliente,
+    Consultoria para Gerente/Líder da Consultoria). Sem *_recurso_id, o
+    campo de texto continua livre (nome de alguém ainda sem cadastro),
+    exatamente como já funcionava antes desta rodada — nenhum destes 5
+    campos é obrigatório."""
+    for campo_nome, campo_id, lado, rotulo in PROJETO_INTERLOCUTORES:
+        if campo_id not in data:
+            continue
+        recurso_id = data.get(campo_id)
+        if recurso_id:
+            rec = db.fetch_one(f"SELECT nome, tipo_vinculo FROM recursos WHERE id = {db.q(recurso_id)}")
+            if not rec:
+                raise ValueError(f"{rotulo}: recurso não encontrado.")
+            eh_consultoria = rec["tipo_vinculo"] == "Consultoria"
+            if lado == "consultoria" and not eh_consultoria:
+                raise ValueError(f"{rotulo}: precisa ser um recurso da Consultoria.")
+            if lado == "cliente" and eh_consultoria:
+                raise ValueError(f"{rotulo}: precisa ser um recurso do cliente ou terceirizado (não Consultoria).")
+            data[campo_nome] = rec["nome"]
+        else:
+            data[campo_id] = None
 
 
 def insert_row(table, data, allowed):
@@ -624,11 +669,20 @@ def create_app():
         data = request.get_json(force=True)
         if not (data.get("nome") and data.get("cliente")):
             return jsonify({"erro": "Nome do projeto e Instituição são obrigatórios."}), 400
+        try:
+            preparar_projeto_interlocutores(data)
+        except ValueError as e:
+            return jsonify({"erro": str(e)}), 400
         return jsonify(insert_row("projetos", data, PROJETO_FIELDS)), 201
 
     @app.put("/api/projetos/<id>")
     def update_projeto(id):
-        row = patch_row("projetos", id, request.get_json(force=True), PROJETO_FIELDS)
+        data = request.get_json(force=True)
+        try:
+            preparar_projeto_interlocutores(data)
+        except ValueError as e:
+            return jsonify({"erro": str(e)}), 400
+        row = patch_row("projetos", id, data, PROJETO_FIELDS)
         if not row:
             abort(404)
         return jsonify(row)

@@ -77,11 +77,25 @@ CREATE TABLE projetos (
   nome            text NOT NULL,
   cliente         text NOT NULL,                 -- Instituição/órgão cliente
   descricao       text,
+  -- Os 5 campos abaixo guardam sempre o NOME do interlocutor (retrato
+  -- congelado) — cada um tem um *_recurso_id irmão (migração 025, FK pra
+  -- recursos, fechada mais abaixo assim que a tabela recursos existe:
+  -- mesmo motivo de atividades.requisito_tr_id) que, quando preenchido,
+  -- é a fonte de verdade: o backend sobrescreve o nome com o cadastro do
+  -- recurso a cada salvamento (preparar_projeto_interlocutores, em
+  -- main.py). Sem *_recurso_id (pessoa ainda sem cadastro de recurso), o
+  -- nome continua sendo só texto digitado livremente, exatamente como
+  -- sempre funcionou antes da migração 025.
   fiscal_projeto            text,                -- fiscal do contrato, nomeado pelo cliente
+  fiscal_projeto_recurso_id             uuid,     -- recurso do lado do cliente/terceirizado (ou NULL = nome livre)
   gestor_projeto            text,                -- gestor do projeto pelo cliente
+  gestor_projeto_recurso_id             uuid,
   gerente_projeto_cliente   text,
+  gerente_projeto_cliente_recurso_id    uuid,
   gerente_projeto_consultoria    text,
+  gerente_projeto_consultoria_recurso_id uuid,    -- recurso precisa ser da Consultoria (checado no backend)
   lider_projeto_consultoria      text,
+  lider_projeto_consultoria_recurso_id   uuid,    -- idem, recurso da Consultoria
   data_abertura       date,                      -- data de abertura/assinatura do projeto
   data_inicio         date,                      -- início previsto
   data_inicio_real    date,
@@ -160,6 +174,16 @@ CREATE TABLE recursos (
   criado_em       timestamptz NOT NULL DEFAULT now()
 );
 COMMENT ON TABLE recursos IS 'Recursos (consultores da consultoria, terceirizados, analistas/gestores do cliente). tipo_vinculo classifica o lado; empresa guarda o nome real da empresa/instituição; controla_horas define se o recurso pode apontar horas em "Minhas atividades".';
+
+-- Agora que recursos existe, fecha as FKs dos 5 interlocutores do projeto
+-- (declaradas lá em cima — migração 025 — mesmo motivo de
+-- atividades.requisito_tr_id). ON DELETE SET NULL: excluir o recurso não
+-- apaga o projeto nem o nome congelado, só desvincula o cadastro.
+ALTER TABLE projetos ADD CONSTRAINT fk_projetos_fiscal_recurso FOREIGN KEY (fiscal_projeto_recurso_id) REFERENCES recursos(id) ON DELETE SET NULL;
+ALTER TABLE projetos ADD CONSTRAINT fk_projetos_gestor_recurso FOREIGN KEY (gestor_projeto_recurso_id) REFERENCES recursos(id) ON DELETE SET NULL;
+ALTER TABLE projetos ADD CONSTRAINT fk_projetos_gerente_cliente_recurso FOREIGN KEY (gerente_projeto_cliente_recurso_id) REFERENCES recursos(id) ON DELETE SET NULL;
+ALTER TABLE projetos ADD CONSTRAINT fk_projetos_gerente_consultoria_recurso FOREIGN KEY (gerente_projeto_consultoria_recurso_id) REFERENCES recursos(id) ON DELETE SET NULL;
+ALTER TABLE projetos ADD CONSTRAINT fk_projetos_lider_consultoria_recurso FOREIGN KEY (lider_projeto_consultoria_recurso_id) REFERENCES recursos(id) ON DELETE SET NULL;
 
 -- ============================================================================
 -- 6. ATIVIDADES  (WBS hierárquica — o coração do cronograma)
@@ -865,7 +889,7 @@ documentacao (singleton por tipo — este documento e o Documento Executivo)
 
 ### 6.1 Tabelas principais
 
-**`projetos`** — uma implantação por linha. Campos-chave: `sigla`, `nome`, `cliente`, os cinco campos de interlocutores (`fiscal_projeto`, `gestor_projeto`, `gerente_projeto_cliente`, `gerente_projeto_consultoria`, `lider_projeto_consultoria`), datas (`data_abertura`, `data_inicio`, `data_inicio_real`, `data_fim_prevista`), `prazo_total_meses` e `horas_dia_util` (jornada padrão usada para converter horas em dias úteis no CPM).
+**`projetos`** — uma implantação por linha. Campos-chave: `sigla`, `nome`, `cliente`, os cinco campos de interlocutores (`fiscal_projeto`, `gestor_projeto`, `gerente_projeto_cliente`, `gerente_projeto_consultoria`, `lider_projeto_consultoria`), datas (`data_abertura`, `data_inicio`, `data_inicio_real`, `data_fim_prevista`), `prazo_total_meses` e `horas_dia_util` (jornada padrão usada para converter horas em dias úteis no CPM). Desde a migração 025, cada um dos cinco interlocutores tem um `*_recurso_id` irmão (FK opcional a `recursos`, `ON DELETE SET NULL`): quando preenchido, o backend sobrescreve o nome com o cadastro do recurso a cada salvamento (fiscal/gestor/gerente do cliente esperam um recurso Cliente/Terceirizado; gerente/líder da Consultoria esperam um recurso Consultoria — checado em `preparar_projeto_interlocutores`, `main.py`); sem `*_recurso_id`, o nome continua sendo só texto digitado livremente (pessoa ainda sem cadastro de recurso).
 
 **`etapas`** — `projeto_id` (FK, `ON DELETE CASCADE`), `numero`, `nome`. `UNIQUE (projeto_id, numero)`.
 

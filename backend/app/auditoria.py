@@ -67,6 +67,13 @@ CAMPO_ROTULOS = {
         "gerente_projeto_cliente": "Gerente do projeto (cliente)",
         "gerente_projeto_consultoria": "Gerente do projeto (Consultoria)",
         "lider_projeto_consultoria": "Líder do projeto (Consultoria)",
+        # *_recurso_id (migração 025) — rótulo próprio, mesmo padrão de
+        # faturas.responsavel_recebimento_recurso_id/_nome acima.
+        "fiscal_projeto_recurso_id": "Fiscal do projeto (recurso)",
+        "gestor_projeto_recurso_id": "Gestor do projeto (recurso)",
+        "gerente_projeto_cliente_recurso_id": "Gerente do projeto (cliente) — recurso",
+        "gerente_projeto_consultoria_recurso_id": "Gerente do projeto (Consultoria) — recurso",
+        "lider_projeto_consultoria_recurso_id": "Líder do projeto (Consultoria) — recurso",
         "data_abertura": "Data de abertura", "data_inicio": "Data de início",
         "data_inicio_real": "Data de início real", "data_fim_prevista": "Data fim prevista",
         "prazo_total_meses": "Prazo total (meses)", "valor_global_contrato": "Valor global do contrato",

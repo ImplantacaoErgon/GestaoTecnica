@@ -1489,11 +1489,31 @@
         <div class="field full"><label>Instituição *</label><input id="proj-instituicao" type="text" placeholder="Nome do órgão/cliente"></div>
         <div class="field full"><label>Descrição</label><textarea id="proj-descricao"></textarea></div>
 
-        <div class="field"><label>Fiscal do projeto</label><input id="proj-fiscal" type="text"></div>
-        <div class="field"><label>Gestor do projeto</label><input id="proj-gestor" type="text"></div>
-        <div class="field"><label>Gerente de projeto do cliente</label><input id="proj-gerente-cliente" type="text"></div>
-        <div class="field"><label>Gerente de projeto da Consultoria</label><input id="proj-gerente-consultoria" type="text"></div>
-        <div class="field full" style="max-width:calc(50% - 7px);"><label>Líder de projeto da Consultoria</label><input id="proj-lider-consultoria" type="text"></div>
+        <div class="field">
+          <label>Fiscal do projeto</label>
+          <select id="proj-fiscal-recurso"><option value="">—</option><option value="__manual__">Nome sem cadastro (digitar)</option></select>
+          <input id="proj-fiscal-nome" type="text" placeholder="Nome da pessoa" hidden style="margin-top:6px;">
+        </div>
+        <div class="field">
+          <label>Gestor do projeto</label>
+          <select id="proj-gestor-recurso"><option value="">—</option><option value="__manual__">Nome sem cadastro (digitar)</option></select>
+          <input id="proj-gestor-nome" type="text" placeholder="Nome da pessoa" hidden style="margin-top:6px;">
+        </div>
+        <div class="field">
+          <label>Gerente de projeto do cliente</label>
+          <select id="proj-gerente-cliente-recurso"><option value="">—</option><option value="__manual__">Nome sem cadastro (digitar)</option></select>
+          <input id="proj-gerente-cliente-nome" type="text" placeholder="Nome da pessoa" hidden style="margin-top:6px;">
+        </div>
+        <div class="field">
+          <label>Gerente de projeto da Consultoria</label>
+          <select id="proj-gerente-consultoria-recurso"><option value="">—</option><option value="__manual__">Nome sem cadastro (digitar)</option></select>
+          <input id="proj-gerente-consultoria-nome" type="text" placeholder="Nome da pessoa" hidden style="margin-top:6px;">
+        </div>
+        <div class="field full" style="max-width:calc(50% - 7px);">
+          <label>Líder de projeto da Consultoria</label>
+          <select id="proj-lider-consultoria-recurso"><option value="">—</option><option value="__manual__">Nome sem cadastro (digitar)</option></select>
+          <input id="proj-lider-consultoria-nome" type="text" placeholder="Nome da pessoa" hidden style="margin-top:6px;">
+        </div>
 
         <div class="field"><label>Data de abertura do projeto</label><input id="proj-data-abertura" type="date"></div>
         <div class="field"><label>Jornada padrão (h/dia útil)</label><input id="proj-horas-dia" type="number" step="0.5" min="1"></div>
@@ -1932,6 +1952,21 @@ function fillStaticSelects(){
     RECURSOS.filter(r=>r.tipo_vinculo==="Consultoria").map(r=>`<option value="${r.id}">${recursoLabel(r)}</option>`).join("");
   $("fat-receb-recurso").innerHTML = `<option value="">—</option>` +
     RECURSOS.filter(r=>r.tipo_vinculo!=="Consultoria").map(r=>`<option value="${r.id}">${recursoLabel(r)}</option>`).join("");
+
+  // Interlocutores do projeto (36ª rodada, migração 025): mesma regra de
+  // lado da Fatura acima — Fiscal/Gestor/Gerente do cliente esperam um
+  // recurso Cliente/Terceirizado; Gerente/Líder da Consultoria esperam um
+  // recurso Consultoria (validado de novo no backend, em
+  // preparar_projeto_interlocutores). "Nome sem cadastro" fica sempre por
+  // último, pra quem ainda não tem cadastro de recurso.
+  const optManual = `<option value="__manual__">Nome sem cadastro (digitar)</option>`;
+  const recursoOptsCliente = RECURSOS.filter(r=>r.tipo_vinculo!=="Consultoria").map(r=>`<option value="${r.id}">${recursoLabel(r)}</option>`).join("");
+  const recursoOptsConsultoria = RECURSOS.filter(r=>r.tipo_vinculo==="Consultoria").map(r=>`<option value="${r.id}">${recursoLabel(r)}</option>`).join("");
+  $("proj-fiscal-recurso").innerHTML = `<option value="">—</option>` + recursoOptsCliente + optManual;
+  $("proj-gestor-recurso").innerHTML = `<option value="">—</option>` + recursoOptsCliente + optManual;
+  $("proj-gerente-cliente-recurso").innerHTML = `<option value="">—</option>` + recursoOptsCliente + optManual;
+  $("proj-gerente-consultoria-recurso").innerHTML = `<option value="">—</option>` + recursoOptsConsultoria + optManual;
+  $("proj-lider-consultoria-recurso").innerHTML = `<option value="">—</option>` + recursoOptsConsultoria + optManual;
 
   const statusAtiv = ["Não iniciada","Em andamento","Bloqueada",
     "Concluída","Concluída com atraso","Concluída com esforço maior","Concluída com atraso e esforço maior",
@@ -3233,6 +3268,17 @@ async function saveFatura(){
 // "novo" (cadastrando mais um projeto, com o app já rodando normalmente).
 let projetoModalModo = "editar";
 
+// Interlocutores do projeto (36ª rodada, migração 025) — mesmos 5 campos
+// e nomes do backend (PROJETO_INTERLOCUTORES em main.py), reunidos aqui
+// pra não repetir os IDs em wireProjetoModal/openProjetoModal/saveProjeto.
+const PROJETO_INTERLOCUTORES = [
+  {sel:"proj-fiscal-recurso", txt:"proj-fiscal-nome", nome:"fiscal_projeto", id:"fiscal_projeto_recurso_id"},
+  {sel:"proj-gestor-recurso", txt:"proj-gestor-nome", nome:"gestor_projeto", id:"gestor_projeto_recurso_id"},
+  {sel:"proj-gerente-cliente-recurso", txt:"proj-gerente-cliente-nome", nome:"gerente_projeto_cliente", id:"gerente_projeto_cliente_recurso_id"},
+  {sel:"proj-gerente-consultoria-recurso", txt:"proj-gerente-consultoria-nome", nome:"gerente_projeto_consultoria", id:"gerente_projeto_consultoria_recurso_id"},
+  {sel:"proj-lider-consultoria-recurso", txt:"proj-lider-consultoria-nome", nome:"lider_projeto_consultoria", id:"lider_projeto_consultoria_recurso_id"},
+];
+
 function wireProjetoModal(){
   const modal = $("overlay-projeto");
   modal.querySelector(".modal-tabs").addEventListener("click", e=>{
@@ -3243,6 +3289,17 @@ function wireProjetoModal(){
   $("proj-close").addEventListener("click", closeProjetoModal);
   $("proj-cancel").addEventListener("click", closeProjetoModal);
   $("proj-save").addEventListener("click", saveProjeto);
+  // Interlocutores do projeto (36ª rodada): cada select tem uma opção
+  // "__manual__" que revela o campo de texto livre ao lado (nome de
+  // alguém ainda sem cadastro de recurso) — qualquer outra escolha
+  // (recurso ou "—") esconde de novo o texto livre.
+  PROJETO_INTERLOCUTORES.forEach(({sel, txt})=>{
+    $(sel).addEventListener("change", ()=>{
+      const manual = $(sel).value === "__manual__";
+      $(txt).hidden = !manual;
+      if(manual) $(txt).focus(); else $(txt).value = "";
+    });
+  });
   $("proj-anexo-add").addEventListener("click", async ()=>{
     const file = $("proj-anexo-file").files[0]; if(!file || !PROJETO) return;
     const fd = new FormData(); fd.append("entidade_tipo","projeto"); fd.append("entidade_id", PROJETO.id); fd.append("file", file);
@@ -3268,11 +3325,17 @@ function openProjetoModal(modo){
   $("proj-nome").value = p?.nome || "";
   $("proj-instituicao").value = p?.cliente || "";
   $("proj-descricao").value = p?.descricao || "";
-  $("proj-fiscal").value = p?.fiscal_projeto || "";
-  $("proj-gestor").value = p?.gestor_projeto || "";
-  $("proj-gerente-cliente").value = p?.gerente_projeto_cliente || "";
-  $("proj-gerente-consultoria").value = p?.gerente_projeto_consultoria || "";
-  $("proj-lider-consultoria").value = p?.lider_projeto_consultoria || "";
+  PROJETO_INTERLOCUTORES.forEach(({sel, txt, nome, id})=>{
+    const recursoId = p?.[id] || "";
+    const nomeTexto = p?.[nome] || "";
+    if(recursoId){
+      $(sel).value = recursoId; $(txt).hidden = true; $(txt).value = "";
+    } else if(nomeTexto){
+      $(sel).value = "__manual__"; $(txt).hidden = false; $(txt).value = nomeTexto;
+    } else {
+      $(sel).value = ""; $(txt).hidden = true; $(txt).value = "";
+    }
+  });
   $("proj-data-abertura").value = p?.data_abertura || "";
   $("proj-horas-dia").value = p?.horas_dia_util ?? 8;
   $("proj-data-inicio").value = p?.data_inicio || "";
@@ -3296,11 +3359,27 @@ async function saveProjeto(){
     nome: $("proj-nome").value.trim(),
     cliente: $("proj-instituicao").value.trim(),
     descricao: $("proj-descricao").value.trim() || null,
-    fiscal_projeto: $("proj-fiscal").value.trim() || null,
-    gestor_projeto: $("proj-gestor").value.trim() || null,
-    gerente_projeto_cliente: $("proj-gerente-cliente").value.trim() || null,
-    gerente_projeto_consultoria: $("proj-gerente-consultoria").value.trim() || null,
-    lider_projeto_consultoria: $("proj-lider-consultoria").value.trim() || null,
+    ...(()=>{
+      // Interlocutores do projeto (36ª rodada): select num recurso
+      // cadastrado (o backend sobrescreve o nome com o cadastro,
+      // ver preparar_projeto_interlocutores) ou "__manual__" com o
+      // nome digitado ao lado (pessoa ainda sem cadastro).
+      const campos = {};
+      PROJETO_INTERLOCUTORES.forEach(({sel, txt, nome, id})=>{
+        const selVal = $(sel).value;
+        if(selVal === "__manual__"){
+          campos[id] = null;
+          campos[nome] = $(txt).value.trim() || null;
+        } else if(selVal){
+          campos[id] = selVal;
+          campos[nome] = null; // backend preenche a partir do recurso
+        } else {
+          campos[id] = null;
+          campos[nome] = null;
+        }
+      });
+      return campos;
+    })(),
     data_abertura: $("proj-data-abertura").value || null,
     horas_dia_util: Number($("proj-horas-dia").value || 8),
     data_inicio: $("proj-data-inicio").value || null,
