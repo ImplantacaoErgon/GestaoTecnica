@@ -8,7 +8,7 @@ from datetime import datetime, date, timedelta
 
 from flask import Flask, request, jsonify, send_from_directory, send_file, abort, session
 
-from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria
+from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 FRONTEND_DIR = os.environ.get(
@@ -1050,6 +1050,24 @@ def create_app():
         )
         return jsonify(db.fetch_all(sql))
 
+    @app.get("/api/projetos/<projeto_id>/dependencias")
+    def list_dependencias_projeto(projeto_id):
+        """Todas as dependências do projeto de uma vez (39ª rodada) — usada
+        pela tela "Editar em massa" pra mostrar, em cada linha da planilha,
+        quantas predecessoras/sucessoras a atividade tem, sem precisar de
+        uma chamada por atividade (list_dependencias acima já existe, mas é
+        por atividade, cara demais pra montar a grade inteira)."""
+        sql = (
+            "SELECT ad.atividade_id, ad.predecessora_id, ad.tipo, ad.lag_horas, "
+            "p.codigo_wbs AS predecessora_codigo_wbs, p.nome AS predecessora_nome, "
+            "s.codigo_wbs AS sucessora_codigo_wbs, s.nome AS sucessora_nome "
+            "FROM atividade_dependencia ad "
+            "JOIN atividades p ON p.id = ad.predecessora_id "
+            "JOIN atividades s ON s.id = ad.atividade_id "
+            f"WHERE p.projeto_id = {db.q(projeto_id)} AND s.projeto_id = {db.q(projeto_id)}"
+        )
+        return jsonify(db.fetch_all(sql))
+
     @app.post("/api/atividades/<id>/dependencias")
     def create_dependencia(id):
         data = request.get_json(force=True)
@@ -1911,6 +1929,65 @@ def create_app():
                 "data_ancora": resultado["data_ancora_normalizada"],
                 "atividades_alteradas": resultado["atividades_alteradas"],
                 "marcos_alterados": resultado["marcos_alterados"],
+            },
+        )
+        return jsonify(resultado)
+
+    # ------------------------------------------------- edição em lote do cronograma
+    # Tela "Editar em massa" (39ª rodada, formato planilha): edita várias
+    # atividades de uma vez e propaga o efeito só pelas sucessoras (diretas
+    # e indiretas) do que foi realmente editado — ver
+    # backend/app/cronograma_edicao_lote.py para a regra completa. Mesmo
+    # padrão preview/confirmar do replanejamento acima, e também não gera
+    # versão sozinha (o front-end oferece gerar uma antes, no mesmo modal).
+    @app.post("/api/cronograma/edicao-lote/preview")
+    def cronograma_edicao_lote_preview():
+        data = request.get_json(force=True) or {}
+        projeto_id = data.get("projeto_id")
+        edicoes = data.get("edicoes") or []
+        if not projeto_id:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        if not edicoes:
+            return jsonify({"erro": "Nenhuma alteração informada."}), 400
+        try:
+            resultado = cronograma_edicao_lote.calcular(projeto_id, edicoes, STATUS_FAMILIA_CONCLUIDA)
+        except ValueError as e:
+            return jsonify({"erro": str(e)}), 400
+        itens = resultado["itens"]
+        return jsonify({
+            "total_editadas": sum(1 for i in itens if i["editado"]),
+            "total_cascata": sum(1 for i in itens if not i["editado"]),
+            "itens": itens,
+        })
+
+    @app.post("/api/cronograma/edicao-lote/confirmar")
+    def cronograma_edicao_lote_confirmar():
+        data = request.get_json(force=True) or {}
+        projeto_id = data.get("projeto_id")
+        edicoes = data.get("edicoes") or []
+        if not projeto_id:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        if not edicoes:
+            return jsonify({"erro": "Nenhuma alteração informada."}), 400
+        projeto = db.fetch_one(f"SELECT nome FROM projetos WHERE id = {db.q(projeto_id)}")
+        if not projeto:
+            abort(404)
+        try:
+            resultado = cronograma_edicao_lote.aplicar(projeto_id, edicoes, STATUS_FAMILIA_CONCLUIDA)
+        except ValueError as e:
+            return jsonify({"erro": str(e)}), 400
+        auditoria.registrar_evento_manual(
+            "edicao",
+            f'Editou em massa {resultado["atividades_editadas"]} atividade(s) do cronograma do projeto '
+            f'"{projeto["nome"]}"'
+            + (f', com efeito em cascata em mais {resultado["atividades_cascata"]} atividade(s) dependente(s)'
+               if resultado["atividades_cascata"] else '') + '.',
+            entidade="cronograma", entidade_id=str(projeto_id), entidade_rotulo=projeto["nome"],
+            projeto_id=projeto_id, sensivel=True,
+            detalhes={
+                "atividades_editadas": resultado["atividades_editadas"],
+                "atividades_cascata": resultado["atividades_cascata"],
+                "ids_alterados": resultado["ids_alterados"],
             },
         )
         return jsonify(resultado)

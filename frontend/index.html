@@ -207,6 +207,16 @@
   .ma-dia.fora-periodo{color:var(--text-faint);}
   .ma-feriado-tag{font-size:9.5px;color:var(--text-faint);}
 
+  /* ---- edição em massa do cronograma (39ª rodada) ---- */
+  #el-linhas-tbody input[type=date], #el-linhas-tbody input[type=number]{
+    background:var(--surface);border:1px solid var(--border);border-radius:6px;
+    padding:5px 7px;font-size:12.5px;color:var(--text);font-family:inherit;
+  }
+  #el-linhas-tbody input[type=date]{width:132px;}
+  #el-linhas-tbody input[type=number]{width:82px;text-align:right;}
+  #el-linhas-tbody input:disabled{opacity:.55;background:var(--surface-2);cursor:not-allowed;}
+  #el-linhas-tbody input:focus{outline:2px solid var(--accent);outline-offset:0;}
+
   /* ---- gantt ---- */
   .gantt-wrap{background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);overflow:auto;margin-bottom:16px;}
   .gantt{display:grid;grid-template-columns:280px 1fr;}
@@ -512,6 +522,7 @@
         <button class="btn secondary small" id="btn-import-cronograma">Importar Cronograma (Excel/CSV)</button>
         <button class="btn secondary small" id="btn-versoes-cronograma" title="Gera e consulta fotos completas do cronograma ao longo do tempo">🕘 Versões do cronograma</button>
         <button class="btn secondary small" id="btn-replanejar-cronograma" title="Recalcula as datas previstas das atividades incompletas, respeitando as dependências">🔄 Replanejar cronograma</button>
+        <button class="btn secondary small" id="btn-edicao-lote-cronograma" title="Edita várias atividades de uma vez, tipo planilha, propagando o efeito em datas/esforço pelas dependentes">📝 Editar em massa</button>
         <button class="btn danger small" id="btn-remover-cronograma" title="Apaga todas as atividades e marcos deste projeto">Remover cronograma inteiro</button>
         <button class="btn small" id="btn-new-atividade">+ Nova atividade</button>
       </div>
@@ -1400,6 +1411,59 @@
   </div>
 </div>
 
+<!-- ================= MODAL: EDIÇÃO EM MASSA DO CRONOGRAMA ================= -->
+<div class="overlay" id="overlay-edicao-lote-cronograma" hidden>
+  <div class="modal" style="max-width:1180px;">
+    <div class="modal-head"><h2>📝 Editar em massa</h2><button class="btn ghost" id="el-close">✕</button></div>
+    <div class="modal-body single-col">
+      <p class="muted" style="margin-bottom:10px;">Edite <strong>Início previsto</strong>, <strong>Fim previsto</strong> e/ou
+      <strong>Esforço previsto</strong> de quantas atividades quiser abaixo e clique em "Analisar alterações": o sistema
+      recalcula sozinho o efeito nas atividades <strong>dependentes</strong> das que você mudou (respeitando o tipo de
+      dependência — FS/SS/FF/SF — e o calendário útil do projeto), sem tocar em mais nenhuma outra. A coluna "Depende de"
+      mostra as predecessoras de cada linha, e "⤷N" ao lado do nome avisa quantas outras dependem dela. Atividades
+      concluídas ou canceladas não podem ser editadas aqui — use o modal de edição individual. Nada é gravado até você
+      confirmar, depois de conferir a prévia do efeito em cascata.</p>
+
+      <div class="table-wrap" style="max-height:360px;margin-bottom:14px;">
+        <table>
+          <thead><tr>
+            <th>Código</th><th>Atividade</th><th>Depende de</th><th>Início previsto</th><th>Fim previsto</th><th>Esforço (h)</th>
+          </tr></thead>
+          <tbody id="el-linhas-tbody"></tbody>
+        </table>
+      </div>
+
+      <div class="field full" style="display:flex;gap:12px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
+        <button class="btn secondary" id="el-analisar">Analisar alterações</button>
+        <span class="muted" id="el-contagem" style="font-size:12.5px;"></span>
+      </div>
+
+      <div class="field full" style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+        <input type="checkbox" id="el-gerar-versao" checked style="width:auto;">
+        <label for="el-gerar-versao" style="margin:0;">Gerar uma versão do cronograma atual antes de aplicar (recomendado)</label>
+      </div>
+      <div class="field full" id="el-rotulo-wrap" style="margin-bottom:14px;">
+        <input type="text" id="el-rotulo-versao" placeholder="Rótulo da versão (opcional) — ex.: Antes da edição em massa de ..." autocomplete="off">
+      </div>
+
+      <div id="el-resultado" hidden>
+        <div id="el-resumo" class="muted" style="margin-bottom:10px;"></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Código</th><th>Atividade</th><th>Origem</th><th>Início prev. (atual → novo)</th><th>Fim prev. (atual → novo)</th><th>Esforço (atual → novo)</th></tr></thead>
+          <tbody id="el-preview-tbody"></tbody>
+        </table></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <span></span>
+      <div style="display:flex;gap:8px;">
+        <button class="btn secondary" id="el-cancelar">Cancelar</button>
+        <button class="btn" id="el-confirmar" disabled>Confirmar alterações</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ================= MODAL: RELATÓRIO EXECUTIVO (IA) ================= -->
 <div class="overlay" id="overlay-relatorio-executivo" hidden>
   <div class="modal" style="max-width:820px;">
@@ -1898,7 +1962,7 @@ async function afterProjetoReady(){
   ]);
   aplicarMarcaNoTopo();
   fillStaticSelects();
-  wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireRemoverCronograma(); wireVersoesCronograma(); wireReplanejarCronograma();
+  wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireRemoverCronograma(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma();
   wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane();
   setupCsvTemplateLink();
   await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas()]);
@@ -4020,6 +4084,169 @@ async function confirmarReplanejamento(){
   rpConfirmando = false;
   $("rp-confirmar").textContent = "Confirmar replanejamento";
   $("rp-confirmar").disabled = false;
+}
+
+// ================= EDIÇÃO EM MASSA DO CRONOGRAMA (39ª rodada) =================
+// Tela em formato planilha: várias atividades editáveis ao mesmo tempo (Início/
+// Fim previsto/Esforço), mesmo padrão preview→confirmar do Replanejamento acima,
+// só que aqui o recálculo é local — só a(s) linha(s) editada(s) e as sucessoras
+// delas no grafo de dependências mudam (ver backend/app/cronograma_edicao_lote.py).
+let elAnalisando = false, elConfirmando = false, elUltimaAnaliseJSON = null;
+
+function wireEdicaoLoteCronograma(){
+  $("btn-edicao-lote-cronograma").addEventListener("click", abrirEdicaoLoteModal);
+  $("el-close").addEventListener("click", fecharEdicaoLoteModal);
+  $("el-cancelar").addEventListener("click", fecharEdicaoLoteModal);
+  $("overlay-edicao-lote-cronograma").addEventListener("click", e=>{ if(e.target.id==="overlay-edicao-lote-cronograma") fecharEdicaoLoteModal(); });
+  $("el-analisar").addEventListener("click", analisarEdicaoLote);
+  $("el-gerar-versao").addEventListener("change", ()=>{ $("el-rotulo-wrap").hidden = !$("el-gerar-versao").checked; });
+  $("el-confirmar").addEventListener("click", confirmarEdicaoLote);
+  // Qualquer alteração num campo depois de já ter analisado invalida a análise —
+  // evita confirmar um resultado que não corresponde mais ao que está na tela
+  // (mesma cautela do rp-ancora no Replanejamento, ver analisarReplanejamento).
+  $("el-linhas-tbody").addEventListener("input", ()=>{
+    if(elUltimaAnaliseJSON !== null){
+      elUltimaAnaliseJSON = null;
+      $("el-confirmar").disabled = true;
+      $("el-resultado").hidden = true;
+    }
+  });
+}
+
+function linhaEdicaoLote(a, predecessoras, sucessoras){
+  const bloqueada = STATUS_FAMILIA_CONCLUIDA.includes(a.status) || a.status === "Cancelada";
+  const preds = predecessoras[a.id] || [];
+  const predTxt = preds.length ? preds.map(p=>`${esc(p.codigo||"—")} (${p.tipo})`).join(", ") : "—";
+  const succCount = (sucessoras[a.id] || []).length;
+  const avisoBloqueada = bloqueada ? ` <span class="muted" style="font-size:10.5px;">(${esc(a.status)} — não editável)</span>` : "";
+  const dis = bloqueada ? "disabled" : "";
+  return `
+    <tr data-id="${a.id}">
+      <td class="mono">${esc(a.codigo_wbs||"—")}</td>
+      <td>${esc(a.nome)}${succCount?` <span class="muted" title="${succCount} atividade(s) dependem desta e podem ser recalculadas" style="font-size:11px;">⤷${succCount}</span>`:""}${avisoBloqueada}</td>
+      <td class="muted" style="font-size:12px;white-space:nowrap;">${predTxt}</td>
+      <td><input type="date" data-campo="dtini_prev" value="${a.dtini_prev||""}" ${dis}></td>
+      <td><input type="date" data-campo="dtfim_prev" value="${a.dtfim_prev||""}" ${dis}></td>
+      <td><input type="number" step="0.5" min="0.5" data-campo="prazo_horas" value="${a.prazo_horas??""}" ${dis}></td>
+    </tr>`;
+}
+
+async function abrirEdicaoLoteModal(){
+  $("el-resultado").hidden = true;
+  $("el-confirmar").disabled = true;
+  $("el-contagem").textContent = "";
+  elUltimaAnaliseJSON = null;
+  $("el-gerar-versao").checked = true;
+  $("el-rotulo-wrap").hidden = false;
+  $("el-rotulo-versao").value = `Antes da edição em massa de ${new Date().toLocaleDateString('pt-BR')}`;
+
+  let deps = [];
+  try{ deps = await api(`/projetos/${PROJETO.id}/dependencias`); }catch(e){}
+  const predecessoras = {}, sucessoras = {};
+  deps.forEach(d=>{
+    if(!predecessoras[d.atividade_id]) predecessoras[d.atividade_id] = [];
+    predecessoras[d.atividade_id].push({codigo: d.predecessora_codigo_wbs, tipo: d.tipo});
+    if(!sucessoras[d.predecessora_id]) sucessoras[d.predecessora_id] = [];
+    sucessoras[d.predecessora_id].push({codigo: d.sucessora_codigo_wbs, tipo: d.tipo});
+  });
+
+  const lista = ATIVIDADES.slice().sort((a,b)=>(a.codigo_wbs||"zzzz").localeCompare(b.codigo_wbs||"zzzz", undefined, {numeric:true}));
+  $("el-linhas-tbody").innerHTML = lista.length
+    ? lista.map(a=>linhaEdicaoLote(a, predecessoras, sucessoras)).join("")
+    : `<tr class="empty-row"><td colspan="6">Este projeto ainda não tem atividades.</td></tr>`;
+  $("overlay-edicao-lote-cronograma").hidden = false;
+}
+function fecharEdicaoLoteModal(){ $("overlay-edicao-lote-cronograma").hidden = true; }
+
+// Compara os valores atuais dos campos da grade com o que veio de ATIVIDADES
+// (snapshot de quando o modal abriu) e devolve só as linhas realmente
+// alteradas, e dentro delas só os campos realmente alterados — é exatamente
+// o payload que o backend espera em `edicoes`.
+function coletarEdicoesLote(){
+  const edicoes = [];
+  $("el-linhas-tbody").querySelectorAll("tr[data-id]").forEach(tr=>{
+    const id = tr.dataset.id;
+    const original = byId(ATIVIDADES, id);
+    const iniInput = tr.querySelector('input[data-campo=dtini_prev]');
+    if(!original || !iniInput || iniInput.disabled) return;
+    const fimInput = tr.querySelector('input[data-campo=dtfim_prev]');
+    const prazoInput = tr.querySelector('input[data-campo=prazo_horas]');
+    const edicao = {};
+    if(iniInput.value && iniInput.value !== (original.dtini_prev||"")) edicao.dtini_prev = iniInput.value;
+    if(fimInput.value && fimInput.value !== (original.dtfim_prev||"")) edicao.dtfim_prev = fimInput.value;
+    const prazoNovo = prazoInput.value === "" ? null : Number(prazoInput.value);
+    const prazoOriginal = original.prazo_horas==null ? null : Number(original.prazo_horas);
+    if(prazoNovo !== null && prazoNovo !== prazoOriginal) edicao.prazo_horas = prazoNovo;
+    if(Object.keys(edicao).length){ edicao.id = id; edicoes.push(edicao); }
+  });
+  return edicoes;
+}
+
+async function analisarEdicaoLote(){
+  if(elAnalisando) return;
+  const edicoes = coletarEdicoesLote();
+  if(!edicoes.length){ toast("Altere ao menos um campo antes de analisar.", true); return; }
+  elAnalisando = true;
+  $("el-analisar").disabled = true; $("el-analisar").textContent = "Analisando…";
+  try{
+    const r = await api("/cronograma/edicao-lote/preview", {
+      method: "POST",
+      body: JSON.stringify({ projeto_id: PROJETO.id, edicoes }),
+    });
+    renderEdicaoLotePreview(r, edicoes.length);
+    elUltimaAnaliseJSON = JSON.stringify(edicoes);
+    $("el-confirmar").disabled = r.itens.length === 0;
+  }catch(e){}
+  elAnalisando = false;
+  $("el-analisar").disabled = false; $("el-analisar").textContent = "Analisar alterações";
+}
+
+function renderEdicaoLotePreview(r, totalLinhasEditadas){
+  $("el-resultado").hidden = false;
+  $("el-contagem").textContent = `${totalLinhasEditadas} linha(s) alterada(s) diretamente na grade.`;
+  $("el-resumo").textContent = r.itens.length
+    ? `${r.total_editadas} atividade(s) editada(s) diretamente, com efeito em cascata em mais ${r.total_cascata} atividade(s) dependente(s).`
+    : "Nenhuma mudança efetiva de data ou esforço a aplicar — os valores digitados já resultam no mesmo cronograma atual.";
+  const ordenado = r.itens.slice().sort((a,b)=>(a.codigo_wbs||"zzzz").localeCompare(b.codigo_wbs||"zzzz", undefined, {numeric:true}));
+  $("el-preview-tbody").innerHTML = ordenado.map(i=>`
+    <tr>
+      <td class="mono">${esc(i.codigo_wbs||"—")}</td>
+      <td>${esc(i.nome)}</td>
+      <td>${i.editado ? pill("Sua edição","accent") : pill("Efeito em cascata","warn")}</td>
+      <td class="mono">${fmtDate(i.dtini_prev_atual)} → <strong>${fmtDate(i.dtini_prev_novo)}</strong></td>
+      <td class="mono">${fmtDate(i.dtfim_prev_atual)} → <strong>${fmtDate(i.dtfim_prev_novo)}</strong></td>
+      <td class="mono">${i.prazo_horas_atual??"—"}h → <strong>${i.prazo_horas_novo??"—"}h</strong></td>
+    </tr>`).join("");
+}
+
+async function confirmarEdicaoLote(){
+  if(elConfirmando) return;
+  const edicoes = coletarEdicoesLote();
+  if(!edicoes.length || JSON.stringify(edicoes) !== elUltimaAnaliseJSON){
+    toast("Analise novamente antes de confirmar — a grade mudou desde a última análise.", true);
+    return;
+  }
+  elConfirmando = true;
+  $("el-confirmar").disabled = true; $("el-confirmar").textContent = "Aplicando…";
+  try{
+    if($("el-gerar-versao").checked){
+      await api("/cronograma/versoes", {
+        method: "POST",
+        body: JSON.stringify({ projeto_id: PROJETO.id, rotulo: $("el-rotulo-versao").value.trim() || null }),
+      });
+    }
+    const r = await api("/cronograma/edicao-lote/confirmar", {
+      method: "POST",
+      body: JSON.stringify({ projeto_id: PROJETO.id, edicoes }),
+    });
+    toast(`Cronograma atualizado: ${r.atividades_editadas} atividade(s) editada(s), ${r.atividades_cascata} em cascata.`);
+    await loadAtividades();
+    renderDashboard(); renderCronograma();
+    fecharEdicaoLoteModal();
+  }catch(e){}
+  elConfirmando = false;
+  $("el-confirmar").textContent = "Confirmar alterações";
+  $("el-confirmar").disabled = false;
 }
 
 // ================= RELATÓRIO EXECUTIVO (IA) =================
