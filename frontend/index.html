@@ -1308,7 +1308,7 @@
 
 <!-- ================= MODAL: VERSÕES DO CRONOGRAMA (histórico) ================= -->
 <div class="overlay" id="overlay-versoes-cronograma" hidden>
-  <div class="modal" style="max-width:720px;">
+  <div class="modal" style="max-width:900px;">
     <div class="modal-head"><h2>🕘 Versões do cronograma</h2><button class="btn ghost" id="vc-close">✕</button></div>
     <div class="modal-body single-col">
       <p class="muted" style="margin-bottom:14px;">Uma versão é uma <strong>foto completa</strong> do cronograma no
@@ -1913,12 +1913,15 @@ async function afterProjetoReady(){
 function fillStaticSelects(){
   const etapaOpts = `<option value="">Etapa (todas)</option>` + ETAPAS.map(e=>`<option value="${e.id}">${e.numero} — ${esc(e.nome)}</option>`).join("");
   $("f-etapa").innerHTML = etapaOpts;
-  $("at-etapa").innerHTML = ETAPAS.map(e=>`<option value="${e.id}">${e.numero} — ${esc(e.nome)}</option>`).join("");
+  // "— Sem etapa —" (migração 026): atividades importadas sem Etapa identificada
+  // ficam com etapa_id NULL — sem essa opção o form forçaria a primeira Etapa da
+  // lista ao editar, mascarando que na verdade não tem nenhuma configurada.
+  $("at-etapa").innerHTML = `<option value="">— Sem etapa —</option>` + ETAPAS.map(e=>`<option value="${e.id}">${e.numero} — ${esc(e.nome)}</option>`).join("");
 
   const frenteOpts = (onlyAtivas) => (onlyAtivas ? FRENTES.filter(x=>x.ativo!==false) : FRENTES)
     .map(x=>`<option value="${x.id}">${esc(x.nome)}${x.ativo===false?" (inativa)":""}</option>`).join("");
   $("f-frente").innerHTML = `<option value="">Frente (todas)</option>` + frenteOpts(false);
-  $("at-frente").innerHTML = frenteOpts(true);
+  $("at-frente").innerHTML = `<option value="">— Sem frente —</option>` + frenteOpts(true);
   $("rf-frente").innerHTML = `<option value="">Frente (todas)</option>` + frenteOpts(false);
   $("req-frente").innerHTML = `<option value="">—</option>` + frenteOpts(false);
   $("ar-frente").innerHTML = `<option value="">Frente (todas)</option>` + frenteOpts(false);
@@ -2322,7 +2325,7 @@ function renderAtividadesTable(list){
     <tr class="clickable" data-id="${a.id}">
       <td class="mono">${esc(a.codigo_wbs||"—")}</td>
       <td>${a.eh_atividade_master?`<span title="Atividade master (entregável mestre do projeto)">★</span> `:""}${a.eh_entregavel?`<span title="Entregável (atrelado a faturamento)">💰</span> `:""}${esc(a.nome)}${a.requisito_tr_codigo?`<div class="muted" style="font-size:11px;">TR: ${esc(a.requisito_tr_codigo)}</div>`:""}</td>
-      <td>${a.etapa_numero}.${esc(a.frente_nome)}</td>
+      <td>${a.etapa_numero!=null?a.etapa_numero+".":""}${esc(a.frente_nome||"—")}</td>
       <td>${pill(a.status, STATUS_COLOR[a.status]||"faint")}${a.atrasada?" "+pill("Atrasada","danger"):""}${a.esforco_estourado?" "+pill("Esforço acima do previsto","warn"):""}</td>
       <td class="mono">${fmtDate(a.dtini_prev)}</td>
       <td class="mono">${fmtDate(a.dtfim_prev)}</td>
@@ -2480,7 +2483,7 @@ function renderEsforcoEstourado(){
   $("dash-esforco").innerHTML = lista.map(a=>`
     <tr class="clickable" data-id="${a.id}">
       <td class="mono">${esc(a.codigo_wbs||"—")}</td><td>${esc(a.nome)}</td>
-      <td>${esc(a.frente_nome)}</td><td class="mono">${a.percentual_concluido}%</td>
+      <td>${esc(a.frente_nome||"—")}</td><td class="mono">${a.percentual_concluido}%</td>
       <td>${horasCell(a)}</td>
     </tr>`).join("");
   $("dash-esforco").querySelectorAll("tr[data-id]").forEach(tr=>{
@@ -2510,7 +2513,7 @@ function _formatarPeriodoSemana(inicio, fim){
 function _linhaSemanaCard(a){
   return `<tr class="clickable" data-id="${a.id}">
     <td class="mono">${esc(a.codigo_wbs||"—")}</td><td>${esc(a.nome)}</td>
-    <td>${esc(a.frente_nome)}</td>
+    <td>${esc(a.frente_nome||"—")}</td>
     <td>${pill(a.status, STATUS_COLOR[a.status]||"faint")}</td>
     <td class="mono">${fmtDate(a.dtini_prev)}</td><td class="mono">${fmtDate(a.dtfim_prev)}</td>
     <td>${responsaveisCell(a)}</td>
@@ -2568,7 +2571,7 @@ function renderAlertasPrioridade(){
     return `<tr class="clickable" data-id="${a.id}">
       <td class="mono">${esc(a.codigo_wbs||"—")}</td><td>${esc(a.nome)}</td>
       <td>${pill(a.prioridade, a.prioridade==="Urgente"?"danger":"warn")}</td>
-      <td>${esc(a.frente_nome)}</td>
+      <td>${esc(a.frente_nome||"—")}</td>
       <td class="muted">${faltando.join(", ")}</td>
     </tr>`;
   }).join("");
@@ -2888,8 +2891,11 @@ function openAtividadeModal(atividade){
   $("at-nome").value = atividade?.nome || "";
   $("at-descricao").value = atividade?.descricao || "";
   $("at-objetivo").value = atividade?.objetivo || "";
-  $("at-etapa").value = atividade?.etapa_id || ETAPAS[0]?.id || "";
-  $("at-frente").value = atividade?.frente_trabalho_id || FRENTES[0]?.id || "";
+  // Sem fallback pro primeiro item da lista (migração 026) — uma atividade sem
+  // Etapa/Frente (ex: importada sem identificação confiável) precisa mostrar
+  // "— Sem etapa —"/"— Sem frente —" de verdade, não a primeira opção por acaso.
+  $("at-etapa").value = atividade?.etapa_id || "";
+  $("at-frente").value = atividade?.frente_trabalho_id || "";
   $("at-tipo").value = atividade?.tipo_atividade_elementar_id || "";
   // Reconstrói a partir de REQUISITOS a cada abertura — evita mostrar a lista desatualizada
   // caso um requisito tenha sido criado/editado na aba "Requisitos" desde o carregamento inicial.
@@ -2927,7 +2933,7 @@ async function saveAtividade(){
   const data = {
     codigo_wbs: $("at-codigo").value.trim(), nome: $("at-nome").value.trim(), descricao: $("at-descricao").value.trim(),
     objetivo: $("at-objetivo").value.trim() || null,
-    etapa_id: $("at-etapa").value, frente_trabalho_id: $("at-frente").value, tipo_atividade_elementar_id: $("at-tipo").value || null,
+    etapa_id: $("at-etapa").value || null, frente_trabalho_id: $("at-frente").value || null, tipo_atividade_elementar_id: $("at-tipo").value || null,
     requisito_tr_id: $("at-requisito-tr").value || null,
     status: $("at-status").value, prioridade: $("at-prioridade").value,
     percentual_concluido: Number($("at-percentual").value || 0), prazo_horas: $("at-prazo").value ? Number($("at-prazo").value) : null,
@@ -3633,6 +3639,8 @@ async function analisarCronograma(){
       {l:"Marcos a atualizar", v: resumo.marcos_atualizar ?? 0},
       {l:"Dependências", v: resumo.dependencias ?? 0},
       {l:"Durações aproximadas (dias/sem.→h)", v: resumo.horas_aproximadas ?? 0},
+      {l:"★ Marcadas Master", v: resumo.marcados_master ?? 0},
+      {l:"💰 Marcadas Entregável", v: resumo.marcados_entregavel ?? 0},
     ].map(k=>`<div class="kpi"><div class="label">${k.l}</div><div class="value">${k.v}</div></div>`).join("");
 
     renderCrGrupoTable("cr-grupos-etapa-tbody", crGruposEtapa, ETAPAS, "etapa_id_sugerida");
@@ -3642,21 +3650,28 @@ async function analisarCronograma(){
     $("cr-step-preview").hidden = false;
     $("cr-analisar").hidden = true;
     $("cr-confirmar").hidden = false;
-    $("cr-foot-hint").textContent = "Confira o mapeamento de Etapa/Frente abaixo antes de confirmar.";
+    $("cr-foot-hint").textContent = "Confira o mapeamento de Etapa/Frente abaixo antes de confirmar — grupos deixados como \"Nenhuma\" importam as atividades sem Etapa/Frente, para configurar depois.";
   }catch(e){}
   $("cr-analisar").disabled = false; $("cr-analisar").textContent = "Analisar planilha";
 }
 
 function renderCrGrupoTable(tbodyId, grupos, existentesList, chaveSugestao){
+  // 37ª rodada: 3 opções, não mais 2. Sem sugestão confiável (nome da própria
+  // atividade/ramo do WBS não bateu com nada já cadastrado), o PADRÃO agora é
+  // "— Nenhuma (deixar em branco) —" — o usuário configura depois olhando o
+  // que já existe em Configurações — em vez de "Criar nova" silenciosamente
+  // com o texto do WBS, que costuma não bater com a taxonomia real.
   $(tbodyId).innerHTML = grupos.map(g=>{
     const sugerida = g[chaveSugestao];
-    const options = [`<option value="__novo__" ${!sugerida?"selected":""}>— Criar nova —</option>`]
-      .concat(existentesList.map(e=>`<option value="${e.id}" ${e.id===sugerida?"selected":""}>${esc(e.nome)}</option>`));
+    const options = [
+      `<option value="__nenhuma__" ${!sugerida?"selected":""}>— Nenhuma (deixar em branco) —</option>`,
+      `<option value="__novo__">— Criar nova —</option>`,
+    ].concat(existentesList.map(e=>`<option value="${e.id}" ${e.id===sugerida?"selected":""}>${esc(e.nome)}</option>`));
     return `<tr data-chave="${esc(g.chave)}">
       <td>${esc(g.nome_planilha)}</td>
       <td class="mono">${g.quantidade}</td>
       <td><select class="cr-select" data-chave="${esc(g.chave)}">${options.join("")}</select></td>
-      <td><input type="text" class="cr-nome" data-chave="${esc(g.chave)}" value="${esc(g.nome_planilha)}" ${sugerida?"disabled":""}></td>
+      <td><input type="text" class="cr-nome" data-chave="${esc(g.chave)}" value="${esc(g.nome_planilha)}" disabled></td>
     </tr>`;
   }).join("") || `<tr class="empty-row"><td colspan="4">Nenhum grupo encontrado.</td></tr>`;
   $(tbodyId).querySelectorAll("select.cr-select").forEach(sel=>{
@@ -3673,7 +3688,9 @@ function lerMapeamento(tbodyId){
     const chave = tr.dataset.chave;
     const sel = tr.querySelector("select.cr-select");
     const inp = tr.querySelector("input.cr-nome");
-    if(sel.value === "__novo__"){
+    if(sel.value === "__nenhuma__"){
+      out.push({chave}); // sem etapa_id/frente_id nem nome -> backend deixa em branco
+    }else if(sel.value === "__novo__"){
       out.push({chave, nome: (inp.value||"").trim() || undefined});
     }else{
       out.push({chave, etapa_id: sel.value, frente_id: sel.value});
@@ -3687,8 +3704,12 @@ async function confirmarImportacaoCronograma(){
   crConfirmando = true;
   $("cr-confirmar").disabled = true; $("cr-confirmar").textContent = "Importando…";
   try{
-    const mapeamentoEtapas = lerMapeamento("cr-grupos-etapa-tbody").map(m=> m.etapa_id ? {chave:m.chave, etapa_id:m.etapa_id} : {chave:m.chave, nome:m.nome});
-    const mapeamentoFrentes = lerMapeamento("cr-grupos-frente-tbody").map(m=> m.frente_id ? {chave:m.chave, frente_id:m.frente_id} : {chave:m.chave, nome:m.nome});
+    // m.nome só existe quando o usuário escolheu "Criar nova" (lerMapeamento) — sem
+    // etapa_id/frente_id e sem nome, manda só {chave}: o backend deixa em branco.
+    const mapeamentoEtapas = lerMapeamento("cr-grupos-etapa-tbody").map(m=>
+      m.etapa_id ? {chave:m.chave, etapa_id:m.etapa_id} : (m.nome ? {chave:m.chave, nome:m.nome} : {chave:m.chave}));
+    const mapeamentoFrentes = lerMapeamento("cr-grupos-frente-tbody").map(m=>
+      m.frente_id ? {chave:m.chave, frente_id:m.frente_id} : (m.nome ? {chave:m.chave, nome:m.nome} : {chave:m.chave}));
     const r = await api("/cronograma/importar/confirmar", {
       method: "POST",
       body: JSON.stringify({ token: crToken, projeto_id: PROJETO.id, mapeamento_etapas: mapeamentoEtapas, mapeamento_frentes: mapeamentoFrentes }),
@@ -3819,10 +3840,27 @@ async function carregarListaVersoes(){
       <td>${v.criado_por ? esc(v.criado_por) : `<span class="muted">—</span>`}</td>
       <td class="mono">${v.total_atividades}</td>
       <td class="mono">${v.total_marcos}</td>
-      <td><button class="btn secondary small" data-ver="${v.id}">Ver</button></td>
+      <td style="white-space:nowrap;">
+        <button class="btn secondary small" data-ver="${v.id}">Ver</button>
+        <button class="btn danger small" style="margin-left:6px;" data-excluir-versao="${v.id}" title="Excluir esta versão">🗑</button>
+      </td>
     </tr>`).join("");
   $("vc-lista-tbody").querySelectorAll("button[data-ver]").forEach(btn=>{
     btn.addEventListener("click", ()=>abrirVersaoDetalhe(btn.dataset.ver));
+  });
+  $("vc-lista-tbody").querySelectorAll("button[data-excluir-versao]").forEach(btn=>{
+    btn.addEventListener("click", (e)=>{
+      e.stopPropagation();
+      const v = versoes.find(x=>x.id===btn.dataset.excluirVersao);
+      const rotulo = v && v.rotulo ? ` — "${v.rotulo}"` : "";
+      askConfirm(`Excluir a versão ${v?v.numero_versao:""}${rotulo} do cronograma? Isso apaga só esta foto do histórico; o cronograma ao vivo não é afetado. Não pode ser desfeito.`, async ()=>{
+        try{
+          await api(`/cronograma/versoes/${btn.dataset.excluirVersao}`, {method:"DELETE"});
+          toast("Versão excluída.");
+          await carregarListaVersoes();
+        }catch(e){}
+      });
+    });
   });
 }
 

@@ -173,6 +173,13 @@ FATURA_FIELDS = [
     "valor_total", "impostos",
 ]
 
+# LEFT JOIN em etapas/frentes_trabalho (migração 026/37ª rodada) — etapa_id e
+# frente_trabalho_id agora podem ser NULL (importação de cronograma deixa em
+# branco quando não identifica um cadastro já existente pelo nome da
+# atividade). Um INNER JOIN aqui faria essas atividades somem da listagem
+# inteira sem nenhum aviso — com LEFT JOIN elas aparecem normalmente, só com
+# etapa_numero/etapa_nome/frente_nome/frente_cor = NULL, para o front-end
+# mostrar "sem etapa"/"sem frente" e o usuário completar depois.
 ATIVIDADE_SELECT = """
 SELECT a.*, e.numero AS etapa_numero, e.nome AS etapa_nome,
        f.nome AS frente_nome, f.cor_hex AS frente_cor,
@@ -204,8 +211,8 @@ SELECT a.*, e.numero AS etapa_numero, e.nome AS etapa_nome,
          WHERE ar.atividade_id = a.id
        ), '[]') AS responsaveis
 FROM atividades a
-JOIN etapas e ON e.id = a.etapa_id
-JOIN frentes_trabalho f ON f.id = a.frente_trabalho_id
+LEFT JOIN etapas e ON e.id = a.etapa_id
+LEFT JOIN frentes_trabalho f ON f.id = a.frente_trabalho_id
 LEFT JOIN tipos_atividade_elementar t ON t.id = a.tipo_atividade_elementar_id
 LEFT JOIN requisitos_tr rq ON rq.id = a.requisito_tr_id
 """
@@ -1799,6 +1806,28 @@ def create_app():
         if not versao:
             abort(404)
         return jsonify(versao)
+
+    @app.delete("/api/cronograma/versoes/<id>")
+    def cronograma_excluir_versao(id):
+        """Apaga uma versão do histórico (a "foto" gerada anteriormente pelo
+        botão "Gerar versão agora"). Não mexe em nada de atividades/marcos
+        ao vivo — eles são independentes da versão desde que ela foi
+        criada; isto só remove o registro de `cronograma_versoes`."""
+        versao = cronograma_versoes.excluir_versao(id)
+        if not versao:
+            abort(404)
+        projeto = db.fetch_one(f"SELECT nome FROM projetos WHERE id = {db.q(versao['projeto_id'])}")
+        projeto_nome = projeto["nome"] if projeto else None
+        auditoria.registrar_evento_manual(
+            "exclusao",
+            f'Excluiu a versão {versao["numero_versao"]} do cronograma do projeto "{projeto_nome}"'
+            + (f' — "{versao["rotulo"]}"' if versao["rotulo"] else "")
+            + f' ({versao["total_atividades"]} atividade(s), {versao["total_marcos"]} marco(s))',
+            entidade="cronograma_versoes", entidade_id=str(versao["id"]), entidade_rotulo=projeto_nome,
+            projeto_id=versao["projeto_id"], sensivel=True,
+            detalhes={"numero_versao": versao["numero_versao"], "rotulo": versao["rotulo"]},
+        )
+        return jsonify({"ok": True})
 
     @app.post("/api/cronograma/versoes")
     def cronograma_gerar_versao():
