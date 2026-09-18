@@ -207,15 +207,50 @@
   .ma-dia.fora-periodo{color:var(--text-faint);}
   .ma-feriado-tag{font-size:9.5px;color:var(--text-faint);}
 
-  /* ---- edição em massa do cronograma (39ª rodada) ---- */
-  #el-linhas-tbody input[type=date], #el-linhas-tbody input[type=number]{
+  /* ---- edição em massa do cronograma (39ª/40ª rodada) ---- */
+  #el-linhas-tbody input[type=date], #el-linhas-tbody input[type=number],
+  #el-linhas-tbody input[type=text], #el-linhas-tbody select{
     background:var(--surface);border:1px solid var(--border);border-radius:6px;
     padding:5px 7px;font-size:12.5px;color:var(--text);font-family:inherit;
   }
-  #el-linhas-tbody input[type=date]{width:132px;}
-  #el-linhas-tbody input[type=number]{width:82px;text-align:right;}
-  #el-linhas-tbody input:disabled{opacity:.55;background:var(--surface-2);cursor:not-allowed;}
-  #el-linhas-tbody input:focus{outline:2px solid var(--accent);outline-offset:0;}
+  #el-linhas-tbody input[type=date]{width:126px;}
+  #el-linhas-tbody input[type=number]{width:64px;text-align:right;}
+  #el-linhas-tbody input[data-campo=nome]{width:200px;}
+  #el-linhas-tbody input[data-campo=observacoes]{width:160px;}
+  #el-linhas-tbody select[data-campo=etapa_id]{width:150px;}
+  #el-linhas-tbody select[data-campo=frente_trabalho_id]{width:130px;}
+  #el-linhas-tbody select[data-campo=prioridade]{width:96px;}
+  #el-linhas-tbody input:disabled, #el-linhas-tbody select:disabled, #el-linhas-tbody button:disabled{
+    opacity:.55;background:var(--surface-2);cursor:not-allowed;
+  }
+  #el-linhas-tbody input:focus, #el-linhas-tbody select:focus{outline:2px solid var(--accent);outline-offset:0;}
+  #el-linhas-tbody input[type=checkbox]{width:18px;height:18px;cursor:pointer;}
+  #el-linhas-tbody td{white-space:nowrap;}
+  #el-linhas-tbody td.el-td-obs{white-space:normal;}
+  #el-linhas-tbody th{white-space:nowrap;}
+  .el-recursos-cell{position:relative;}
+  .el-recursos-btn{
+    background:transparent;border:1px solid var(--border);border-radius:6px;padding:4px 9px;
+    font-size:12px;cursor:pointer;color:var(--text);font-family:inherit;white-space:nowrap;
+  }
+  .el-recursos-btn:hover{background:var(--surface-2);}
+  .el-recursos-pop{
+    position:absolute;top:100%;left:0;z-index:60;width:250px;max-height:230px;overflow:auto;
+    background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow);
+    padding:8px;margin-top:4px;
+  }
+  .el-recursos-pop label{
+    display:flex;align-items:center;gap:7px;padding:3px 2px;font-size:12px;font-weight:400;cursor:pointer;
+  }
+  .el-recursos-pop input[type=checkbox]{width:15px;height:15px;}
+  .el-relato-box{
+    margin-top:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+  }
+  .el-relato-box input[type=text]{
+    flex:1;min-width:220px;background:var(--surface);border:1px solid var(--border);border-radius:6px;
+    padding:5px 7px;font-size:12px;color:var(--text);font-family:inherit;
+  }
+  .el-relato-box input.el-relato-obrigatorio{border-color:var(--danger, #d33);}
 
   /* ---- gantt ---- */
   .gantt-wrap{background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);overflow:auto;margin-bottom:16px;}
@@ -1413,25 +1448,31 @@
 
 <!-- ================= MODAL: EDIÇÃO EM MASSA DO CRONOGRAMA ================= -->
 <div class="overlay" id="overlay-edicao-lote-cronograma" hidden>
-  <div class="modal" style="max-width:1180px;">
+  <div class="modal" style="max-width:1640px;width:96vw;">
     <div class="modal-head"><h2>📝 Editar em massa</h2><button class="btn ghost" id="el-close">✕</button></div>
     <div class="modal-body single-col">
-      <p class="muted" style="margin-bottom:10px;">Edite <strong>Início previsto</strong>, <strong>Fim previsto</strong> e/ou
-      <strong>Esforço previsto</strong> de quantas atividades quiser abaixo e clique em "Analisar alterações": o sistema
-      recalcula sozinho o efeito nas atividades <strong>dependentes</strong> das que você mudou (respeitando o tipo de
-      dependência — FS/SS/FF/SF — e o calendário útil do projeto), sem tocar em mais nenhuma outra. A coluna "Depende de"
-      mostra as predecessoras de cada linha, e "⤷N" ao lado do nome avisa quantas outras dependem dela. Atividades
-      concluídas ou canceladas não podem ser editadas aqui — use o modal de edição individual. Nada é gravado até você
-      confirmar, depois de conferir a prévia do efeito em cascata.</p>
+      <p class="muted" style="margin-bottom:10px;">Edite quantas atividades e campos quiser abaixo (datas/esforço previstos,
+      % concluído, datas reais, Etapa, Frente, Prioridade, Nome, Observações, ★Master, 💰Entregável e Recursos) e clique em
+      "Analisar alterações". <strong>Início/Fim previsto e Esforço</strong> propagam automaticamente o efeito pelas
+      atividades <strong>dependentes</strong> (respeitando FS/SS/FF/SF e o calendário útil) — os demais campos mudam só na
+      própria linha. A coluna "Depende de" mostra as predecessoras, e "⤷N" ao lado do nome avisa quantas outras dependem
+      dela. Editar <strong>% concluído</strong> ou uma <strong>data real</strong> pode pedir um relato: opcional (com texto
+      padrão sugerido) quando é uma melhora — % subindo ou data antecipada — e obrigatório quando é um retrocesso — %
+      caindo ou data adiada; a caixa de relato aparece na prévia, linha a linha. Atividades concluídas ou canceladas não
+      podem ser editadas aqui — use o modal de edição individual. Nada é gravado até você confirmar.</p>
 
-      <div class="table-wrap" style="max-height:360px;margin-bottom:14px;">
+      <div class="table-wrap" style="max-height:400px;margin-bottom:14px;">
         <table>
           <thead><tr>
-            <th>Código</th><th>Atividade</th><th>Depende de</th><th>Início previsto</th><th>Fim previsto</th><th>Esforço (h)</th>
+            <th>Código</th><th>Atividade</th><th>Depende de</th><th>Etapa</th><th>Frente</th><th>Prioridade</th>
+            <th>Início prev.</th><th>Fim prev.</th><th>Esforço (h)</th>
+            <th>% concl.</th><th>Início real</th><th>Fim real</th>
+            <th>★</th><th>💰</th><th>Recursos</th><th>Observações</th>
           </tr></thead>
           <tbody id="el-linhas-tbody"></tbody>
         </table>
       </div>
+      <div id="el-recursos-popup" class="el-recursos-pop" hidden style="position:fixed;"></div>
 
       <div class="field full" style="display:flex;gap:12px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
         <button class="btn secondary" id="el-analisar">Analisar alterações</button>
@@ -1449,7 +1490,7 @@
       <div id="el-resultado" hidden>
         <div id="el-resumo" class="muted" style="margin-bottom:10px;"></div>
         <div class="table-wrap"><table>
-          <thead><tr><th>Código</th><th>Atividade</th><th>Origem</th><th>Início prev. (atual → novo)</th><th>Fim prev. (atual → novo)</th><th>Esforço (atual → novo)</th></tr></thead>
+          <thead><tr><th>Código</th><th>Atividade</th><th>Origem</th><th>Início prev. (atual → novo)</th><th>Fim prev. (atual → novo)</th><th>Esforço (atual → novo)</th><th>Outras alterações</th></tr></thead>
           <tbody id="el-preview-tbody"></tbody>
         </table></div>
       </div>
@@ -4087,11 +4128,18 @@ async function confirmarReplanejamento(){
 }
 
 // ================= EDIÇÃO EM MASSA DO CRONOGRAMA (39ª rodada) =================
-// Tela em formato planilha: várias atividades editáveis ao mesmo tempo (Início/
-// Fim previsto/Esforço), mesmo padrão preview→confirmar do Replanejamento acima,
-// só que aqui o recálculo é local — só a(s) linha(s) editada(s) e as sucessoras
-// delas no grafo de dependências mudam (ver backend/app/cronograma_edicao_lote.py).
+// Tela em formato planilha: várias atividades editáveis ao mesmo tempo — Início/
+// Fim previsto/Esforço propagam em cascata pelas sucessoras no grafo de
+// dependências (ver backend/app/cronograma_edicao_lote.py); % concluído/Início
+// real/Fim real/Etapa/Frente/Prioridade/Nome/Observações/Master/Entregável/
+// Recursos (40ª rodada) mudam só na própria linha, nunca cascateiam — % e
+// datas reais podem pedir um relato (opcional com texto padrão numa melhora,
+// obrigatório numa piora), mostrado inline na prévia. Mesmo padrão
+// preview→confirmar do Replanejamento acima.
 let elAnalisando = false, elConfirmando = false, elUltimaAnaliseJSON = null;
+let elRecursosState = {};                                    // { atividadeId: Set(recurso_id) } — participantes atuais + edições do popup
+let elUltimoPreviewItens = [];                                // último resultado de /preview
+let elRecursosPopupAtividadeId = null, elRecursosPopupBtn = null;
 
 function wireEdicaoLoteCronograma(){
   $("btn-edicao-lote-cronograma").addEventListener("click", abrirEdicaoLoteModal);
@@ -4104,13 +4152,58 @@ function wireEdicaoLoteCronograma(){
   // Qualquer alteração num campo depois de já ter analisado invalida a análise —
   // evita confirmar um resultado que não corresponde mais ao que está na tela
   // (mesma cautela do rp-ancora no Replanejamento, ver analisarReplanejamento).
-  $("el-linhas-tbody").addEventListener("input", ()=>{
+  // "input" cobre texto/número/data digitados; "change" cobre select/checkbox
+  // (alguns navegadores não disparam "input" pra eles).
+  const invalidar = () => {
     if(elUltimaAnaliseJSON !== null){
       elUltimaAnaliseJSON = null;
       $("el-confirmar").disabled = true;
       $("el-resultado").hidden = true;
     }
+  };
+  $("el-linhas-tbody").addEventListener("input", invalidar);
+  $("el-linhas-tbody").addEventListener("change", invalidar);
+
+  // Popup de Recursos (checklist flutuante, posicionado sob o botão clicado —
+  // position:fixed de propósito, pra não ficar cortado pelo overflow:auto do
+  // table-wrap): fecha ao clicar fora ou apertar Esc.
+  document.addEventListener("click", e=>{
+    const pop = $("el-recursos-popup");
+    if(pop.hidden) return;
+    if(pop.contains(e.target) || e.target.closest(".el-recursos-btn")) return;
+    fecharPopupRecursosLote();
   });
+  document.addEventListener("keydown", e=>{ if(e.key === "Escape") fecharPopupRecursosLote(); });
+}
+
+function fecharPopupRecursosLote(){
+  $("el-recursos-popup").hidden = true;
+  elRecursosPopupAtividadeId = null; elRecursosPopupBtn = null;
+}
+
+function rotuloRecursosBtn(atividadeId){
+  const n = (elRecursosState[atividadeId] || new Set()).size;
+  return n ? `👥 ${n}` : "👥 —";
+}
+
+function abrirPopupRecursosLote(btn, atividadeId){
+  if(elRecursosPopupAtividadeId === atividadeId && !$("el-recursos-popup").hidden){ fecharPopupRecursosLote(); return; }
+  elRecursosPopupAtividadeId = atividadeId; elRecursosPopupBtn = btn;
+  const selecionados = elRecursosState[atividadeId] || (elRecursosState[atividadeId] = new Set());
+  const recursoLabel = r => `${esc(r.nome)}${r.tipo_vinculo?` (${esc(r.tipo_vinculo)})`:""}${r.ativo===false?" — inativo":""}`;
+  const pop = $("el-recursos-popup");
+  pop.innerHTML = RECURSOS.length
+    ? RECURSOS.map(r=>`<label><input type="checkbox" data-recurso-id="${r.id}" ${selecionados.has(r.id)?"checked":""}> ${recursoLabel(r)}</label>`).join("")
+    : `<span class="muted">Nenhum recurso cadastrado.</span>`;
+  pop.querySelectorAll("input[data-recurso-id]").forEach(cb=>cb.addEventListener("change", ()=>{
+    if(cb.checked) selecionados.add(cb.dataset.recursoId); else selecionados.delete(cb.dataset.recursoId);
+    if(elRecursosPopupBtn) elRecursosPopupBtn.textContent = rotuloRecursosBtn(atividadeId);
+    if(elUltimaAnaliseJSON !== null){ elUltimaAnaliseJSON = null; $("el-confirmar").disabled = true; $("el-resultado").hidden = true; }
+  }));
+  const r = btn.getBoundingClientRect();
+  pop.style.left = Math.round(r.left) + "px";
+  pop.style.top = Math.round(r.bottom + 4) + "px";
+  pop.hidden = false;
 }
 
 function linhaEdicaoLote(a, predecessoras, sucessoras){
@@ -4120,14 +4213,34 @@ function linhaEdicaoLote(a, predecessoras, sucessoras){
   const succCount = (sucessoras[a.id] || []).length;
   const avisoBloqueada = bloqueada ? ` <span class="muted" style="font-size:10.5px;">(${esc(a.status)} — não editável)</span>` : "";
   const dis = bloqueada ? "disabled" : "";
+
+  const etapaOpts = `<option value="">— Sem etapa —</option>` + ETAPAS.map(e=>`<option value="${e.id}" ${a.etapa_id===e.id?"selected":""}>${e.numero} — ${esc(e.nome)}</option>`).join("");
+  const frenteOpts = `<option value="">— Sem frente —</option>` + FRENTES.filter(f=>f.ativo!==false || f.id===a.frente_trabalho_id)
+    .map(f=>`<option value="${f.id}" ${a.frente_trabalho_id===f.id?"selected":""}>${esc(f.nome)}</option>`).join("");
+  const prioridadeOpts = `<option value="">—</option>` + ["Urgente","Alta","Média","Baixa"]
+    .map(p=>`<option value="${p}" ${a.prioridade===p?"selected":""}>${p}</option>`).join("");
+
   return `
     <tr data-id="${a.id}">
       <td class="mono">${esc(a.codigo_wbs||"—")}</td>
-      <td>${esc(a.nome)}${succCount?` <span class="muted" title="${succCount} atividade(s) dependem desta e podem ser recalculadas" style="font-size:11px;">⤷${succCount}</span>`:""}${avisoBloqueada}</td>
-      <td class="muted" style="font-size:12px;white-space:nowrap;">${predTxt}</td>
+      <td>
+        <input type="text" data-campo="nome" value="${esc(a.nome||"")}" ${dis} style="margin-bottom:2px;display:block;">
+        ${succCount?`<span class="muted" title="${succCount} atividade(s) dependem desta e podem ser recalculadas" style="font-size:11px;">⤷${succCount}</span>`:""}${avisoBloqueada}
+      </td>
+      <td class="muted" style="font-size:12px;">${predTxt}</td>
+      <td><select data-campo="etapa_id" ${dis}>${etapaOpts}</select></td>
+      <td><select data-campo="frente_trabalho_id" ${dis}>${frenteOpts}</select></td>
+      <td><select data-campo="prioridade" ${dis}>${prioridadeOpts}</select></td>
       <td><input type="date" data-campo="dtini_prev" value="${a.dtini_prev||""}" ${dis}></td>
       <td><input type="date" data-campo="dtfim_prev" value="${a.dtfim_prev||""}" ${dis}></td>
       <td><input type="number" step="0.5" min="0.5" data-campo="prazo_horas" value="${a.prazo_horas??""}" ${dis}></td>
+      <td><input type="number" step="1" min="0" max="100" data-campo="percentual_concluido" value="${a.percentual_concluido??0}" ${dis}></td>
+      <td><input type="date" data-campo="dtini_real" value="${a.dtini_real||""}" ${dis}></td>
+      <td><input type="date" data-campo="dtfim_real" value="${a.dtfim_real||""}" ${dis}></td>
+      <td style="text-align:center;"><input type="checkbox" data-campo="eh_atividade_master" ${a.eh_atividade_master?"checked":""} ${dis} title="Atividade master"></td>
+      <td style="text-align:center;"><input type="checkbox" data-campo="eh_entregavel" ${a.eh_entregavel?"checked":""} ${dis} title="Entregável"></td>
+      <td class="el-recursos-cell"><button type="button" class="btn ghost el-recursos-btn" data-recursos-btn="${a.id}" ${dis}>${rotuloRecursosBtn(a.id)}</button></td>
+      <td class="el-td-obs"><input type="text" data-campo="observacoes" value="${esc(a.observacoes||"")}" ${dis}></td>
     </tr>`;
 }
 
@@ -4136,6 +4249,8 @@ async function abrirEdicaoLoteModal(){
   $("el-confirmar").disabled = true;
   $("el-contagem").textContent = "";
   elUltimaAnaliseJSON = null;
+  elUltimoPreviewItens = [];
+  fecharPopupRecursosLote();
   $("el-gerar-versao").checked = true;
   $("el-rotulo-wrap").hidden = false;
   $("el-rotulo-versao").value = `Antes da edição em massa de ${new Date().toLocaleDateString('pt-BR')}`;
@@ -4151,32 +4266,75 @@ async function abrirEdicaoLoteModal(){
   });
 
   const lista = ATIVIDADES.slice().sort((a,b)=>(a.codigo_wbs||"zzzz").localeCompare(b.codigo_wbs||"zzzz", undefined, {numeric:true}));
+  elRecursosState = {};
+  lista.forEach(a=>{ elRecursosState[a.id] = new Set((a.responsaveis||[]).map(r=>r.id)); });
+
   $("el-linhas-tbody").innerHTML = lista.length
     ? lista.map(a=>linhaEdicaoLote(a, predecessoras, sucessoras)).join("")
-    : `<tr class="empty-row"><td colspan="6">Este projeto ainda não tem atividades.</td></tr>`;
+    : `<tr class="empty-row"><td colspan="16">Este projeto ainda não tem atividades.</td></tr>`;
+  $("el-linhas-tbody").querySelectorAll("button[data-recursos-btn]").forEach(btn=>{
+    btn.addEventListener("click", ()=> abrirPopupRecursosLote(btn, btn.dataset.recursosBtn));
+  });
   $("overlay-edicao-lote-cronograma").hidden = false;
 }
-function fecharEdicaoLoteModal(){ $("overlay-edicao-lote-cronograma").hidden = true; }
+function fecharEdicaoLoteModal(){ $("overlay-edicao-lote-cronograma").hidden = true; fecharPopupRecursosLote(); }
 
-// Compara os valores atuais dos campos da grade com o que veio de ATIVIDADES
-// (snapshot de quando o modal abriu) e devolve só as linhas realmente
-// alteradas, e dentro delas só os campos realmente alterados — é exatamente
-// o payload que o backend espera em `edicoes`.
+// Compara os valores atuais dos campos da grade (+ do popup de Recursos) com o
+// que veio de ATIVIDADES (snapshot de quando o modal abriu) e devolve só as
+// linhas realmente alteradas, e dentro delas só os campos realmente alterados
+// — é exatamente o payload que o backend espera em `edicoes` (relato_texto
+// entra depois, só no confirmar — ver confirmarEdicaoLote).
 function coletarEdicoesLote(){
   const edicoes = [];
   $("el-linhas-tbody").querySelectorAll("tr[data-id]").forEach(tr=>{
     const id = tr.dataset.id;
     const original = byId(ATIVIDADES, id);
-    const iniInput = tr.querySelector('input[data-campo=dtini_prev]');
-    if(!original || !iniInput || iniInput.disabled) return;
-    const fimInput = tr.querySelector('input[data-campo=dtfim_prev]');
-    const prazoInput = tr.querySelector('input[data-campo=prazo_horas]');
+    const campo = c => tr.querySelector(`[data-campo="${c}"]`);
+    const nomeInput = campo("nome");
+    if(!original || !nomeInput || nomeInput.disabled) return;
     const edicao = {};
+
+    const iniInput = campo("dtini_prev"), fimInput = campo("dtfim_prev"), prazoInput = campo("prazo_horas");
     if(iniInput.value && iniInput.value !== (original.dtini_prev||"")) edicao.dtini_prev = iniInput.value;
     if(fimInput.value && fimInput.value !== (original.dtfim_prev||"")) edicao.dtfim_prev = fimInput.value;
     const prazoNovo = prazoInput.value === "" ? null : Number(prazoInput.value);
     const prazoOriginal = original.prazo_horas==null ? null : Number(original.prazo_horas);
     if(prazoNovo !== null && prazoNovo !== prazoOriginal) edicao.prazo_horas = prazoNovo;
+
+    const nomeNovo = nomeInput.value.trim();
+    if(nomeNovo && nomeNovo !== (original.nome||"")) edicao.nome = nomeNovo;
+
+    const obsNovo = campo("observacoes").value;
+    if(obsNovo !== (original.observacoes||"")) edicao.observacoes = obsNovo;
+
+    const etapaSel = campo("etapa_id");
+    if((etapaSel.value||null) !== (original.etapa_id||null)) edicao.etapa_id = etapaSel.value || "";
+    const frenteSel = campo("frente_trabalho_id");
+    if((frenteSel.value||null) !== (original.frente_trabalho_id||null)) edicao.frente_trabalho_id = frenteSel.value || "";
+    const prioSel = campo("prioridade");
+    if((prioSel.value||null) !== (original.prioridade||null)) edicao.prioridade = prioSel.value || "";
+
+    const masterChk = campo("eh_atividade_master");
+    if(masterChk.checked !== !!original.eh_atividade_master) edicao.eh_atividade_master = masterChk.checked;
+    const entregavelChk = campo("eh_entregavel");
+    if(entregavelChk.checked !== !!original.eh_entregavel) edicao.eh_entregavel = entregavelChk.checked;
+
+    const pctInput = campo("percentual_concluido");
+    const pctNovo = pctInput.value === "" ? null : Number(pctInput.value);
+    const pctOriginal = original.percentual_concluido==null ? 0 : Number(original.percentual_concluido);
+    if(pctNovo !== null && pctNovo !== pctOriginal) edicao.percentual_concluido = pctNovo;
+
+    const iniRealInput = campo("dtini_real"), fimRealInput = campo("dtfim_real");
+    if((iniRealInput.value||null) !== (original.dtini_real||null)) edicao.dtini_real = iniRealInput.value || "";
+    if((fimRealInput.value||null) !== (original.dtfim_real||null)) edicao.dtfim_real = fimRealInput.value || "";
+
+    const atuaisIds = new Set((original.responsaveis||[]).map(r=>r.id));
+    const selecionadosIds = elRecursosState[id] || new Set();
+    const adicionar = [...selecionadosIds].filter(rid=>!atuaisIds.has(rid));
+    const remover = [...atuaisIds].filter(rid=>!selecionadosIds.has(rid));
+    if(adicionar.length) edicao.recursos_adicionar = adicionar;
+    if(remover.length) edicao.recursos_remover = remover;
+
     if(Object.keys(edicao).length){ edicao.id = id; edicoes.push(edicao); }
   });
   return edicoes;
@@ -4193,12 +4351,65 @@ async function analisarEdicaoLote(){
       method: "POST",
       body: JSON.stringify({ projeto_id: PROJETO.id, edicoes }),
     });
+    elUltimoPreviewItens = r.itens;
     renderEdicaoLotePreview(r, edicoes.length);
     elUltimaAnaliseJSON = JSON.stringify(edicoes);
-    $("el-confirmar").disabled = r.itens.length === 0;
+    atualizarConfirmarHabilitadoLote();
   }catch(e){}
   elAnalisando = false;
   $("el-analisar").disabled = false; $("el-analisar").textContent = "Analisar alterações";
+}
+
+// Habilita "Confirmar" só quando a análise ainda vale E nenhuma caixa de
+// relato obrigatório (% caindo / data real adiada) está vazia.
+function atualizarConfirmarHabilitadoLote(){
+  if(elUltimaAnaliseJSON === null || !elUltimoPreviewItens.length){ $("el-confirmar").disabled = true; return; }
+  const pendente = [...$("el-preview-tbody").querySelectorAll('input[data-relato-obrigatorio="1"]')]
+    .some(inp => !inp.value.trim());
+  $("el-confirmar").disabled = pendente;
+}
+
+function rotuloEtapaLote(id){ const e = byId(ETAPAS, id); return e ? `${e.numero} — ${e.nome}` : "— sem etapa —"; }
+function rotuloFrenteLote(id){ const f = byId(FRENTES, id); return f ? f.nome : "— sem frente —"; }
+function rotuloRecursoLote(id){ const r = byId(RECURSOS, id); return r ? r.nome : "?"; }
+
+// Monta o texto da coluna "Outras alterações" da prévia (tudo que não é
+// cascata de datas) + a caixa de relato inline, quando a linha mexeu em %
+// concluído/data real (ver docstring de cronograma_edicao_lote.py).
+function descreverOutrasAlteracoesLote(item){
+  const partes = [];
+  const s = item.simples || {};
+  if("nome" in s) partes.push(`Nome: "${esc(s.nome.atual||"")}" → "${esc(s.nome.novo)}"`);
+  if("etapa_id" in s) partes.push(`Etapa: ${esc(rotuloEtapaLote(s.etapa_id.atual))} → ${esc(rotuloEtapaLote(s.etapa_id.novo))}`);
+  if("frente_trabalho_id" in s) partes.push(`Frente: ${esc(rotuloFrenteLote(s.frente_trabalho_id.atual))} → ${esc(rotuloFrenteLote(s.frente_trabalho_id.novo))}`);
+  if("prioridade" in s) partes.push(`Prioridade: ${esc(s.prioridade.atual||"—")} → ${esc(s.prioridade.novo||"—")}`);
+  if("observacoes" in s) partes.push(`Observações alteradas`);
+  if("eh_atividade_master" in s) partes.push(`★Master: ${s.eh_atividade_master.novo ? "marcada" : "desmarcada"}`);
+  if("eh_entregavel" in s) partes.push(`💰Entregável: ${s.eh_entregavel.novo ? "marcado" : "desmarcado"}`);
+
+  const p = item.progresso || {};
+  if("percentual_concluido" in p) partes.push(`% concluído: ${p.percentual_concluido.atual}% → <strong>${p.percentual_concluido.novo}%</strong>`);
+  if("dtini_real" in p) partes.push(`Início real: ${fmtDate(p.dtini_real.atual)} → <strong>${fmtDate(p.dtini_real.novo)}</strong>`);
+  if("dtfim_real" in p) partes.push(`Fim real: ${fmtDate(p.dtfim_real.atual)} → <strong>${fmtDate(p.dtfim_real.novo)}</strong>`);
+  if(item.status_novo) partes.push(`Status também mudará para <strong>${esc(item.status_novo)}</strong> (calculado automaticamente)`);
+
+  if(item.recursos_adicionar && item.recursos_adicionar.length) partes.push(`+ Recurso(s): ${item.recursos_adicionar.map(id=>esc(rotuloRecursoLote(id))).join(", ")}`);
+  if(item.recursos_remover && item.recursos_remover.length) partes.push(`− Recurso(s): ${item.recursos_remover.map(id=>esc(rotuloRecursoLote(id))).join(", ")}`);
+
+  let html = partes.length ? partes.map(t=>`<div>${t}</div>`).join("") : `<span class="muted">—</span>`;
+
+  if(item.progresso && Object.keys(item.progresso).length){
+    const obrigatorio = item.relato_necessario === "obrigatorio";
+    const valorInicial = item.relato_texto_sugerido || "";
+    html += `<div class="el-relato-box">
+      <span class="muted" style="font-size:11px;">${obrigatorio?"Relato (obrigatório):":"Relato (opcional):"}</span>
+      <input type="text" data-relato-id="${item.id}" data-relato-obrigatorio="${obrigatorio?"1":"0"}"
+             class="${obrigatorio?"el-relato-obrigatorio":""}"
+             placeholder="${obrigatorio?"Explique o motivo do retrocesso…":"Texto do relato…"}"
+             value="${esc(valorInicial)}">
+    </div>`;
+  }
+  return html;
 }
 
 function renderEdicaoLotePreview(r, totalLinhasEditadas){
@@ -4206,7 +4417,7 @@ function renderEdicaoLotePreview(r, totalLinhasEditadas){
   $("el-contagem").textContent = `${totalLinhasEditadas} linha(s) alterada(s) diretamente na grade.`;
   $("el-resumo").textContent = r.itens.length
     ? `${r.total_editadas} atividade(s) editada(s) diretamente, com efeito em cascata em mais ${r.total_cascata} atividade(s) dependente(s).`
-    : "Nenhuma mudança efetiva de data ou esforço a aplicar — os valores digitados já resultam no mesmo cronograma atual.";
+    : "Nenhuma mudança efetiva a aplicar — os valores informados já resultam no mesmo cronograma/cadastro atual.";
   const ordenado = r.itens.slice().sort((a,b)=>(a.codigo_wbs||"zzzz").localeCompare(b.codigo_wbs||"zzzz", undefined, {numeric:true}));
   $("el-preview-tbody").innerHTML = ordenado.map(i=>`
     <tr>
@@ -4216,7 +4427,11 @@ function renderEdicaoLotePreview(r, totalLinhasEditadas){
       <td class="mono">${fmtDate(i.dtini_prev_atual)} → <strong>${fmtDate(i.dtini_prev_novo)}</strong></td>
       <td class="mono">${fmtDate(i.dtfim_prev_atual)} → <strong>${fmtDate(i.dtfim_prev_novo)}</strong></td>
       <td class="mono">${i.prazo_horas_atual??"—"}h → <strong>${i.prazo_horas_novo??"—"}h</strong></td>
+      <td style="font-size:12px;">${descreverOutrasAlteracoesLote(i)}</td>
     </tr>`).join("");
+  $("el-preview-tbody").querySelectorAll('input[data-relato-id]').forEach(inp=>{
+    inp.addEventListener("input", atualizarConfirmarHabilitadoLote);
+  });
 }
 
 async function confirmarEdicaoLote(){
@@ -4226,6 +4441,17 @@ async function confirmarEdicaoLote(){
     toast("Analise novamente antes de confirmar — a grade mudou desde a última análise.", true);
     return;
   }
+  const relatoInputs = [...$("el-preview-tbody").querySelectorAll('input[data-relato-id]')];
+  const faltando = relatoInputs.find(inp => inp.dataset.relatoObrigatorio === "1" && !inp.value.trim());
+  if(faltando){
+    toast("Preencha o relato obrigatório de toda linha com retrocesso de % ou data real antes de confirmar.", true);
+    faltando.focus();
+    return;
+  }
+  const relatosPorId = {};
+  relatoInputs.forEach(inp=>{ if(inp.value.trim()) relatosPorId[inp.dataset.relatoId] = inp.value.trim(); });
+  edicoes.forEach(e=>{ if(relatosPorId[e.id]) e.relato_texto = relatosPorId[e.id]; });
+
   elConfirmando = true;
   $("el-confirmar").disabled = true; $("el-confirmar").textContent = "Aplicando…";
   try{
@@ -4239,7 +4465,8 @@ async function confirmarEdicaoLote(){
       method: "POST",
       body: JSON.stringify({ projeto_id: PROJETO.id, edicoes }),
     });
-    toast(`Cronograma atualizado: ${r.atividades_editadas} atividade(s) editada(s), ${r.atividades_cascata} em cascata.`);
+    toast(`Cronograma atualizado: ${r.atividades_editadas} atividade(s) editada(s), ${r.atividades_cascata} em cascata`
+      + (r.relatos_criados ? `, ${r.relatos_criados} relato(s) registrado(s)` : "") + ".");
     await loadAtividades();
     renderDashboard(); renderCronograma();
     fecharEdicaoLoteModal();

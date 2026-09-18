@@ -1950,7 +1950,10 @@ def create_app():
         if not edicoes:
             return jsonify({"erro": "Nenhuma alteração informada."}), 400
         try:
-            resultado = cronograma_edicao_lote.calcular(projeto_id, edicoes, STATUS_FAMILIA_CONCLUIDA)
+            resultado = cronograma_edicao_lote.calcular(
+                projeto_id, edicoes, STATUS_FAMILIA_CONCLUIDA, PRIORIDADE_VALIDAS,
+                classificar_conclusao, validar_consistencia_conclusao,
+            )
         except ValueError as e:
             return jsonify({"erro": str(e)}), 400
         itens = resultado["itens"]
@@ -1972,8 +1975,18 @@ def create_app():
         projeto = db.fetch_one(f"SELECT nome FROM projetos WHERE id = {db.q(projeto_id)}")
         if not projeto:
             abort(404)
+        # autor_nome (texto livre, mesma coluna que o relato manual usa quando o
+        # autor não está cadastrado em `recursos` — usuário de sistema e recurso
+        # são cadastros diferentes, sem vínculo entre si) identifica quem confirmou
+        # a edição em massa, nos relatos de progresso gerados automaticamente por
+        # esta tela (% concluído/datas reais — ver cronograma_edicao_lote.py).
+        usuario_atual = auth.buscar_usuario_publico(session.get("usuario_id"))
         try:
-            resultado = cronograma_edicao_lote.aplicar(projeto_id, edicoes, STATUS_FAMILIA_CONCLUIDA)
+            resultado = cronograma_edicao_lote.aplicar(
+                projeto_id, edicoes, STATUS_FAMILIA_CONCLUIDA, PRIORIDADE_VALIDAS,
+                classificar_conclusao, validar_consistencia_conclusao,
+                autor_nome=(usuario_atual or {}).get("nome"),
+            )
         except ValueError as e:
             return jsonify({"erro": str(e)}), 400
         auditoria.registrar_evento_manual(
@@ -1981,13 +1994,16 @@ def create_app():
             f'Editou em massa {resultado["atividades_editadas"]} atividade(s) do cronograma do projeto '
             f'"{projeto["nome"]}"'
             + (f', com efeito em cascata em mais {resultado["atividades_cascata"]} atividade(s) dependente(s)'
-               if resultado["atividades_cascata"] else '') + '.',
+               if resultado["atividades_cascata"] else '')
+            + (f', com {resultado["relatos_criados"]} relato(s) de progresso registrado(s)'
+               if resultado.get("relatos_criados") else '') + '.',
             entidade="cronograma", entidade_id=str(projeto_id), entidade_rotulo=projeto["nome"],
             projeto_id=projeto_id, sensivel=True,
             detalhes={
                 "atividades_editadas": resultado["atividades_editadas"],
                 "atividades_cascata": resultado["atividades_cascata"],
                 "ids_alterados": resultado["ids_alterados"],
+                "relatos_criados": resultado.get("relatos_criados", 0),
             },
         )
         return jsonify(resultado)
