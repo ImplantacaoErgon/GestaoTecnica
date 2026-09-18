@@ -94,3 +94,17 @@ def obter_versao(versao_id):
         FROM cronograma_versoes
         WHERE id = {db.q(versao_id)}
     """)
+
+
+def excluir_versao(versao_id):
+    """Apaga uma versão do histórico (37ª/38ª rodada). Só remove o registro
+    em `cronograma_versoes` — a foto em si; nunca toca em `atividades`/
+    `marcos` ao vivo, que já são independentes da versão desde o instante
+    em que ela foi gerada. Devolve os dados básicos da versão apagada (para
+    o chamador montar a mensagem do Log de Auditoria) ou None se o id não
+    existia (o chamador decide se isso é 404)."""
+    return db.execute_returning_one(f"""
+        DELETE FROM cronograma_versoes
+        WHERE id = {db.q(versao_id)}
+        RETURNING id, projeto_id, numero_versao, rotulo, total_atividades, total_marcos
+    """)
