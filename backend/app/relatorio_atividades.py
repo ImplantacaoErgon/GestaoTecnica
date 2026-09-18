@@ -76,8 +76,10 @@ def coletar_dados(recurso_id, data_ini, data_fim):
         JOIN recursos r ON r.id = hd.recurso_id
         JOIN atividades a ON a.id = hd.atividade_id
         JOIN projetos p ON p.id = a.projeto_id
-        JOIN etapas e ON e.id = a.etapa_id
-        JOIN frentes_trabalho fr ON fr.id = a.frente_trabalho_id
+        -- LEFT JOIN (migração 026) — etapa_id/frente_trabalho_id podem ser NULL agora;
+        -- um INNER JOIN sumiria com os lançamentos dessas atividades do relatório.
+        LEFT JOIN etapas e ON e.id = a.etapa_id
+        LEFT JOIN frentes_trabalho fr ON fr.id = a.frente_trabalho_id
         WHERE hd.data BETWEEN {db.q(data_ini)} AND {db.q(data_fim)}
         {filtro_recurso}
         ORDER BY r.nome, p.sigla NULLS LAST, a.codigo_wbs NULLS LAST, a.nome, hd.data

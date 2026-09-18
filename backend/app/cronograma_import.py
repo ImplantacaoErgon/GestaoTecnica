@@ -29,14 +29,30 @@ DECISÕES DE PRODUTO (combinadas com o usuário antes de implementar):
   Etapa/grupo no WBS, ou uma Etapa/Frente já cadastrada com nome parecido)
   e o usuário confirma ou ajusta antes de gravar, porque a estrutura do WBS
   pode mudar entre uma exportação e outra.
+- 37ª rodada: quando o preview não sugere (com confiança) uma Etapa/Frente já
+  cadastrada pelo nome do ramo do WBS e o usuário também não pede
+  explicitamente para criar uma nova na tela, a atividade É IMPORTADA MESMO
+  ASSIM, só que SEM Etapa/Frente (etapa_id/frente_trabalho_id ficam NULL —
+  ver migração 026) — em vez do comportamento antigo, que ou bloqueava a
+  linha com erro ou inventava um grupo novo a partir do texto do WBS (o que
+  não batia com a taxonomia real de Etapas/Frentes do cliente, cadastrada em
+  Configurações). Numa reimportação, uma atividade que já tem Etapa/Frente
+  (manual ou de importação anterior) nunca é voltada pra NULL só porque desta
+  vez não foi identificada de novo — mesmo espírito "só adiciona, nunca
+  apaga" já usado pra recursos e dependências.
 - Mesmas regras de conversão já validadas no script: atividade "resumo" (que
   tem subatividades) não recebe prazo_horas (a Duração dela no MS Project é
   o prazo de calendário do ramo inteiro, não o esforço da atividade em si);
-  duração em dias/semanas corridos é convertida em horas por aproximação
-  (×8h/dia, ×40h/semana); uma tarefa de duração "0 hrs" vira Marco em vez de
+  duração em dias/semanas corridos, OU um número puro sem unidade (célula
+  numérica solta), é convertida em horas por aproximação (×8h/dia,
+  ×40h/semana); uma tarefa de duração "0 hrs" vira Marco em vez de
   Atividade; toda atividade que a planilha mostra "em andamento" ganha um
   relato automático antes de ter o status alterado (regra de negócio do
   sistema).
+- 37ª rodada: colunas ★ Master / 💰 Entregável (atividades.eh_atividade_master
+  / eh_entregavel), quando presentes na planilha ("Sim" na célula), marcam a
+  atividade — mesmo espírito "só adiciona": em branco nunca desmarca uma
+  atividade já marcada manualmente pela tela.
 """
 import csv
 import io
@@ -83,10 +99,20 @@ COLUNA_ALIASES = {
     "nome": ["nome da tarefa", "nome", "task name", "tarefa"],
     "inicio": ["inicio", "data inicio", "start"],
     "termino": ["termino", "data termino", "finish", "fim"],
-    "duracao": ["duracao", "duration"],
+    # "duracao dias" primeiro de propósito: quando a planilha tem as duas colunas
+    # (ex: "Duração (dias)" e "Duração" repetindo o mesmo valor — caso real de uma
+    # planilha exportada por aqui mesmo e depois editada à mão), prefere a
+    # inequívoca ("(dias)" no cabeçalho já diz a unidade) — ver parse_duracao_horas.
+    "duracao": ["duracao dias", "duracao", "duration"],
     "pct": ["% concluida", "%concluida", "percent complete", "% complete", "concluido"],
     "predecessoras": ["predecessoras", "predecessors"],
     "recursos": ["nomes dos recursos", "nome dos recursos", "recursos", "resource names"],
+    # 37ª rodada: campos ★ Master e 💰 Entregável (atividades.eh_atividade_master /
+    # eh_entregavel) passam a ser lidos da planilha, se vierem — ver Node e o uso
+    # em confirmar(). Aceita tanto o nome exportado por este sistema ("Entregavel"/
+    # "Master", sem acento — Excel às vezes normaliza) quanto variantes comuns.
+    "entregavel": ["entregavel", "entregável", "eh entregavel", "e entregavel"],
+    "master": ["master", "atividade master", "eh master", "e master"],
 }
 COLUNAS_OBRIGATORIAS = ("edt", "id", "nome", "duracao")
 
@@ -254,17 +280,36 @@ def parse_duracao_horas(v):
         return None, False
     txt = str(v).strip().replace(",", ".")
     m = re.match(r"([\d.]+)\s*(hrs?|dias?|dia|sem(?:s|anas)?)$", txt, re.IGNORECASE)
-    if not m:
+    if m:
+        val = float(m.group(1))
+        unidade = m.group(2).lower()
+        if unidade.startswith("hr"):
+            return val, False
+        if unidade.startswith("dia"):
+            return val * 8.0, True
+        if unidade.startswith("sem"):
+            return val * 5 * 8.0, True
         return None, False
-    val = float(m.group(1))
-    unidade = m.group(2).lower()
-    if unidade.startswith("hr"):
-        return val, False
-    if unidade.startswith("dia"):
-        return val * 8.0, True
-    if unidade.startswith("sem"):
-        return val * 5 * 8.0, True
+    # Número puro, sem unidade (ex: célula numérica "6.75", sem "hrs"/"dias" no
+    # texto) — a planilha pode vir assim quando o valor já foi calculado em dias
+    # em outra ferramenta e colado como número. Trata como DIAS (mesma aproximação
+    # ×8h/dia dos outros casos), que é a leitura mais comum pra uma coluna
+    # "Duração" numérica solta — nunca como horas, pra não subestimar 8x o prazo.
+    if re.match(r"^[\d.]+$", txt):
+        return float(txt) * 8.0, True
     return None, False
+
+
+def parse_bool_sim(v):
+    """'Sim'/True/1 -> True; qualquer outra coisa (vazio, 'Não', 0...) -> False.
+    Usado nas colunas ★ Master / 💰 Entregável (37ª rodada)."""
+    if v in (None, ""):
+        return False
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return bool(v)
+    return _normaliza_texto(v) in ("sim", "s", "x", "true", "verdadeiro", "1")
 
 
 def parse_lag_horas(txt):
@@ -349,6 +394,12 @@ class Node:
         self.pct = parse_pct(linha.get("pct"))  # já em 0..100
         self.predecessoras_txt = linha.get("predecessoras")
         self.recursos_txt = linha.get("recursos")
+        # ★ Master / 💰 Entregável (37ª rodada) — ver atividades.eh_atividade_master /
+        # eh_entregavel. "Sim" na planilha marca; em branco NÃO desmarca numa
+        # reimportação (mesmo espírito "só adiciona" já usado pra recursos/dependências
+        # — ver confirmar()), então False aqui só decide o valor em atividades NOVAS.
+        self.eh_entregavel = parse_bool_sim(linha.get("entregavel"))
+        self.eh_master = parse_bool_sim(linha.get("master"))
         self.children = []
         self.parent = None
         self.is_summary = False
@@ -547,7 +598,7 @@ def preview(projeto_id, file_bytes, filename):
     )
     por_origem = {r["origem_importacao_id"] for r in existentes_atividades if r["origem_importacao_id"]}
     por_wbs = {r["codigo_wbs"] for r in existentes_atividades if r["codigo_wbs"]}
-    novas = atualizar = horas_aproximadas = 0
+    novas = atualizar = horas_aproximadas = marcados_entregavel = marcados_master = 0
     for n in resultado["atividade_nodes"]:
         casado = (n.origem_id in por_origem) or (n.edt in por_wbs)
         if casado:
@@ -558,6 +609,10 @@ def preview(projeto_id, file_bytes, filename):
             _, aprox = parse_duracao_horas(n.duracao_txt)
             if aprox:
                 horas_aproximadas += 1
+        if n.eh_entregavel:
+            marcados_entregavel += 1
+        if n.eh_master:
+            marcados_master += 1
 
     existentes_marcos = db.fetch_all(
         f"SELECT nome, data_prevista, origem_importacao_id FROM marcos WHERE projeto_id = {db.q(projeto_id)}"
@@ -593,6 +648,7 @@ def preview(projeto_id, file_bytes, filename):
             "atividades_novas": novas, "atividades_atualizar": atualizar,
             "marcos_novos": marcos_novos, "marcos_atualizar": marcos_atualizar,
             "dependencias": total_dependencias, "horas_aproximadas": horas_aproximadas,
+            "marcados_entregavel": marcados_entregavel, "marcados_master": marcados_master,
         },
         "avisos": avisos,
         "grupos_etapa": grupos_etapa,
@@ -689,6 +745,17 @@ def confirmar(token, projeto_id, mapeamento_etapas, mapeamento_frentes):
     # o gargalo, mas não custa nada aplicar o mesmo padrão) --------
     pre_statements = []
 
+    # 37ª rodada: um grupo do WBS (ramo de Etapa ou de Frente) agora tem TRÊS
+    # desfechos possíveis, não mais dois — e o padrão deixou de ser "cria uma nova
+    # automaticamente com o nome do WBS":
+    #   1. m["etapa_id"]/m["frente_id"] presente -> usa a Etapa/Frente já cadastrada
+    #      escolhida (seja pela sugestão por nome, seja por escolha manual na tela).
+    #   2. m["nome"] presente (sem id) -> o usuário pediu explicitamente para criar
+    #      uma nova, com esse nome (ação deliberada, não mais o fallback silencioso).
+    #   3. nem um nem outro -> DEIXA EM BRANCO (etapa_id/frente_trabalho_id = NULL
+    #      nas atividades desse grupo) para o usuário configurar depois olhando o
+    #      que já existe em Configurações — em vez de inventar um grupo novo a
+    #      partir do texto do WBS, que muitas vezes não bate com a taxonomia real.
     mapa_etapas = {m["chave"]: m for m in (mapeamento_etapas or [])}
     etapa_id_by_key = {}
     n_etapas = (db.fetch_one(f"SELECT COUNT(*)::int AS n FROM etapas WHERE projeto_id = {db.q(projeto_id)}") or {}).get("n", 0)
@@ -697,8 +764,8 @@ def confirmar(token, projeto_id, mapeamento_etapas, mapeamento_frentes):
         m = mapa_etapas.get(n.edt) or {}
         if m.get("etapa_id"):
             etapa_id_by_key[n.edt] = m["etapa_id"]
-        else:
-            nome = (m.get("nome") or n.nome).strip()[:250] or f"Etapa {n.edt}"
+        elif m.get("nome"):
+            nome = m["nome"].strip()[:250] or f"Etapa {n.edt}"
             novo_id = str(uuid_lib.uuid4())
             pre_statements.append(_sql_insert("etapas", {
                 "id": novo_id, "projeto_id": projeto_id, "numero": proximo_numero, "nome": nome,
@@ -706,6 +773,12 @@ def confirmar(token, projeto_id, mapeamento_etapas, mapeamento_frentes):
             }))
             etapa_id_by_key[n.edt] = novo_id
             proximo_numero += 1
+        else:
+            etapa_id_by_key[n.edt] = None
+            avisos.append(
+                f"Etapa não identificada para o ramo '{n.nome}' (EDT {n.edt}) — atividade(s) "
+                "importada(s) sem Etapa; configure manualmente no Cronograma."
+            )
 
     mapa_frentes = {m["chave"]: m for m in (mapeamento_frentes or [])}
     frente_id_by_key = {}
@@ -718,10 +791,10 @@ def confirmar(token, projeto_id, mapeamento_etapas, mapeamento_frentes):
         m = mapa_frentes.get(chave) or {}
         if m.get("frente_id"):
             frente_id_by_key[chave] = m["frente_id"]
-        else:
+        elif m.get("nome"):
             no = resultado["grupos_frente_nodes"].get(chave)
             nome_padrao = no.nome if no else "Gestão do Projeto"
-            nome = (m.get("nome") or nome_padrao).strip()[:250] or nome_padrao
+            nome = m["nome"].strip()[:250] or nome_padrao
             novo_id = str(uuid_lib.uuid4())
             pre_statements.append(_sql_insert("frentes_trabalho", {
                 "id": novo_id, "projeto_id": projeto_id, "nome": nome,
@@ -729,6 +802,14 @@ def confirmar(token, projeto_id, mapeamento_etapas, mapeamento_frentes):
             }))
             frente_id_by_key[chave] = novo_id
             proxima_ordem += 1
+        else:
+            frente_id_by_key[chave] = None
+            no = resultado["grupos_frente_nodes"].get(chave)
+            nome_planilha = no.nome if no else "Gestão do Projeto"
+            avisos.append(
+                f"Frente de trabalho não identificada para o ramo '{nome_planilha}' — atividade(s) "
+                "importada(s) sem Frente; configure manualmente no Cronograma."
+            )
 
     recurso_info = {}
     for n in resultado["atividade_nodes"]:
@@ -795,12 +876,12 @@ def confirmar(token, projeto_id, mapeamento_etapas, mapeamento_frentes):
     statements_atividades = []
 
     for n in resultado["atividade_nodes"]:
+        # 37ª rodada: etapa_id/frente_id podem vir None agora (grupo do WBS deixado
+        # em branco no mapeamento — ver acima) — a atividade é importada mesmo
+        # assim, só sem essa classificação, em vez de ser pulada com erro.
         frente_key = n.frente_key or "gestao"
         frente_id = frente_id_by_key.get(frente_key)
         etapa_id = etapa_id_by_key.get(n.etapa_key)
-        if not (frente_id and etapa_id):
-            erros.append({"edt": n.edt, "nome": n.nome, "erro": "Etapa ou Frente não resolvida para esta linha."})
-            continue
 
         horas, aprox = parse_duracao_horas(n.duracao_txt)
         if n.is_summary:
@@ -833,13 +914,29 @@ def confirmar(token, projeto_id, mapeamento_etapas, mapeamento_frentes):
         existente = por_origem.get(n.origem_id) or por_wbs.get(n.edt)
 
         campos_base = {
-            "etapa_id": etapa_id, "frente_trabalho_id": frente_id, "atividade_pai_id": pai_atividade_id,
+            "atividade_pai_id": pai_atividade_id,
             "codigo_wbs": n.edt, "origem_importacao_id": n.origem_id, "nome": n.nome[:250],
             "prazo_horas": horas,
             "dtini_prev": n.dtini.isoformat() if n.dtini else None,
             "dtfim_prev": n.dtfim.isoformat() if n.dtfim else None,
             "percentual_concluido": pct,
         }
+        # etapa_id/frente_trabalho_id só entram no dict quando RESOLVIDOS (não
+        # None) — numa atividade já existente, omitir a chave preserva o que já
+        # está gravado (manual ou de importação anterior) em vez de sobrescrever
+        # com NULL só porque esta reimportação não conseguiu identificar de novo
+        # (_sql_update, ao contrário de _sql_insert, não filtra None sozinho).
+        # ★ Master / 💰 Entregável (eh_atividade_master/eh_entregavel): mesmo
+        # espírito "só adiciona" já usado para recursos/dependências — "Sim" na
+        # planilha LIGA a marcação; em branco nunca desliga uma já marcada na tela.
+        if etapa_id:
+            campos_base["etapa_id"] = etapa_id
+        if frente_id:
+            campos_base["frente_trabalho_id"] = frente_id
+        if n.eh_entregavel:
+            campos_base["eh_entregavel"] = True
+        if n.eh_master:
+            campos_base["eh_atividade_master"] = True
 
         try:
             if existente:

@@ -225,8 +225,10 @@ def montar_grade(usuario, data_ref: date):
         FROM atividades a
         JOIN atividade_recurso ar ON ar.atividade_id = a.id AND ar.recurso_id IN ({placeholders})
         JOIN projetos p ON p.id = a.projeto_id
-        JOIN etapas e ON e.id = a.etapa_id
-        JOIN frentes_trabalho f ON f.id = a.frente_trabalho_id
+        -- LEFT JOIN (migração 026) — etapa_id/frente_trabalho_id podem ser NULL agora;
+        -- um INNER JOIN esconderia a atividade da grade do consultor sem aviso nenhum.
+        LEFT JOIN etapas e ON e.id = a.etapa_id
+        LEFT JOIN frentes_trabalho f ON f.id = a.frente_trabalho_id
         WHERE a.dtini_prev IS NOT NULL AND a.dtfim_prev IS NOT NULL AND a.prazo_horas IS NOT NULL
           AND a.dtini_prev <= {db.q(fim.isoformat())} AND a.dtfim_prev >= {db.q(inicio.isoformat())}
         ORDER BY p.sigla NULLS LAST, p.nome, e.numero, a.codigo_wbs NULLS LAST, a.nome

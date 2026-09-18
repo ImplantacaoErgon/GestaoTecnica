@@ -229,7 +229,9 @@ def coletar_dados_projeto(projeto_id):
                  ELSE CURRENT_DATE - a.dtfim_prev
                END AS dias_atraso
         FROM atividades a
-        JOIN frentes_trabalho f ON f.id = a.frente_trabalho_id
+        -- LEFT JOIN (migração 026) — frente_trabalho_id pode ser NULL agora; um INNER
+        -- JOIN excluiria essas atividades do Relatório Executivo sem nenhum aviso.
+        LEFT JOIN frentes_trabalho f ON f.id = a.frente_trabalho_id
         WHERE a.projeto_id = {db.q(projeto_id)}
     """)
     by_id = {a["id"]: a for a in atividades}
@@ -263,7 +265,7 @@ def coletar_dados_projeto(projeto_id):
 
     atrasadas_amostra = [
         {
-            "codigo_wbs": a.get("codigo_wbs"), "nome": a["nome"], "frente": a["frente_nome"],
+            "codigo_wbs": a.get("codigo_wbs"), "nome": a["nome"], "frente": a["frente_nome"] or "Sem frente de trabalho",
             "status": a["status"], "fim_previsto": a.get("dtfim_prev"), "dias_atraso": a["dias_atraso"],
             "responsaveis": a.get("responsaveis_nomes"),
         }
@@ -271,9 +273,14 @@ def coletar_dados_projeto(projeto_id):
     ]
 
     # ---------------- resumo por frente ----------------
+    # atividades sem Frente de trabalho (migração 026 — a importação de cronograma
+    # pode deixar em branco quando não identifica com confiança um cadastro já
+    # existente) entram num grupo próprio, em vez de quebrar o sorted() abaixo
+    # (comparar None com str dá erro) ou desaparecer silenciosamente do resumo.
     por_frente = {}
     for a in atividades:
-        f = por_frente.setdefault(a["frente_nome"], {"total": 0, "concluidas": 0, "em_andamento": 0, "atrasadas": 0})
+        f = por_frente.setdefault(a["frente_nome"] or "Sem frente de trabalho",
+                                   {"total": 0, "concluidas": 0, "em_andamento": 0, "atrasadas": 0})
         f["total"] += 1
         if a["status"] in STATUS_FAMILIA_CONCLUIDA:
             f["concluidas"] += 1
@@ -290,7 +297,7 @@ def coletar_dados_projeto(projeto_id):
 
     # ---------------- bloqueios ativos ----------------
     bloqueios_ativos = [
-        {"codigo_wbs": a.get("codigo_wbs"), "nome": a["nome"], "frente": a["frente_nome"]}
+        {"codigo_wbs": a.get("codigo_wbs"), "nome": a["nome"], "frente": a["frente_nome"] or "Sem frente de trabalho"}
         for a in atividades if a["status"] == "Bloqueada"
     ]
 
@@ -330,7 +337,7 @@ def coletar_dados_projeto(projeto_id):
         proj = projecao.get(a["id"])
         dtfim_prev = _parse_data(a.get("dtfim_prev"))
         item = {
-            "codigo_wbs": a.get("codigo_wbs"), "nome": a["nome"], "frente": a["frente_nome"],
+            "codigo_wbs": a.get("codigo_wbs"), "nome": a["nome"], "frente": a["frente_nome"] or "Sem frente de trabalho",
             "status": a["status"], "percentual_concluido": a.get("percentual_concluido"),
             "responsaveis": a.get("responsaveis_nomes"),
             "fim_previsto_no_plano": a.get("dtfim_prev"),
