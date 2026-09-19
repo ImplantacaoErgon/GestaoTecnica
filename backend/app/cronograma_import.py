@@ -104,7 +104,18 @@ COLUNA_ALIASES = {
     # planilha exportada por aqui mesmo e depois editada à mão), prefere a
     # inequívoca ("(dias)" no cabeçalho já diz a unidade) — ver parse_duracao_horas.
     "duracao": ["duracao dias", "duracao", "duration"],
-    "pct": ["% concluida", "%concluida", "percent complete", "% complete", "concluido"],
+    # 40ª rodada (bugfix): a planilha do cliente veio com o cabeçalho "% Conclusão"
+    # (não "% Concluída"), que o casamento por igualdade exata não reconhecia —
+    # a coluna simplesmente não era mapeada e TODA a linha caía no default 0 em
+    # parse_pct(None), com ou sem o sinal "%" no valor da célula (que o parse_pct
+    # já tratava certo). Lista de aliases ampliada + fallback por "%" no cabeçalho
+    # logo abaixo, em _mapear_colunas, pra não depender de prever cada variação.
+    "pct": [
+        "% concluida", "%concluida", "% concluido", "%concluido",
+        "% conclusao", "%conclusao", "conclusao", "concluido",
+        "percentual concluido", "percentual", "percent complete", "% complete",
+        "% realizado", "%realizado", "realizado", "% completo", "%completo",
+    ],
     "predecessoras": ["predecessoras", "predecessors"],
     "recursos": ["nomes dos recursos", "nome dos recursos", "recursos", "resource names"],
     # 37ª rodada: campos ★ Master e 💰 Entregável (atividades.eh_atividade_master /
@@ -147,6 +158,17 @@ def _mapear_colunas(headers_normalizados):
             alias_norm = _normaliza_cabecalho(alias)
             if alias_norm in idx_by_header:
                 resultado[chave] = idx_by_header[alias_norm]
+                break
+    # Fallback pra "pct": se nenhum alias bateu, mas existe um cabeçalho com o
+    # sinal "%" (e ele ainda não foi usado por outra coluna), assume que é o
+    # percentual concluído — cobre variações de nome que a lista de aliases
+    # acima não previu (ex.: "% Conclusão"), sem risco de pegar coluna errada
+    # porque nenhuma outra chave do COLUNA_ALIASES espera "%" no cabeçalho.
+    if "pct" not in resultado:
+        usados = set(resultado.values())
+        for h, i in idx_by_header.items():
+            if "%" in h and i not in usados:
+                resultado["pct"] = i
                 break
     faltando = [c for c in COLUNAS_OBRIGATORIAS if c not in resultado]
     if faltando:
