@@ -8,7 +8,7 @@ from datetime import datetime, date, timedelta
 
 from flask import Flask, request, jsonify, send_from_directory, send_file, abort, session
 
-from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria
+from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_export, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 FRONTEND_DIR = os.environ.get(
@@ -1890,6 +1890,51 @@ def create_app():
                  WHERE a.projeto_id = {db.q(projeto_id)}) AS relatos
         """)
         return jsonify(row or {"atividades": 0, "marcos": 0, "dependencias": 0, "relatos": 0})
+
+    @app.get("/api/cronograma/exportar")
+    def cronograma_exportar():
+        """Exporta as atividades do projeto numa planilha Excel — botão
+        "Exportar Cronograma (Excel)" ao lado de Importar/Versões do
+        Cronograma. Filtros de Etapa, Frente de trabalho e período previsto
+        são opcionais (mesma semântica de sobreposição de intervalo já usada
+        em GET /atividades) — sem nenhum, exporta o cronograma inteiro do
+        projeto. Ver app/cronograma_export.py."""
+        projeto_id = request.args.get("projeto_id")
+        if not projeto_id:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        projeto = db.fetch_one(f"SELECT nome, sigla FROM projetos WHERE id = {db.q(projeto_id)}")
+        if not projeto:
+            abort(404)
+        where = [f"a.projeto_id = {db.q(projeto_id)}"]
+        if request.args.get("etapa_id"):
+            where.append(f"a.etapa_id = {db.q(request.args['etapa_id'])}")
+        if request.args.get("frente_trabalho_id"):
+            where.append(f"a.frente_trabalho_id = {db.q(request.args['frente_trabalho_id'])}")
+        if request.args.get("periodo_inicio") and request.args.get("periodo_fim"):
+            where.append(
+                f"a.dtini_prev <= {db.q(request.args['periodo_fim'])} "
+                f"AND a.dtfim_prev >= {db.q(request.args['periodo_inicio'])}"
+            )
+        sql = ATIVIDADE_SELECT + " WHERE " + " AND ".join(where) + " ORDER BY a.dtini_prev NULLS LAST, a.codigo_wbs"
+        atividades = db.fetch_all(sql)
+        try:
+            xlsx_bytes = cronograma_export.gerar_planilha_bytes(atividades)
+        except Exception as e:
+            print(f"[cronograma_export] erro ao gerar planilha: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            return jsonify({"erro": f"Falha ao gerar a planilha: {e}"}), 500
+        # Nome de arquivo derivado da sigla/nome do projeto — sanitizado na unha (sem
+        # regex extra) pra nunca deixar caractere fora do comum quebrar o header
+        # Content-Disposition, por mais improvável que seja com os dados atuais.
+        base = (projeto.get("sigla") or projeto.get("nome") or "projeto").strip()
+        base = "".join(c if c.isalnum() or c in "-_" else "-" for c in base).strip("-") or "projeto"
+        nome_arquivo = f"cronograma-{base}-{date.today().isoformat()}.xlsx"
+        return send_file(
+            io.BytesIO(xlsx_bytes),
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True, download_name=nome_arquivo,
+        )
 
     @app.post("/api/cronograma/remover-tudo")
     def cronograma_remover_tudo():

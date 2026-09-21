@@ -557,6 +557,7 @@
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
         <button class="btn secondary small" id="btn-import-cronograma">Importar Cronograma (Excel/CSV)</button>
+        <button class="btn secondary small" id="btn-exportar-cronograma" title="Exporta as atividades numa planilha Excel — com filtros opcionais de Etapa, Frente e período">📤 Exportar Cronograma (Excel)</button>
         <button class="btn secondary small" id="btn-versoes-cronograma" title="Gera e consulta fotos completas do cronograma ao longo do tempo">🕘 Versões do cronograma</button>
         <button class="btn secondary small" id="btn-replanejar-cronograma" title="Recalcula as datas previstas das atividades incompletas, respeitando as dependências">🔄 Replanejar cronograma</button>
         <button class="btn secondary small" id="btn-edicao-lote-cronograma" title="Edita várias atividades de uma vez, tipo planilha, propagando o efeito em datas/esforço pelas dependentes">📝 Editar em massa</button>
@@ -1722,6 +1723,36 @@
   </div>
 </div>
 
+<!-- ================= MODAL: EXPORTAR CRONOGRAMA (EXCEL) ================= -->
+<div class="overlay" id="overlay-exportar-cronograma" hidden>
+  <div class="modal" style="max-width:480px;">
+    <div class="modal-head"><h2>📤 Exportar Cronograma (Excel)</h2><button class="btn ghost" id="ec-close">✕</button></div>
+    <div class="modal-body single-col">
+      <p class="muted">Gera uma planilha (.xlsx) com as atividades deste projeto. Os filtros abaixo são
+        todos opcionais — deixe em branco pra exportar o cronograma inteiro.</p>
+      <div class="field full">
+        <label>Etapa</label>
+        <select id="ec-etapa"><option value="">Todas</option></select>
+      </div>
+      <div class="field full">
+        <label>Frente de trabalho</label>
+        <select id="ec-frente"><option value="">Todas</option></select>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <div class="field" style="flex:1;"><label>Período previsto — de</label><input type="date" id="ec-periodo-ini"></div>
+        <div class="field" style="flex:1;"><label>até</label><input type="date" id="ec-periodo-fim" title="Deixe em branco para não limitar o fim do período"></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <span></span>
+      <div style="display:flex;gap:8px;">
+        <button class="btn secondary" id="ec-cancelar">Cancelar</button>
+        <button class="btn" id="ec-exportar">⬇ Exportar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ================= MODAL: PROJETO ================= -->
 <div class="overlay" id="overlay-projeto" hidden>
   <div class="modal">
@@ -2164,7 +2195,7 @@ async function afterProjetoReady(){
   ]);
   aplicarMarcaNoTopo();
   fillStaticSelects();
-  wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireRemoverCronograma(); wireRemoverRequisitos(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma();
+  wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireExportarCronograma(); wireRemoverCronograma(); wireRemoverRequisitos(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma();
   wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal();
   setupCsvTemplateLink();
   await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias()]);
@@ -4142,6 +4173,50 @@ function openImportarCronogramaModal(){
   $("overlay-importar-cronograma").hidden = false;
 }
 function closeImportarCronogramaModal(){ $("overlay-importar-cronograma").hidden = true; }
+
+// ================= EXPORTAR CRONOGRAMA (EXCEL) =================
+// Botão ao lado de Importar/Versões — gera uma planilha das atividades do
+// projeto atual, com filtros opcionais de Etapa/Frente/período (mesma
+// semântica de sobreposição de intervalo do filtro principal do Cronograma).
+// Igual ao padrão já usado no Relatório de Horas dos Recursos
+// (gerarRelatorioAtividades): só monta a URL com os parâmetros informados e
+// abre em nova aba — o navegador/backend cuidam do download (Content-
+// -Disposition), nada é buscado via api()/fetch aqui.
+function wireExportarCronograma(){
+  $("btn-exportar-cronograma").addEventListener("click", abrirExportarCronogramaModal);
+  $("ec-close").addEventListener("click", ()=>{ $("overlay-exportar-cronograma").hidden = true; });
+  $("ec-cancelar").addEventListener("click", ()=>{ $("overlay-exportar-cronograma").hidden = true; });
+  $("overlay-exportar-cronograma").addEventListener("click", e=>{ if(e.target.id==="overlay-exportar-cronograma") $("overlay-exportar-cronograma").hidden = true; });
+  $("ec-exportar").addEventListener("click", exportarCronograma);
+}
+
+function abrirExportarCronogramaModal(){
+  $("ec-etapa").innerHTML = `<option value="">Todas</option>` +
+    ETAPAS.map(e=>`<option value="${e.id}">${e.numero} — ${esc(e.nome)}</option>`).join("");
+  $("ec-frente").innerHTML = `<option value="">Todas</option>` +
+    FRENTES.map(f=>`<option value="${f.id}">${esc(f.nome)}${f.ativo===false?" (inativa)":""}</option>`).join("");
+  $("ec-etapa").value = ""; $("ec-frente").value = "";
+  $("ec-periodo-ini").value = ""; $("ec-periodo-fim").value = "";
+  $("overlay-exportar-cronograma").hidden = false;
+}
+
+function exportarCronograma(){
+  const ini = $("ec-periodo-ini").value, fim = $("ec-periodo-fim").value;
+  if((ini && !fim) || (fim && !ini)){
+    toast("Informe as duas datas do período (início e fim), ou deixe as duas em branco.", true);
+    return;
+  }
+  if(ini && fim && fim < ini){
+    toast("A data fim do período não pode ser anterior à data início.", true);
+    return;
+  }
+  const params = new URLSearchParams({ projeto_id: PROJETO.id });
+  if($("ec-etapa").value) params.set("etapa_id", $("ec-etapa").value);
+  if($("ec-frente").value) params.set("frente_trabalho_id", $("ec-frente").value);
+  if(ini && fim){ params.set("periodo_inicio", ini); params.set("periodo_fim", fim); }
+  window.open(`${API}/cronograma/exportar?${params.toString()}`, "_blank");
+  $("overlay-exportar-cronograma").hidden = true;
+}
 
 async function analisarCronograma(){
   const file = $("cr-file").files[0];
