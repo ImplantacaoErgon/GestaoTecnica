@@ -290,6 +290,7 @@
   .list-simple{list-style:none;margin:0;padding:0;}
   .list-simple li{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:12.5px;gap:10px;}
   .list-simple li:last-child{border-bottom:none;}
+  .list-simple li.clickable:hover{background:var(--surface-2);}
   .inline-add{display:flex;gap:6px;margin-top:10px;}
   .inline-add select, .inline-add input{flex:1;background:var(--surface-2);border:1px solid var(--border);border-radius:7px;padding:7px 9px;font-size:12.5px;font-family:inherit;}
 
@@ -704,11 +705,17 @@
     <div class="view-sub">Mapa de riscos e marcos contratuais do projeto.</div>
     <div class="grid-2">
       <div class="card">
-        <h3>Riscos</h3>
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <h3>Riscos</h3>
+          <button class="btn small" id="btn-new-risco">+ Novo risco</button>
+        </div>
         <ul class="list-simple" id="riscos-list"></ul>
       </div>
       <div class="card">
-        <h3>Marcos</h3>
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <h3>Marcos</h3>
+          <button class="btn small" id="btn-new-marco">+ Novo marco</button>
+        </div>
         <ul class="list-simple" id="marcos-list"></ul>
       </div>
     </div>
@@ -1241,6 +1248,45 @@
   </div>
 </div>
 
+<!-- ================= MODAL: RISCO (41ª rodada) ================= -->
+<div class="overlay" id="overlay-risco" hidden>
+  <div class="modal">
+    <div class="modal-head"><h2 id="risco-modal-title">Novo risco</h2><button class="btn ghost" id="risco-close">✕</button></div>
+    <div class="modal-body">
+      <div class="field full"><label>Descrição *</label><textarea id="risco-descricao"></textarea></div>
+      <div class="field"><label>Categoria</label><input id="risco-categoria" type="text" placeholder="Ex: Técnico, Cronograma, Cliente…"></div>
+      <div class="field"><label>Responsável</label><select id="risco-responsavel"></select></div>
+      <div class="field"><label>Probabilidade</label><select id="risco-probabilidade"><option>Baixo</option><option selected>Médio</option><option>Alto</option></select></div>
+      <div class="field"><label>Impacto</label><select id="risco-impacto"><option>Baixo</option><option selected>Médio</option><option>Alto</option></select></div>
+      <div class="field"><label>Status</label><select id="risco-status"><option selected>Aberto</option><option>Mitigado</option><option>Encerrado</option></select></div>
+      <div class="field"><label>Identificado em</label><input id="risco-data" type="date"></div>
+      <div class="field full"><label>Mitigação</label><textarea id="risco-mitigacao" placeholder="Ação planejada para reduzir probabilidade/impacto…"></textarea></div>
+    </div>
+    <div class="modal-foot">
+      <span></span>
+      <div style="display:flex;gap:8px;"><button class="btn secondary" id="risco-cancel">Cancelar</button><button class="btn" id="risco-save">Salvar</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= MODAL: MARCO (41ª rodada) ================= -->
+<div class="overlay" id="overlay-marco" hidden>
+  <div class="modal">
+    <div class="modal-head"><h2 id="marco-modal-title">Novo marco</h2><button class="btn ghost" id="marco-close">✕</button></div>
+    <div class="modal-body">
+      <div class="field full"><label>Nome *</label><input id="marco-nome" type="text"></div>
+      <div class="field full"><label>Descrição</label><textarea id="marco-descricao"></textarea></div>
+      <div class="field"><label>Etapa</label><select id="marco-etapa"></select></div>
+      <div class="field"><label>Data prevista *</label><input id="marco-data-prevista" type="date"></div>
+      <div class="field"><label>Data real</label><input id="marco-data-real" type="date"></div>
+    </div>
+    <div class="modal-foot">
+      <span></span>
+      <div style="display:flex;gap:8px;"><button class="btn secondary" id="marco-cancel">Cancelar</button><button class="btn" id="marco-save">Salvar</button></div>
+    </div>
+  </div>
+</div>
+
 <!-- ================= MODAL: IMPORTAR REQUISITOS DO DOCUMENTO DO TR ================= -->
 <div class="overlay" id="overlay-importar-tr" hidden>
   <div class="modal wide">
@@ -1745,7 +1791,7 @@ async function chamarAuthApi(path, body){
 let USUARIO_LOGADO = null;
 let PARAMETROS = null; // logo + nome da empresa (Configurações > Parâmetros) — ver carregarParametros()
 let PROJETO=null, PROJETOS=[], ETAPAS=[], FRENTES=[], TIPOS=[], RECURSOS=[], USUARIOS=[], ATIVIDADES=[], REQUISITOS=[], RISCOS=[], MARCOS=[], CALENDARIO=[], MANUAIS=[], FATURAS=[];
-let editingAtividadeId=null, editingRequisitoId=null;
+let editingAtividadeId=null, editingRequisitoId=null, editingRiscoId=null, editingMarcoId=null;
 let MA_DATA_REF=new Date(), MA_GRADE=null; // "Minhas atividades" — data de referência da semana mostrada e último retorno do servidor
 const STATUS_EXIGE_RELATO = new Set(["Em andamento","Bloqueada","Cancelada"]);
 
@@ -2004,7 +2050,7 @@ async function afterProjetoReady(){
   aplicarMarcaNoTopo();
   fillStaticSelects();
   wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireRemoverCronograma(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma();
-  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane();
+  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal();
   setupCsvTemplateLink();
   await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas()]);
   // Reaplica agora que REQUISITOS/ATIVIDADES já estão carregados — os selects
@@ -2050,6 +2096,9 @@ function fillStaticSelects(){
   $("f-responsavel").innerHTML = `<option value="">Recurso (todos)</option>` + recursoOpts;
   $("req-responsavel").innerHTML = `<option value="">—</option>` + recursoOpts;
   $("at-relato-pend-responsavel").innerHTML = `<option value="">—</option>` + recursoOpts;
+  // Riscos & Marcos (41ª rodada)
+  $("risco-responsavel").innerHTML = `<option value="">—</option>` + recursoOpts;
+  $("marco-etapa").innerHTML = `<option value="">— Sem etapa —</option>` + ETAPAS.map(e=>`<option value="${e.id}">${e.numero} — ${esc(e.nome)}</option>`).join("");
 
   // Fatura (27ª rodada): responsável pela entrega precisa ser da Consultoria (regra
   // validada de novo no backend, em preparar_fatura); responsável pelo
@@ -2843,14 +2892,103 @@ async function loadRiscosMarcos(){
 function renderRiscosMarcos(){
   const nivelCor = {"Baixo":"ok","Médio":"warn","Alto":"danger"};
   $("riscos-list").innerHTML = RISCOS.length ? RISCOS.map(r=>`
-    <li style="flex-direction:column;align-items:flex-start;gap:4px;">
+    <li class="clickable" data-id="${r.id}" style="flex-direction:column;align-items:flex-start;gap:4px;cursor:pointer;">
       <div style="display:flex;justify-content:space-between;width:100%;"><strong style="font-size:12.5px;">${esc(r.descricao)}</strong>${pill(r.status, r.status==="Aberto"?"warn":r.status==="Mitigado"?"accent":"ok")}</div>
       <div class="muted">Probabilidade ${pill(r.probabilidade, nivelCor[r.probabilidade])} · Impacto ${pill(r.impacto, nivelCor[r.impacto])} ${r.responsavel_nome?(' · '+esc(r.responsavel_nome)):''}</div>
     </li>`).join("") : `<li class="muted">Nenhum risco cadastrado.</li>`;
+  $("riscos-list").querySelectorAll("li[data-id]").forEach(li=>{
+    li.addEventListener("click", ()=>openRiscoModal(byId(RISCOS, li.dataset.id)));
+  });
 
   $("marcos-list").innerHTML = MARCOS.length ? MARCOS.slice().sort((a,b)=>a.data_prevista.localeCompare(b.data_prevista)).map(m=>`
-    <li><span>${esc(m.nome)}${m.data_real?" "+pill("Concluído","ok"):""}</span><span class="mono muted">${fmtDate(m.data_prevista)}</span></li>`).join("")
+    <li class="clickable" data-id="${m.id}" style="cursor:pointer;"><span>${esc(m.nome)}${m.data_real?" "+pill("Concluído","ok"):""}</span><span class="mono muted">${fmtDate(m.data_prevista)}</span></li>`).join("")
     : `<li class="muted">Nenhum marco cadastrado.</li>`;
+  $("marcos-list").querySelectorAll("li[data-id]").forEach(li=>{
+    li.addEventListener("click", ()=>openMarcoModal(byId(MARCOS, li.dataset.id)));
+  });
+}
+
+// ================= MODAL RISCO / MARCO (41ª rodada) =================
+// Antes desta rodada a aba "Riscos & Marcos" só listava (a API /api/riscos e
+// /api/marcos já existia desde antes, mas nada na tela chamava POST/PUT) —
+// pedido do usuário: "como é possível cadastrar os Riscos e os Marcos?".
+// Segue exatamente o mesmo padrão de Requisito/Fatura (modal com "+ Novo",
+// clique na linha pra editar); sem exclusão, também como Requisito/Fatura
+// (a API não tem DELETE pra essas duas tabelas).
+function wireRiscoModal(){
+  $("btn-new-risco").addEventListener("click", ()=>openRiscoModal(null));
+  $("risco-close").addEventListener("click", closeRiscoModal);
+  $("risco-cancel").addEventListener("click", closeRiscoModal);
+  $("overlay-risco").addEventListener("click", e=>{ if(e.target.id==="overlay-risco") closeRiscoModal(); });
+  $("risco-save").addEventListener("click", saveRisco);
+}
+function openRiscoModal(r){
+  editingRiscoId = r ? r.id : null;
+  $("risco-modal-title").textContent = r ? "Editar risco" : "Novo risco";
+  $("risco-descricao").value = r?.descricao || "";
+  $("risco-categoria").value = r?.categoria || "";
+  $("risco-responsavel").value = r?.responsavel_id || "";
+  $("risco-probabilidade").value = r?.probabilidade || "Médio";
+  $("risco-impacto").value = r?.impacto || "Médio";
+  $("risco-status").value = r?.status || "Aberto";
+  $("risco-data").value = r?.identificado_em || toISO(new Date());
+  $("risco-mitigacao").value = r?.mitigacao || "";
+  $("overlay-risco").hidden = false;
+}
+function closeRiscoModal(){ $("overlay-risco").hidden = true; editingRiscoId = null; }
+async function saveRisco(){
+  const data = {
+    descricao: $("risco-descricao").value.trim(),
+    categoria: $("risco-categoria").value.trim() || null,
+    responsavel_id: $("risco-responsavel").value || null,
+    probabilidade: $("risco-probabilidade").value,
+    impacto: $("risco-impacto").value,
+    status: $("risco-status").value,
+    identificado_em: $("risco-data").value || null,
+    mitigacao: $("risco-mitigacao").value.trim() || null,
+  };
+  if(!data.descricao){ toast("Informe a descrição do risco.", true); return; }
+  if(!editingRiscoId) data.projeto_id = PROJETO.id;
+  try{
+    if(editingRiscoId) await api(`/riscos/${editingRiscoId}`, {method:"PUT", body: JSON.stringify(data)});
+    else await api("/riscos", {method:"POST", body: JSON.stringify(data)});
+    await loadRiscosMarcos(); renderRiscosMarcos(); closeRiscoModal(); toast("Risco salvo.");
+  }catch(e){}
+}
+
+function wireMarcoModal(){
+  $("btn-new-marco").addEventListener("click", ()=>openMarcoModal(null));
+  $("marco-close").addEventListener("click", closeMarcoModal);
+  $("marco-cancel").addEventListener("click", closeMarcoModal);
+  $("overlay-marco").addEventListener("click", e=>{ if(e.target.id==="overlay-marco") closeMarcoModal(); });
+  $("marco-save").addEventListener("click", saveMarco);
+}
+function openMarcoModal(m){
+  editingMarcoId = m ? m.id : null;
+  $("marco-modal-title").textContent = m ? "Editar marco" : "Novo marco";
+  $("marco-nome").value = m?.nome || "";
+  $("marco-descricao").value = m?.descricao || "";
+  $("marco-etapa").value = m?.etapa_id || "";
+  $("marco-data-prevista").value = m?.data_prevista || "";
+  $("marco-data-real").value = m?.data_real || "";
+  $("overlay-marco").hidden = false;
+}
+function closeMarcoModal(){ $("overlay-marco").hidden = true; editingMarcoId = null; }
+async function saveMarco(){
+  const data = {
+    nome: $("marco-nome").value.trim(),
+    descricao: $("marco-descricao").value.trim() || null,
+    etapa_id: $("marco-etapa").value || null,
+    data_prevista: $("marco-data-prevista").value || null,
+    data_real: $("marco-data-real").value || null,
+  };
+  if(!data.nome || !data.data_prevista){ toast("Informe nome e data prevista do marco.", true); return; }
+  if(!editingMarcoId) data.projeto_id = PROJETO.id;
+  try{
+    if(editingMarcoId) await api(`/marcos/${editingMarcoId}`, {method:"PUT", body: JSON.stringify(data)});
+    else await api("/marcos", {method:"POST", body: JSON.stringify(data)});
+    await loadRiscosMarcos(); renderRiscosMarcos(); closeMarcoModal(); toast("Marco salvo.");
+  }catch(e){}
 }
 
 // ================= MODAL ATIVIDADE =================
