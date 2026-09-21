@@ -106,10 +106,7 @@ ATIVIDADE_FIELDS = [
     "dtini_real", "dtfim_real", "percentual_concluido", "status", "prioridade", "observacoes",
     "eh_atividade_master", "eh_entregavel",
 ]
-RELATO_FIELDS = [
-    "autor_id", "autor_nome", "texto", "eh_pendencia",
-    "pendencia_responsavel_id", "pendencia_prazo_possivel", "pendencia_data_limite",
-]
+RELATO_FIELDS = ["autor_id", "autor_nome", "texto"]  # eh_pendencia/pendencia_* removidos na 41ª rodada (migração 027) — ver PENDENCIA_FIELDS abaixo
 # Status que exigem ao menos um relato de andamento registrado (ver create/update_atividade).
 # "Não iniciada" e "Concluída" ficam de fora — todo o resto (inclusive "Cancelada", que também
 # merece um relato explicando o motivo) precisa de relato.
@@ -158,6 +155,15 @@ TIPO_ATIVIDADE_FIELDS = ["nome", "descricao", "ordem", "ativo"]
 MARCO_FIELDS = ["projeto_id", "etapa_id", "nome", "descricao", "data_prevista", "data_real", "origem_importacao_id"]
 RISCO_FIELDS = ["projeto_id", "descricao", "categoria", "probabilidade", "impacto", "mitigacao",
                 "responsavel_id", "status", "identificado_em"]
+# 41ª rodada (migração 027): cadastro formal de Pendências — ver preparar_pendencia() para as
+# regras de validação (responsável de cada lado, vínculos opcionais com atividade/risco) e
+# _proximo_codigo_pendencia() para a geração do código sequencial "PND-001".
+PENDENCIA_FIELDS = [
+    "projeto_id", "codigo", "titulo", "frente_trabalho_id", "atividade_id", "risco_id",
+    "descricao", "impactos", "responsavel_consultoria_id", "responsavel_cliente_id",
+    "data_identificacao", "data_limite", "data_prevista", "data_real",
+    "status", "prioridade", "categoria", "acoes_necessarias", "observacoes",
+]
 CICLO_FIELDS = ["atividade_id", "numero_ciclo", "data_execucao", "qtd_registros_extraidos",
                 "qtd_registros_carregados", "qtd_rejeicoes", "observacoes"]
 # valor_liquido NÃO entra aqui — é coluna GENERATED (valor_total - impostos), o
@@ -318,6 +324,77 @@ def preparar_fatura(data, projeto_id):
             raise ValueError(
                 "Informe o responsável pelo recebimento: um recurso cadastrado ou o nome de uma pessoa do cliente."
             )
+
+
+def _proximo_codigo_pendencia(projeto_id):
+    """Código sequencial por projeto, formato "PND-001" — não há rota de
+    exclusão de pendência (mesmo padrão de riscos/marcos/requisitos, usa-se
+    status 'Cancelada' em vez de apagar), então contar linhas existentes é
+    seguro (nunca reaproveita um número já usado)."""
+    n = db.fetch_one(f"SELECT COUNT(*) AS n FROM pendencias WHERE projeto_id = {db.q(projeto_id)}")["n"]
+    return f"PND-{int(n) + 1:03d}"
+
+
+def preparar_pendencia(data, projeto_id):
+    """Valida e normaliza (in place) os dados de uma pendência antes de
+    inserir/atualizar — usada por create_pendencia/update_pendencia. Levanta
+    ValueError com mensagem amigável quando a regra não é atendida (o
+    chamador converte em 400). Mesmo padrão de preparar_fatura/
+    preparar_projeto_interlocutores acima.
+
+    Regras (41ª rodada, pedidas explicitamente pelo usuário):
+    - frente de trabalho é obrigatória e precisa pertencer a este projeto;
+    - atividade e risco são OPCIONAIS, mas quando informados precisam
+      pertencer a este mesmo projeto;
+    - responsável pela consultoria precisa ser um recurso tipo_vinculo
+      'Consultoria'; responsável pelo cliente precisa ser um recurso
+      tipo_vinculo diferente de 'Consultoria' (Cliente/Terceirizado) — os
+      dois são sempre obrigatórios, sem opção de nome livre (o usuário foi
+      explícito: "tem que ser recurso do projeto").
+    """
+    if "frente_trabalho_id" in data:
+        frente_id = data.get("frente_trabalho_id")
+        if not frente_id:
+            raise ValueError("Informe a frente de trabalho.")
+        frente = db.fetch_one(f"SELECT projeto_id FROM frentes_trabalho WHERE id = {db.q(frente_id)}")
+        if not frente:
+            raise ValueError("Frente de trabalho não encontrada.")
+        if frente["projeto_id"] != projeto_id:
+            raise ValueError("A frente de trabalho informada não pertence a este projeto.")
+
+    if data.get("atividade_id"):
+        ativ = db.fetch_one(f"SELECT projeto_id FROM atividades WHERE id = {db.q(data['atividade_id'])}")
+        if not ativ:
+            raise ValueError("Atividade não encontrada.")
+        if ativ["projeto_id"] != projeto_id:
+            raise ValueError("A atividade informada não pertence a este projeto.")
+
+    if data.get("risco_id"):
+        risco = db.fetch_one(f"SELECT projeto_id FROM riscos WHERE id = {db.q(data['risco_id'])}")
+        if not risco:
+            raise ValueError("Risco não encontrado.")
+        if risco["projeto_id"] != projeto_id:
+            raise ValueError("O risco informado não pertence a este projeto.")
+
+    if "responsavel_consultoria_id" in data:
+        rec_id = data.get("responsavel_consultoria_id")
+        if not rec_id:
+            raise ValueError("Informe o responsável da consultoria.")
+        rec = db.fetch_one(f"SELECT tipo_vinculo FROM recursos WHERE id = {db.q(rec_id)}")
+        if not rec:
+            raise ValueError("Responsável da consultoria não encontrado.")
+        if rec["tipo_vinculo"] != "Consultoria":
+            raise ValueError("O responsável da consultoria precisa ser um recurso Consultoria.")
+
+    if "responsavel_cliente_id" in data:
+        rec_id = data.get("responsavel_cliente_id")
+        if not rec_id:
+            raise ValueError("Informe o responsável do cliente.")
+        rec = db.fetch_one(f"SELECT tipo_vinculo FROM recursos WHERE id = {db.q(rec_id)}")
+        if not rec:
+            raise ValueError("Responsável do cliente não encontrado.")
+        if rec["tipo_vinculo"] == "Consultoria":
+            raise ValueError("O responsável do cliente precisa ser um recurso do cliente ou terceirizado (não Consultoria).")
 
 
 def preparar_projeto_interlocutores(data):
@@ -999,13 +1076,18 @@ def create_app():
         ))
 
     # ---------------------------------------------------------------- relatos
+    # 41ª rodada: relato deixou de carregar o sinalizador de "pendência"
+    # (eh_pendencia/pendencia_*, migração 027) — voltou a ser só o texto de
+    # andamento que já era antes disso. Sinalizar uma pendência a partir de
+    # uma atividade agora é feito pelo cadastro formal `pendencias` (ver
+    # rotas mais abaixo), aberto já com a atividade pré-preenchida pela
+    # própria aba "Pendências" do modal de atividade.
     @app.get("/api/atividades/<id>/relatos")
     def list_relatos(id):
         sql = (
-            "SELECT r.*, au.nome AS autor_cadastro_nome, pr.nome AS pendencia_responsavel_nome "
+            "SELECT r.*, au.nome AS autor_cadastro_nome "
             "FROM atividade_relato r "
             "LEFT JOIN recursos au ON au.id = r.autor_id "
-            "LEFT JOIN recursos pr ON pr.id = r.pendencia_responsavel_id "
             f"WHERE r.atividade_id = {db.q(id)} ORDER BY r.criado_em DESC"
         )
         return jsonify(db.fetch_all(sql))
@@ -1015,30 +1097,10 @@ def create_app():
         data = request.get_json(force=True)
         if not (data.get("texto") or "").strip():
             return jsonify({"erro": "Informe o texto do relato."}), 400
-        if data.get("eh_pendencia"):
-            faltando = [
-                campo for campo in ("pendencia_responsavel_id", "pendencia_prazo_possivel", "pendencia_data_limite")
-                if not data.get(campo)
-            ]
-            if faltando:
-                return jsonify({
-                    "erro": "Pendência exige recurso responsável, prazo possível e data limite."
-                }), 400
         data = dict(data)
         data["atividade_id"] = id
         row = insert_row("atividade_relato", data, ["atividade_id"] + RELATO_FIELDS)
         return jsonify(row), 201
-
-    @app.patch("/api/relatos/<relato_id>/resolver")
-    def resolver_pendencia(relato_id):
-        sql = (
-            "UPDATE atividade_relato SET pendencia_resolvida = TRUE, pendencia_resolvida_em = now() "
-            f"WHERE id = {db.q(relato_id)} AND eh_pendencia RETURNING *"
-        )
-        row = db.execute_returning_one(sql)
-        if not row:
-            abort(404)
-        return jsonify(row)
 
     # ------------------------------------------------------------ dependências
     @app.get("/api/atividades/<id>/dependencias")
@@ -1231,6 +1293,69 @@ def create_app():
     @app.delete("/api/requisitos/<id>")
     def delete_requisito(id):
         return delete_row("requisitos_tr", id)
+
+    @app.get("/api/requisitos/resumo-remocao")
+    def requisitos_resumo_remocao():
+        """Prévia (contagens) pro modal de 'Apagar todos os requisitos' — mesmo
+        espírito do /cronograma/resumo-remocao: mostra o tamanho do estrago
+        antes do usuário confirmar."""
+        projeto_id = request.args.get("projeto_id")
+        if not projeto_id:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        row = db.fetch_one(f"""
+            SELECT
+              (SELECT count(*) FROM requisitos_tr WHERE projeto_id = {db.q(projeto_id)}) AS requisitos,
+              (SELECT count(*) FROM atividade_requisito ar
+                 JOIN requisitos_tr r ON r.id = ar.requisito_id
+                 WHERE r.projeto_id = {db.q(projeto_id)}) AS vinculos_atividade,
+              (SELECT count(*) FROM requisito_referencia_manual rrm
+                 JOIN requisitos_tr r ON r.id = rrm.requisito_id
+                 WHERE r.projeto_id = {db.q(projeto_id)}) AS referencias_manual,
+              (SELECT count(DISTINCT a.id) FROM atividades a
+                 JOIN requisitos_tr r ON r.id = a.requisito_tr_id
+                 WHERE r.projeto_id = {db.q(projeto_id)}) AS atividades_perdem_vinculo
+        """)
+        return jsonify(row or {"requisitos": 0, "vinculos_atividade": 0, "referencias_manual": 0, "atividades_perdem_vinculo": 0})
+
+    @app.post("/api/requisitos/remover-todos")
+    def requisitos_remover_todos():
+        """Apaga TODOS os requisitos do TR do projeto (e, em cascata, os vínculos
+        N:N com atividades e as referências de manuais encontradas em 'Analisar
+        Requisitos'). Atividades que apontavam pra um desses requisitos
+        (atividades.requisito_tr_id) NÃO são apagadas — só perdem esse vínculo
+        direto (fica NULL), porque o campo é opcional e a FK não tem ON DELETE
+        definido. Ação irreversível: por isso exige, em `confirmacao`, o nome
+        exato do projeto — conferido aqui no servidor antes de apagar
+        qualquer coisa (mesmo padrão de /cronograma/remover-tudo)."""
+        data = request.get_json(force=True)
+        projeto_id = data.get("projeto_id")
+        confirmacao = (data.get("confirmacao") or "").strip()
+        if not projeto_id:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        projeto = db.fetch_one(f"SELECT nome FROM projetos WHERE id = {db.q(projeto_id)}")
+        if not projeto:
+            abort(404)
+        if not confirmacao or confirmacao != projeto["nome"]:
+            return jsonify({"erro": "Confirmação não confere com o nome do projeto. Nada foi apagado."}), 400
+        contagem = db.fetch_one(
+            f"SELECT count(*) AS requisitos FROM requisitos_tr WHERE projeto_id = {db.q(projeto_id)}"
+        ) or {"requisitos": 0}
+        db.execute(
+            f"UPDATE atividades SET requisito_tr_id = NULL WHERE requisito_tr_id IN "
+            f"(SELECT id FROM requisitos_tr WHERE projeto_id = {db.q(projeto_id)})"
+        )
+        db.execute(f"DELETE FROM requisitos_tr WHERE projeto_id = {db.q(projeto_id)}")
+        # Ação irreversível e destrutiva — registra como evento sensível dedicado
+        # (não passa por delete_row: é uma exclusão em massa, não de 1 registro).
+        auditoria.registrar_evento_manual(
+            "exclusao",
+            f'Apagou todos os requisitos do TR do projeto "{projeto["nome"]}" '
+            f'({contagem["requisitos"]} requisito(s))',
+            entidade="requisitos_tr", entidade_id=str(projeto_id), entidade_rotulo=projeto["nome"],
+            projeto_id=projeto_id, sensivel=True,
+            detalhes={"requisitos_removidos": contagem["requisitos"]},
+        )
+        return jsonify({"ok": True})
 
     @app.post("/api/requisitos/importar-csv")
     def importar_requisitos_csv():
@@ -2028,6 +2153,65 @@ def create_app():
     @app.put("/api/riscos/<id>")
     def update_risco(id):
         row = patch_row("riscos", id, request.get_json(force=True), RISCO_FIELDS)
+        if not row:
+            abort(404)
+        return jsonify(row)
+
+    # --------------------------------------------------------------- pendências
+    # 41ª rodada — ver preparar_pendencia() acima para as regras de validação.
+    # Sem rota de exclusão (mesmo padrão de riscos/marcos/requisitos) — usar
+    # status "Cancelada" em vez de apagar.
+    @app.get("/api/pendencias")
+    def list_pendencias():
+        pid = request.args.get("projeto_id")
+        sql = (
+            "SELECT p.*, "
+            "f.nome AS frente_nome, "
+            "a.nome AS atividade_nome, a.codigo_wbs AS atividade_codigo_wbs, "
+            "ri.descricao AS risco_descricao, "
+            "rc.nome AS responsavel_consultoria_nome, rcli.nome AS responsavel_cliente_nome, "
+            "(p.status NOT IN ('Resolvida','Cancelada') AND p.data_limite < CURRENT_DATE) AS atrasada "
+            "FROM pendencias p "
+            "JOIN frentes_trabalho f ON f.id = p.frente_trabalho_id "
+            "LEFT JOIN atividades a ON a.id = p.atividade_id "
+            "LEFT JOIN riscos ri ON ri.id = p.risco_id "
+            "JOIN recursos rc ON rc.id = p.responsavel_consultoria_id "
+            "JOIN recursos rcli ON rcli.id = p.responsavel_cliente_id"
+        )
+        if pid:
+            sql += f" WHERE p.projeto_id = {db.q(pid)}"
+        sql += " ORDER BY p.data_limite ASC, p.criado_em DESC"
+        return jsonify(db.fetch_all(sql))
+
+    @app.post("/api/pendencias")
+    def create_pendencia():
+        data = request.get_json(force=True)
+        obrigatorios = ["projeto_id", "titulo", "frente_trabalho_id", "descricao",
+                        "responsavel_consultoria_id", "responsavel_cliente_id", "data_limite"]
+        faltando = [c for c in obrigatorios if not data.get(c)]
+        if faltando:
+            return jsonify({"erro": "Informe identificação, frente, descrição, responsáveis (consultoria e cliente) e data limite."}), 400
+        try:
+            preparar_pendencia(data, data["projeto_id"])
+        except ValueError as e:
+            return jsonify({"erro": str(e)}), 400
+        data = dict(data)
+        data["codigo"] = _proximo_codigo_pendencia(data["projeto_id"])
+        return jsonify(insert_row("pendencias", data, PENDENCIA_FIELDS)), 201
+
+    @app.put("/api/pendencias/<id>")
+    def update_pendencia(id):
+        atual = db.fetch_one(f"SELECT projeto_id FROM pendencias WHERE id = {db.q(id)}")
+        if not atual:
+            abort(404)
+        data = request.get_json(force=True)
+        try:
+            preparar_pendencia(data, atual["projeto_id"])
+        except ValueError as e:
+            return jsonify({"erro": str(e)}), 400
+        data = dict(data)
+        data.pop("codigo", None)  # código nunca muda depois de gerado
+        row = patch_row("pendencias", id, data, PENDENCIA_FIELDS)
         if not row:
             abort(404)
         return jsonify(row)
