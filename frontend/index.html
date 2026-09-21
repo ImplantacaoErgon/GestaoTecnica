@@ -430,6 +430,7 @@
         </div>
       </div>
       <button data-view="minhas-atividades">Minhas atividades</button>
+      <button data-view="pendencias">🚩 Pendências</button>
       <button data-view="faturas">💵 Faturas</button>
       <div class="tab-group" data-group>
         <button type="button" class="tab-group-trigger" data-views="requisitos,manuais,analisar-requisitos">Requisitos TR <span class="caret">▾</span></button>
@@ -718,6 +719,27 @@
         </div>
         <ul class="list-simple" id="marcos-list"></ul>
       </div>
+    </div>
+  </section>
+
+  <!-- ============ PENDÊNCIAS (41ª rodada) ============ -->
+  <section class="view" id="view-pendencias">
+    <h2 class="view-title">🚩 Pendências</h2>
+    <div class="view-sub">Registro formal de pendências — problemas em curso, com responsável da consultoria e do cliente e prazo de solução. Pode ou não estar ligada a uma atividade do cronograma e/ou a um risco já cadastrado.</div>
+    <div class="kpis" id="pend-kpis"></div>
+    <div class="filters">
+      <input type="text" id="pf-search" placeholder="Buscar por código, título, descrição…">
+      <select id="pf-frente"><option value="">Frente (todas)</option></select>
+      <select id="pf-status"><option value="">Status (todos)</option><option>Aberta</option><option>Em andamento</option><option>Resolvida</option><option>Cancelada</option></select>
+      <select id="pf-prioridade"><option value="">Prioridade (todas)</option><option>Urgente</option><option>Alta</option><option>Média</option><option>Baixa</option></select>
+      <select id="pf-atrasada"><option value="">Atrasadas (todas)</option><option value="1">Só atrasadas</option></select>
+      <button class="btn small" id="btn-new-pendencia" style="margin-left:auto;">+ Nova pendência</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Código</th><th>Título/Frente</th><th>Responsáveis</th><th>Status</th><th>Prioridade</th><th>Data limite</th></tr></thead>
+        <tbody id="pendencias-tbody"></tbody>
+      </table>
     </div>
   </section>
 
@@ -1040,6 +1062,7 @@
       <button data-pane="detalhes" class="active">Detalhes</button>
       <button data-pane="responsaveis">Recursos</button>
       <button data-pane="relatos">Relatos</button>
+      <button data-pane="pendencias">🚩 Pendências</button>
       <button data-pane="dependencias">Dependências</button>
       <button data-pane="requisitos">Requisitos vinculados</button>
       <button data-pane="anexos">Anexos</button>
@@ -1106,17 +1129,17 @@
         <p class="muted" id="at-relatos-hint" style="margin-bottom:10px;"></p>
         <ul class="list-simple" id="at-relatos-list"></ul>
         <div class="field full" style="margin-top:14px;"><label>Novo relato</label><textarea id="at-relato-texto" placeholder="O que foi feito, discutido ou observado nesta atividade..."></textarea></div>
-        <div class="field full" style="display:flex;align-items:center;gap:8px;margin:2px 0 8px;">
-          <input type="checkbox" id="at-relato-pendencia" style="width:auto;">
-          <label for="at-relato-pendencia" style="margin:0;">É uma pendência (impede o andamento da atividade)</label>
-        </div>
-        <div id="at-relato-pendencia-campos" style="display:none;" class="modal-body" >
-          <div class="field"><label>Recurso responsável pela pendência</label><select id="at-relato-pend-responsavel"></select></div>
-          <div class="field"></div>
-          <div class="field"><label>Prazo possível</label><input id="at-relato-pend-prazo" type="date"></div>
-          <div class="field"><label>Data limite</label><input id="at-relato-pend-limite" type="date"></div>
-        </div>
         <div style="text-align:right;"><button class="btn small" id="at-relato-add">Adicionar relato</button></div>
+      </div>
+    </div>
+
+    <!-- 41ª rodada: pendência deixou de ser um sinalizador dentro do relato
+         (eh_pendencia) — agora é o cadastro formal `pendencias`, aberto aqui
+         já com esta atividade (e a frente dela) pré-preenchidas. -->
+    <div class="modal-pane" data-pane="pendencias">
+      <div class="modal-body single-col">
+        <div style="text-align:right;margin-bottom:10px;"><button class="btn small" id="at-pend-nova">+ Nova pendência</button></div>
+        <ul class="list-simple" id="at-pendencias-list"></ul>
       </div>
     </div>
 
@@ -1283,6 +1306,46 @@
     <div class="modal-foot">
       <span></span>
       <div style="display:flex;gap:8px;"><button class="btn secondary" id="marco-cancel">Cancelar</button><button class="btn" id="marco-save">Salvar</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= MODAL: PENDÊNCIA (41ª rodada) ================= -->
+<div class="overlay" id="overlay-pendencia" hidden>
+  <div class="modal" style="max-width:840px;">
+    <div class="modal-head"><h2 id="pend-modal-title">Nova pendência</h2><button class="btn ghost" id="pend-close">✕</button></div>
+    <div class="modal-body">
+      <div class="field" id="pend-codigo-wrap" hidden><label>Código</label><input id="pend-codigo" type="text" disabled></div>
+      <div class="field full"><label>Identificação *</label><input id="pend-titulo" type="text" placeholder="Um resumo curto da pendência"></div>
+      <div class="field full"><label>Descrição *</label><textarea id="pend-descricao"></textarea></div>
+
+      <div class="field"><label>Frente de trabalho *</label><select id="pend-frente"></select></div>
+      <div class="field"><label>Atividade (opcional)</label><select id="pend-atividade"></select></div>
+      <div class="field"><label>Risco relacionado (opcional)</label><select id="pend-risco"></select></div>
+      <div class="field"><label>Categoria</label><input id="pend-categoria" type="text" placeholder="Ex: Técnica, Contratual, Financeira, Dados…"></div>
+
+      <div class="field"><label>Responsável — Consultoria *</label><select id="pend-responsavel-consultoria"></select></div>
+      <div class="field"><label>Responsável — Cliente *</label><select id="pend-responsavel-cliente"></select></div>
+
+      <div class="field"><label>Status</label><select id="pend-status"><option>Aberta</option><option>Em andamento</option><option>Resolvida</option><option>Cancelada</option></select></div>
+      <div class="field"><label>Prioridade</label><select id="pend-prioridade"><option>Urgente</option><option>Alta</option><option selected>Média</option><option>Baixa</option></select></div>
+
+      <div class="field"><label>Identificada em</label><input id="pend-data-identificacao" type="date"></div>
+      <div class="field"><label>Data limite de solução *</label><input id="pend-data-limite" type="date"></div>
+      <div class="field"><label>Data prevista de solução</label><input id="pend-data-prevista" type="date"></div>
+      <div class="field"><label>Data real de solução</label><input id="pend-data-real" type="date"></div>
+
+      <div class="field full"><label>Impactos</label><textarea id="pend-impactos" placeholder="O que essa pendência afeta se não for resolvida…"></textarea></div>
+      <div class="field full"><label>Ações necessárias</label><textarea id="pend-acoes"></textarea></div>
+      <div class="field full"><label>Observações</label><textarea id="pend-observacoes"></textarea></div>
+      <div class="field full" id="pend-historico-wrap" hidden>
+        <label>🛡️ Histórico</label>
+        <div id="pend-historico"></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <span></span>
+      <div style="display:flex;gap:8px;"><button class="btn secondary" id="pend-cancel">Cancelar</button><button class="btn" id="pend-save">Salvar</button></div>
     </div>
   </div>
 </div>
@@ -1790,8 +1853,9 @@ async function chamarAuthApi(path, body){
 // ---------------- estado global ----------------
 let USUARIO_LOGADO = null;
 let PARAMETROS = null; // logo + nome da empresa (Configurações > Parâmetros) — ver carregarParametros()
-let PROJETO=null, PROJETOS=[], ETAPAS=[], FRENTES=[], TIPOS=[], RECURSOS=[], USUARIOS=[], ATIVIDADES=[], REQUISITOS=[], RISCOS=[], MARCOS=[], CALENDARIO=[], MANUAIS=[], FATURAS=[];
-let editingAtividadeId=null, editingRequisitoId=null, editingRiscoId=null, editingMarcoId=null;
+let PROJETO=null, PROJETOS=[], ETAPAS=[], FRENTES=[], TIPOS=[], RECURSOS=[], USUARIOS=[], ATIVIDADES=[], REQUISITOS=[], RISCOS=[], MARCOS=[], CALENDARIO=[], MANUAIS=[], FATURAS=[], PENDENCIAS=[];
+const PENDENCIA_STATUS_COR = {"Aberta":"warn", "Em andamento":"accent", "Resolvida":"ok", "Cancelada":"faint"};
+let editingAtividadeId=null, editingRequisitoId=null, editingRiscoId=null, editingMarcoId=null, editingPendenciaId=null;
 let MA_DATA_REF=new Date(), MA_GRADE=null; // "Minhas atividades" — data de referência da semana mostrada e último retorno do servidor
 const STATUS_EXIGE_RELATO = new Set(["Em andamento","Bloqueada","Cancelada"]);
 
@@ -1858,9 +1922,9 @@ async function recarregarDadosDoProjeto(){
     api(`/calendario?projeto_id=${PROJETO.id}`)
   ]);
   fillStaticSelects();
-  await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas()]);
+  await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias()]);
   fillStaticSelects();
-  renderDashboard(); renderCronograma(); renderRequisitos(); renderRiscosMarcos(); renderConfigTable(); renderAnalisarRequisitos(); renderFaturas();
+  renderDashboard(); renderCronograma(); renderRequisitos(); renderRiscosMarcos(); renderConfigTable(); renderAnalisarRequisitos(); renderFaturas(); renderPendencias();
   // "Minhas atividades" NÃO depende do projeto ativo desde a 16ª rodada
   // (mostra todos os projetos em que o usuário está delegado) — por isso,
   // ao contrário das demais views desta função, não precisa recarregar
@@ -2050,14 +2114,14 @@ async function afterProjetoReady(){
   aplicarMarcaNoTopo();
   fillStaticSelects();
   wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireRemoverCronograma(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma();
-  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal();
+  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal();
   setupCsvTemplateLink();
-  await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas()]);
+  await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias()]);
   // Reaplica agora que REQUISITOS/ATIVIDADES já estão carregados — os selects
   // "Item do TR" (atividade) e "Atividade (entregável)" (fatura) dependem
   // deles e a primeira chamada acima rodou antes desse load.
   fillStaticSelects();
-  renderDashboard(); renderCronograma(); renderRequisitos(); renderRiscosMarcos(); renderConfigTable(); renderAnalisarRequisitos(); renderFaturas();
+  renderDashboard(); renderCronograma(); renderRequisitos(); renderRiscosMarcos(); renderConfigTable(); renderAnalisarRequisitos(); renderFaturas(); renderPendencias();
   $("tabs").style.display = "flex";
 }
 
@@ -2076,6 +2140,7 @@ function fillStaticSelects(){
   $("rf-frente").innerHTML = `<option value="">Frente (todas)</option>` + frenteOpts(false);
   $("req-frente").innerHTML = `<option value="">—</option>` + frenteOpts(false);
   $("ar-frente").innerHTML = `<option value="">Frente (todas)</option>` + frenteOpts(false);
+  $("pf-frente").innerHTML = `<option value="">Frente (todas)</option>` + frenteOpts(false);
 
   $("at-tipo").innerHTML = `<option value="">—</option>` + TIPOS.map(t=>`<option value="${t.id}">${esc(t.nome)}${t.ativo===false?" (inativo)":""}</option>`).join("");
   $("at-requisito-tr").innerHTML = `<option value="">—</option>` + REQUISITOS.map(r=>`<option value="${r.id}">${esc(r.codigo)} — ${esc(r.titulo)}</option>`).join("");
@@ -2095,10 +2160,22 @@ function fillStaticSelects(){
   const recursoOpts = RECURSOS.map(r=>`<option value="${r.id}">${recursoLabel(r)}</option>`).join("");
   $("f-responsavel").innerHTML = `<option value="">Recurso (todos)</option>` + recursoOpts;
   $("req-responsavel").innerHTML = `<option value="">—</option>` + recursoOpts;
-  $("at-relato-pend-responsavel").innerHTML = `<option value="">—</option>` + recursoOpts;
   // Riscos & Marcos (41ª rodada)
   $("risco-responsavel").innerHTML = `<option value="">—</option>` + recursoOpts;
   $("marco-etapa").innerHTML = `<option value="">— Sem etapa —</option>` + ETAPAS.map(e=>`<option value="${e.id}">${e.numero} — ${esc(e.nome)}</option>`).join("");
+
+  // Pendências (41ª rodada) — frente é obrigatória (sem opção "sem frente"),
+  // atividade e risco são opcionais. Responsável consultoria/cliente reaproveita
+  // o mesmo filtro por tipo_vinculo já usado em Fatura/Interlocutores (ver
+  // recursoOptsConsultoria/recursoOptsCliente mais abaixo — por isso o bloco de
+  // Pendências nos selects fica depois deles nesta função). Depende de
+  // ATIVIDADES e RISCOS, carregados no mesmo lote — mesmo motivo do comentário
+  // de "fat-atividade" acima sobre reaplicar fillStaticSelects() depois do load.
+  $("pend-frente").innerHTML = `<option value="">Selecione…</option>` + frenteOpts(true);
+  $("pend-atividade").innerHTML = `<option value="">— Nenhuma —</option>` + ATIVIDADES
+    .map(a=>`<option value="${a.id}" data-frente="${a.frente_trabalho_id||""}">${a.codigo_wbs?esc(a.codigo_wbs)+" — ":""}${esc(a.nome)}</option>`).join("");
+  $("pend-risco").innerHTML = `<option value="">— Nenhum —</option>` + RISCOS
+    .map(r=>`<option value="${r.id}">${esc(r.descricao)}</option>`).join("");
 
   // Fatura (27ª rodada): responsável pela entrega precisa ser da Consultoria (regra
   // validada de novo no backend, em preparar_fatura); responsável pelo
@@ -2124,6 +2201,12 @@ function fillStaticSelects(){
   $("proj-gerente-cliente-recurso").innerHTML = `<option value="">—</option>` + recursoOptsCliente + optManual;
   $("proj-gerente-consultoria-recurso").innerHTML = `<option value="">—</option>` + recursoOptsConsultoria + optManual;
   $("proj-lider-consultoria-recurso").innerHTML = `<option value="">—</option>` + recursoOptsConsultoria + optManual;
+
+  // Pendências (41ª rodada): responsável consultoria/cliente são sempre um
+  // recurso cadastrado (sem "nome sem cadastro" — o usuário foi explícito:
+  // "tem que ser recurso do projeto"), reaproveitando o mesmo filtro por lado.
+  $("pend-responsavel-consultoria").innerHTML = `<option value="">Selecione…</option>` + recursoOptsConsultoria;
+  $("pend-responsavel-cliente").innerHTML = `<option value="">Selecione…</option>` + recursoOptsCliente;
 
   const statusAtiv = ["Não iniciada","Em andamento","Bloqueada",
     "Concluída","Concluída com atraso","Concluída com esforço maior","Concluída com atraso e esforço maior",
@@ -2322,7 +2405,7 @@ function wireDashboardRefresh(){
     const btn = $("btn-refresh-dashboard"), status = $("dash-refresh-status");
     btn.disabled = true; status.textContent = "Atualizando…";
     try{
-      await Promise.all([loadAtividades(), loadRiscosMarcos()]);
+      await Promise.all([loadAtividades(), loadRiscosMarcos(), loadPendencias()]);
       renderDashboard();
       status.textContent = "Atualizado às " + new Date().toLocaleTimeString("pt-BR");
     }catch(e){
@@ -2849,6 +2932,7 @@ function reqFilters(){
     classificacao:$("rf-classificacao").value, atendimento:$("rf-atendimento").value, status:$("rf-status").value };
 }
 const TIPO_REQ_COLOR = {"Funcional":"accent","Não Funcional":"warn"};
+const PRIORIDADE_COLOR = {"Urgente":"danger","Alta":"warn","Média":"accent","Baixa":"faint"};
 function renderRequisitos(){
   const f = reqFilters();
   const list = REQUISITOS.filter(r=>{
@@ -2991,6 +3075,144 @@ async function saveMarco(){
   }catch(e){}
 }
 
+// ================= PENDÊNCIAS (41ª rodada) =================
+// Cadastro formal de pendências — ver migração 027 e preparar_pendencia()
+// no backend para as regras (unifica o que antes era um sinalizador dentro
+// do relato de andamento de uma atividade, a pedido do usuário). Tela
+// própria (não um card pequeno como Riscos & Marcos) porque tem campos
+// demais pra caber numa lista simples: código, título/frente, dois
+// responsáveis, três datas, status, prioridade — precisa de filtro/tabela
+// como Requisitos TR.
+async function loadPendencias(){
+  PENDENCIAS = await api(`/pendencias?projeto_id=${PROJETO.id}`);
+}
+
+function pendFilters(){
+  return {
+    search: ($("pf-search").value||"").trim().toLowerCase(),
+    frente: $("pf-frente").value,
+    status: $("pf-status").value,
+    prioridade: $("pf-prioridade").value,
+    soAtrasadas: $("pf-atrasada").value==="1",
+  };
+}
+
+function renderPendencias(){
+  const f = pendFilters();
+  const list = PENDENCIAS.filter(p=>{
+    if(f.frente && p.frente_trabalho_id!==f.frente) return false;
+    if(f.status && p.status!==f.status) return false;
+    if(f.prioridade && p.prioridade!==f.prioridade) return false;
+    if(f.soAtrasadas && !p.atrasada) return false;
+    if(f.search && !([p.codigo,p.titulo,p.descricao].join(" ").toLowerCase().includes(f.search))) return false;
+    return true;
+  });
+
+  const abertasOuAndamento = PENDENCIAS.filter(p=>p.status==="Aberta"||p.status==="Em andamento");
+  $("pend-kpis").innerHTML = [
+    {l:"Total", v:PENDENCIAS.length},
+    {l:"Abertas", v:PENDENCIAS.filter(p=>p.status==="Aberta").length},
+    {l:"Em andamento", v:PENDENCIAS.filter(p=>p.status==="Em andamento").length},
+    {l:"Atrasadas", v:PENDENCIAS.filter(p=>p.atrasada).length},
+    {l:"Resolvidas", v:PENDENCIAS.filter(p=>p.status==="Resolvida").length},
+  ].map(k=>`<div class="kpi"><div class="label">${k.l}</div><div class="value">${k.v}</div></div>`).join("");
+
+  $("pendencias-tbody").innerHTML = list.length ? list.map(p=>`
+    <tr class="clickable" data-id="${p.id}">
+      <td class="mono">${esc(p.codigo)}</td>
+      <td>${esc(p.titulo)}<div class="muted">${esc(p.frente_nome||"—")}${p.atividade_nome?` · ${p.atividade_codigo_wbs?esc(p.atividade_codigo_wbs)+" — ":""}${esc(p.atividade_nome)}`:""}</div></td>
+      <td>${esc(p.responsavel_consultoria_nome||"—")} <span class="muted">/</span> ${esc(p.responsavel_cliente_nome||"—")}</td>
+      <td>${pill(p.status, PENDENCIA_STATUS_COR[p.status]||"faint")}</td>
+      <td>${pill(p.prioridade, PRIORIDADE_COLOR[p.prioridade]||"faint")}</td>
+      <td>${fmtDate(p.data_limite)}${p.atrasada?" "+pill("Atrasada","danger"):""}</td>
+    </tr>`).join("") : `<tr class="empty-row"><td colspan="6">Nenhuma pendência encontrada.</td></tr>`;
+  $("pendencias-tbody").querySelectorAll("tr[data-id]").forEach(tr=>{
+    tr.addEventListener("click", ()=>openPendenciaModal(byId(PENDENCIAS, tr.dataset.id)));
+  });
+}
+["pf-search","pf-frente","pf-status","pf-prioridade","pf-atrasada"].forEach(id=>{
+  document.addEventListener("DOMContentLoaded", ()=>{ $(id).addEventListener("input", renderPendencias); $(id).addEventListener("change", renderPendencias); });
+});
+
+function wirePendenciaModal(){
+  $("btn-new-pendencia").addEventListener("click", ()=>openPendenciaModal(null));
+  $("pend-close").addEventListener("click", closePendenciaModal);
+  $("pend-cancel").addEventListener("click", closePendenciaModal);
+  $("overlay-pendencia").addEventListener("click", e=>{ if(e.target.id==="overlay-pendencia") closePendenciaModal(); });
+  $("pend-save").addEventListener("click", savePendencia);
+  // Conveniência: ao escolher uma atividade, pré-preenche a frente a partir
+  // dela — só quando a frente ainda estiver vazia, nunca sobrescreve uma
+  // escolha explícita do usuário (mesmo critério de autoCalcularDataPrevista).
+  $("pend-atividade").addEventListener("change", ()=>{
+    if($("pend-frente").value) return;
+    const opt = $("pend-atividade").selectedOptions[0];
+    const frenteId = opt ? opt.dataset.frente : "";
+    if(frenteId) $("pend-frente").value = frenteId;
+  });
+}
+
+function openPendenciaModal(p, prefill){
+  editingPendenciaId = p ? p.id : null;
+  $("pend-modal-title").textContent = p ? "Editar pendência" : "Nova pendência";
+  $("pend-codigo-wrap").hidden = !p;
+  $("pend-codigo").value = p?.codigo || "";
+  $("pend-titulo").value = p?.titulo || "";
+  $("pend-descricao").value = p?.descricao || "";
+  $("pend-frente").value = p?.frente_trabalho_id || prefill?.frente_trabalho_id || "";
+  $("pend-atividade").value = p?.atividade_id || prefill?.atividade_id || "";
+  $("pend-risco").value = p?.risco_id || "";
+  $("pend-categoria").value = p?.categoria || "";
+  $("pend-responsavel-consultoria").value = p?.responsavel_consultoria_id || "";
+  $("pend-responsavel-cliente").value = p?.responsavel_cliente_id || "";
+  $("pend-status").value = p?.status || "Aberta";
+  $("pend-prioridade").value = p?.prioridade || "Média";
+  $("pend-data-identificacao").value = p?.data_identificacao || toISO(new Date());
+  $("pend-data-limite").value = p?.data_limite || "";
+  $("pend-data-prevista").value = p?.data_prevista || "";
+  $("pend-data-real").value = p?.data_real || "";
+  $("pend-impactos").value = p?.impactos || "";
+  $("pend-acoes").value = p?.acoes_necessarias || "";
+  $("pend-observacoes").value = p?.observacoes || "";
+  $("pend-historico-wrap").hidden = !p;
+  if(p) audRenderHistoricoRegistro("pend-historico", "pendencias", p.id);
+  $("overlay-pendencia").hidden = false;
+}
+function closePendenciaModal(){ $("overlay-pendencia").hidden = true; editingPendenciaId = null; }
+async function savePendencia(){
+  const data = {
+    titulo: $("pend-titulo").value.trim(),
+    descricao: $("pend-descricao").value.trim(),
+    frente_trabalho_id: $("pend-frente").value || null,
+    atividade_id: $("pend-atividade").value || null,
+    risco_id: $("pend-risco").value || null,
+    categoria: $("pend-categoria").value.trim() || null,
+    responsavel_consultoria_id: $("pend-responsavel-consultoria").value || null,
+    responsavel_cliente_id: $("pend-responsavel-cliente").value || null,
+    status: $("pend-status").value,
+    prioridade: $("pend-prioridade").value,
+    data_identificacao: $("pend-data-identificacao").value || null,
+    data_limite: $("pend-data-limite").value || null,
+    data_prevista: $("pend-data-prevista").value || null,
+    data_real: $("pend-data-real").value || null,
+    impactos: $("pend-impactos").value.trim() || null,
+    acoes_necessarias: $("pend-acoes").value.trim() || null,
+    observacoes: $("pend-observacoes").value.trim() || null,
+  };
+  if(!data.titulo || !data.descricao || !data.frente_trabalho_id || !data.responsavel_consultoria_id
+     || !data.responsavel_cliente_id || !data.data_limite){
+    toast("Informe identificação, descrição, frente, responsáveis (consultoria e cliente) e data limite.", true);
+    return;
+  }
+  if(!editingPendenciaId) data.projeto_id = PROJETO.id;
+  try{
+    if(editingPendenciaId) await api(`/pendencias/${editingPendenciaId}`, {method:"PUT", body: JSON.stringify(data)});
+    else await api("/pendencias", {method:"POST", body: JSON.stringify(data)});
+    await loadPendencias(); renderPendencias();
+    if(editingAtividadeId) refreshPendenciasAtividade();
+    closePendenciaModal(); toast("Pendência salva.");
+  }catch(e){}
+}
+
 // ================= MODAL ATIVIDADE =================
 function switchPane(container, name){
   container.querySelectorAll(".modal-tabs button").forEach(b=>b.classList.toggle("active", b.dataset.pane===name));
@@ -3088,8 +3310,10 @@ function wireAtividadeModal(){
     await api("/anexos", {method:"POST", body: fd});
     $("at-anexo-file").value=""; await refreshAnexos();
   });
-  $("at-relato-pendencia").addEventListener("change", e=>{
-    $("at-relato-pendencia-campos").style.display = e.target.checked ? "grid" : "none";
+  $("at-pend-nova").addEventListener("click", ()=>{
+    if(!editingAtividadeId){ toast("Salve a atividade antes de registrar uma pendência.", true); return; }
+    const atividade = byId(ATIVIDADES, editingAtividadeId);
+    openPendenciaModal(null, {atividade_id: editingAtividadeId, frente_trabalho_id: atividade?.frente_trabalho_id || ""});
   });
   $("at-status").addEventListener("change", ()=>{
     if(editingAtividadeId) refreshRelatos();
@@ -3108,18 +3332,9 @@ function wireAtividadeModal(){
   $("at-relato-add").addEventListener("click", async ()=>{
     const texto = $("at-relato-texto").value.trim();
     if(!texto){ toast("Informe o texto do relato.", true); return; }
-    const eh_pendencia = $("at-relato-pendencia").checked;
-    const data = {
-      texto, eh_pendencia,
-      pendencia_responsavel_id: eh_pendencia ? ($("at-relato-pend-responsavel").value || null) : null,
-      pendencia_prazo_possivel: eh_pendencia ? ($("at-relato-pend-prazo").value || null) : null,
-      pendencia_data_limite: eh_pendencia ? ($("at-relato-pend-limite").value || null) : null,
-    };
     try{
-      await api(`/atividades/${editingAtividadeId}/relatos`, {method:"POST", body: JSON.stringify(data)});
-      $("at-relato-texto").value=""; $("at-relato-pendencia").checked=false;
-      $("at-relato-pendencia-campos").style.display="none";
-      $("at-relato-pend-responsavel").value=""; $("at-relato-pend-prazo").value=""; $("at-relato-pend-limite").value="";
+      await api(`/atividades/${editingAtividadeId}/relatos`, {method:"POST", body: JSON.stringify({texto})});
+      $("at-relato-texto").value="";
       await refreshRelatos();
       toast("Relato adicionado.");
     }catch(e){}
@@ -3156,18 +3371,18 @@ function openAtividadeModal(atividade){
   $("at-dtini-real").value = atividade?.dtini_real || "";
   $("at-dtfim-real").value = atividade?.dtfim_real || "";
   $("at-observacoes").value = atividade?.observacoes || "";
-  $("at-relato-texto").value=""; $("at-relato-pendencia").checked=false; $("at-relato-pendencia-campos").style.display="none";
-  $("at-relato-pend-responsavel").value=""; $("at-relato-pend-prazo").value=""; $("at-relato-pend-limite").value="";
+  $("at-relato-texto").value="";
   switchPane($("overlay-atividade"), "detalhes");
   $("overlay-atividade").hidden = false;
   $("at-tab-historico").style.display = atividade ? "" : "none";
-  if(atividade){ refreshResponsaveis(); refreshDeps(); refreshReqs(); refreshAnexos(); refreshRelatos(); }
+  if(atividade){ refreshResponsaveis(); refreshDeps(); refreshReqs(); refreshAnexos(); refreshRelatos(); refreshPendenciasAtividade(); }
   else {
     $("at-resp-list").innerHTML = `<li class="muted">Salve a atividade antes de adicionar recursos.</li>`;
     $("at-deps-list").innerHTML = `<li class="muted">Salve a atividade antes de adicionar dependências.</li>`;
     $("at-reqs-list").innerHTML=""; $("at-anexos-list").innerHTML="";
     $("at-relatos-list").innerHTML = `<li class="muted">Salve a atividade antes de registrar relatos.</li>`;
     $("at-relatos-hint").textContent = "";
+    $("at-pendencias-list").innerHTML = `<li class="muted">Salve a atividade antes de registrar uma pendência.</li>`;
   }
 }
 function closeAtividadeModal(){ $("overlay-atividade").hidden = true; editingAtividadeId=null; }
@@ -3263,27 +3478,32 @@ async function refreshRelatos(){
     : `Relatos ficam registrados aqui de forma permanente (não podem ser editados ou apagados depois).`;
   $("at-relatos-list").innerHTML = relatos.length ? relatos.map(r=>{
     const autor = r.autor_cadastro_nome || r.autor_nome || "—";
-    let pendBlock = "";
-    if(r.eh_pendencia){
-      const resp = r.pendencia_responsavel_nome || "—";
-      pendBlock = `<div style="margin-top:6px;">
-        ${pill(r.pendencia_resolvida ? "Pendência resolvida" : "Pendência aberta", r.pendencia_resolvida ? "ok" : "danger")}
-        <span class="muted" style="margin-left:8px;">Recurso: ${esc(resp)} · Prazo possível: ${fmtDate(r.pendencia_prazo_possivel)} · Data limite: ${fmtDate(r.pendencia_data_limite)}</span>
-        ${!r.pendencia_resolvida ? `<button class="btn ghost" data-resolver="${r.id}" style="margin-left:8px;">Marcar como resolvida</button>` : ""}
-      </div>`;
-    }
     return `<li style="display:block;">
       <div style="display:flex;justify-content:space-between;gap:10px;">
         <span style="font-weight:600;">${esc(autor)}</span>
         <span class="muted mono" style="font-size:11.5px;">${fmtDateTime(r.criado_em)}</span>
       </div>
       <div style="margin-top:4px;white-space:pre-wrap;">${esc(r.texto)}</div>
-      ${pendBlock}
     </li>`;
   }).join("") : `<li class="muted">Nenhum relato registrado ainda.</li>`;
-  $("at-relatos-list").querySelectorAll("button[data-resolver]").forEach(b=>b.addEventListener("click", async ()=>{
-    await api(`/relatos/${b.dataset.resolver}/resolver`, {method:"PATCH"}); await refreshRelatos();
-  }));
+}
+
+// 41ª rodada: pendências vinculadas a esta atividade, vindas do cadastro
+// formal `pendencias` (PENDENCIAS já carregado no state do projeto — ver
+// loadPendencias) — não é uma chamada de API própria, só um filtro local.
+async function refreshPendenciasAtividade(){
+  const lista = PENDENCIAS.filter(p=>p.atividade_id===editingAtividadeId);
+  $("at-pendencias-list").innerHTML = lista.length ? lista.map(p=>`
+    <li class="clickable" data-id="${p.id}" style="cursor:pointer;flex-direction:column;align-items:flex-start;gap:4px;">
+      <div style="display:flex;justify-content:space-between;width:100%;">
+        <strong style="font-size:12.5px;">${esc(p.codigo)} — ${esc(p.titulo)}</strong>
+        ${pill(p.status, PENDENCIA_STATUS_COR[p.status]||"faint")}
+      </div>
+      <div class="muted">Data limite: ${fmtDate(p.data_limite)}${p.atrasada?" "+pill("Atrasada","danger"):""}</div>
+    </li>`).join("") : `<li class="muted">Nenhuma pendência vinculada a esta atividade.</li>`;
+  $("at-pendencias-list").querySelectorAll("li[data-id]").forEach(li=>{
+    li.addEventListener("click", ()=>openPendenciaModal(byId(PENDENCIAS, li.dataset.id)));
+  });
 }
 
 // ================= MODAL REQUISITO =================
@@ -4031,8 +4251,8 @@ async function removerCronogramaConfirmado(){
       body: JSON.stringify({ projeto_id: PROJETO.id, confirmacao: digitado }),
     });
     toast("Cronograma removido: todas as atividades e marcos deste projeto foram apagados.");
-    await Promise.all([loadAtividades(), loadRiscosMarcos()]);
-    renderDashboard(); renderCronograma(); renderRiscosMarcos();
+    await Promise.all([loadAtividades(), loadRiscosMarcos(), loadPendencias()]);
+    renderDashboard(); renderCronograma(); renderRiscosMarcos(); renderPendencias();
     fecharRemoverCronogramaModal();
   }catch(e){}
   rcRemovendo = false;
@@ -4256,8 +4476,8 @@ async function confirmarReplanejamento(){
       body: JSON.stringify({ projeto_id: PROJETO.id, data_ancora: ancora }),
     });
     toast(`Cronograma replanejado: ${r.atividades_alteradas} atividade(s) e ${r.marcos_alterados} marco(s) com data nova.`);
-    await Promise.all([loadAtividades(), loadRiscosMarcos()]);
-    renderDashboard(); renderCronograma(); renderRiscosMarcos();
+    await Promise.all([loadAtividades(), loadRiscosMarcos(), loadPendencias()]);
+    renderDashboard(); renderCronograma(); renderRiscosMarcos(); renderPendencias();
     fecharReplanejarModal();
   }catch(e){}
   rpConfirmando = false;
@@ -5361,7 +5581,7 @@ async function reloadConfigEntidades(){
   renderConfigTable();
   // nomes/ativo podem ter mudado — atualiza o que já está carregado na tela
   await loadAtividades();
-  renderDashboard(); renderCronograma(); renderRequisitos(); renderRiscosMarcos();
+  renderDashboard(); renderCronograma(); renderRequisitos(); renderRiscosMarcos(); renderPendencias();
 }
 
 // ================= Parâmetros do site (Configurações > Parâmetros) =================
