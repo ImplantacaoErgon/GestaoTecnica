@@ -1860,7 +1860,21 @@ async function api(path, opts={}){
   }
   if(!res.ok){ let msg="Erro na requisição"; try{ msg=(await res.json()).erro||msg; }catch(e){} toast(msg, true); throw new Error(msg); }
   if(res.status===204) return null;
-  return res.json();
+  // A resposta veio com status de sucesso (2xx), mas ainda assim pode não ser
+  // JSON válido (ex.: por engano recebeu de volta o próprio index.html em vez
+  // dos dados). Sem isto, esse caso vira só "Unexpected token '<'... is not
+  // valid JSON" sem dizer QUAL chamada falhou, obrigando a investigar às
+  // cegas pelo Network tab — lendo como texto e tentando o parse manualmente,
+  // o erro (se acontecer) já vem com a rota e um trecho da resposta real.
+  const raw = await res.text();
+  try{
+    return raw ? JSON.parse(raw) : null;
+  }catch(e){
+    const msg = `Resposta inesperada (não é JSON) de ${path}: ${raw.slice(0,150)}`;
+    console.error(msg);
+    toast(`Falha ao processar resposta de ${path}.`, true);
+    throw new Error(msg);
+  }
 }
 
 // chamarAuthApi(): usada só nas telas de login/cadastro/esqueci-senha, ANTES
