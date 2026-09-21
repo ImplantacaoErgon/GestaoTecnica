@@ -53,6 +53,25 @@ DECISÕES DE PRODUTO (combinadas com o usuário antes de implementar):
   / eh_entregavel), quando presentes na planilha ("Sim" na célula), marcam a
   atividade — mesmo espírito "só adiciona": em branco nunca desmarca uma
   atividade já marcada manualmente pela tela.
+- 42ª rodada: o modo "flat" (planilha no formato da própria "Exportar
+  Cronograma" — ver cronograma_export.py) passou a CRIAR uma atividade nova
+  quando o Código da linha não é encontrado no projeto, em vez de só avisar
+  "não encontrada" e pular a linha. Motivo: o caso de uso real não é só
+  "exportei, ajustei 2 células, reimportei por cima" — é também "apaguei o
+  cronograma (ou comecei um projeto do zero) e quero restaurar/popular a
+  partir da própria planilha exportada", e nesse caso o comportamento antigo
+  (só atualiza) deixava o usuário sem nenhuma forma de repovoar o projeto
+  pelo modo flat. Ao criar, a Etapa/Frente indicadas na planilha também são
+  criadas automaticamente se ainda não existirem no projeto (casando por
+  número/nome — mesma lógica de _resolver_etapa_flat/_resolver_frente_flat
+  usada pra atualização); Status/Prioridade em branco ou não reconhecidos na
+  criação caem no default do sistema ('Não iniciada'/'Média') em vez de
+  "mantido" (não existe valor anterior pra manter). Uma linha nova SEM
+  Código também é criada (mesmo espírito), mas com aviso de que uma
+  reimportação futura não vai conseguir casar aquela linha automaticamente
+  (recomenda-se preencher o Código pela tela depois). O comportamento pra
+  atividades JÁ EXISTENTES (casadas por Código) não muda em nada — continua
+  só atualizando, nunca apagando um campo por causa de uma célula em branco.
 """
 import csv
 import io
@@ -643,6 +662,50 @@ def _resolver_recursos_flat(texto):
     return nomes
 
 
+def _proximo_numero_etapa_flat(etapas_existentes):
+    usados = {e["numero"] for e in etapas_existentes if e.get("numero") is not None}
+    n = 1
+    while n in usados:
+        n += 1
+    return n
+
+
+def _criar_etapa_flat(texto, projeto_id, etapas_existentes, statements):
+    """Cria (acumula o INSERT de) uma Etapa nova a partir do texto da coluna
+    'Etapa' da planilha flat, usada quando o modo flat cria uma atividade
+    nova e a Etapa indicada não bate com nenhuma já cadastrada no projeto —
+    ver 42ª rodada. Atualiza `etapas_existentes` (a lista compartilhada por
+    toda a confirmação) IN PLACE, pra que outra linha da mesma planilha que
+    cite a mesma Etapa reaproveite, em vez de criar duplicada. Casa/reaproveita
+    o número quando a célula vem no formato exportado 'N — Nome' e esse
+    número ainda está livre; senão usa o próximo número livre do projeto."""
+    m = re.match(r"^\s*(\d+)\s*(?:—|-)\s*(.*)$", texto)
+    nome = (m.group(2).strip() if m and m.group(2).strip() else texto.strip())[:250]
+    numero_pedido = int(m.group(1)) if m else None
+    ja_usado = any(e.get("numero") == numero_pedido for e in etapas_existentes)
+    numero = numero_pedido if (numero_pedido and not ja_usado) else _proximo_numero_etapa_flat(etapas_existentes)
+    novo_id = str(uuid_lib.uuid4())
+    statements.append(_sql_insert("etapas", {
+        "id": novo_id, "projeto_id": projeto_id, "numero": numero, "nome": nome,
+        "descricao": "Criada automaticamente pela importação da planilha exportada (Etapa não encontrada no projeto).",
+    }))
+    etapas_existentes.append({"id": novo_id, "numero": numero, "nome": nome})
+    return novo_id
+
+
+def _criar_frente_flat(texto, projeto_id, frentes_existentes, statements):
+    """Idem _criar_etapa_flat, para Frente de trabalho — não tem número, só nome."""
+    nome = texto.strip()[:250]
+    novo_id = str(uuid_lib.uuid4())
+    ordem = len(frentes_existentes) + 1
+    statements.append(_sql_insert("frentes_trabalho", {
+        "id": novo_id, "projeto_id": projeto_id, "nome": nome,
+        "cor_hex": CORES_FRENTE[(ordem - 1) % len(CORES_FRENTE)], "ordem": ordem,
+    }))
+    frentes_existentes.append({"id": novo_id, "nome": nome})
+    return novo_id
+
+
 # ============================================================================
 # Análise da planilha (dispatcher: modo "flat" x modo "hierárquico")
 # ============================================================================
@@ -771,9 +834,11 @@ def _sugerir_match(nome_planilha, existentes):
 def _preview_flat(projeto_id, resultado, file_bytes, filename):
     avisos = [
         "Planilha reconhecida no formato de exportação desta tela (botão \"Exportar Cronograma\") — "
-        "atualiza apenas atividades já existentes no projeto, casadas pela coluna Código; não cria "
-        "atividades, marcos ou dependências novas. Campos deixados em branco na planilha NÃO apagam "
-        "o que já está gravado (para limpar um campo, edite pela tela)."
+        "atualiza as atividades já existentes no projeto, casadas pela coluna Código, e CRIA uma "
+        "atividade nova (criando também a Etapa/Frente indicadas, se ainda não existirem) para todo "
+        "Código que não for encontrado — é o mesmo arquivo que serve pra restaurar/popular o "
+        "cronograma inteiro num projeto vazio. Campos deixados em branco numa atividade JÁ EXISTENTE "
+        "nunca apagam o que já está gravado (para limpar um campo, edite pela tela)."
     ] + list(resultado["avisos"])
 
     existentes = db.fetch_all(
@@ -782,24 +847,43 @@ def _preview_flat(projeto_id, resultado, file_bytes, filename):
     codigos_existentes = {r["codigo_wbs"] for r in existentes}
     etapas_existentes = db.fetch_all(f"SELECT id, numero, nome FROM etapas WHERE projeto_id = {db.q(projeto_id)}")
     frentes_existentes = db.fetch_all(f"SELECT id, nome FROM frentes_trabalho WHERE projeto_id = {db.q(projeto_id)}")
+    etapas_novas_avisadas, frentes_novas_avisadas = set(), set()
 
-    atualizar = marcados_entregavel = marcados_master = 0
+    novas = atualizar = marcados_entregavel = marcados_master = 0
     for l in resultado["linhas"]:
-        if not (l["codigo"] and l["codigo"] in codigos_existentes):
-            avisos.append(
-                f"Atividade '{l['nome'] or '(sem nome)'}' (Código {l['codigo'] or '—'}) não encontrada "
-                "no projeto — não será atualizada."
-            )
-            continue
-        atualizar += 1
+        codigo_existe = bool(l["codigo"] and l["codigo"] in codigos_existentes)
+        if not codigo_existe:
+            if not l["nome"]:
+                avisos.append(f"Linha com Código {l['codigo'] or '—'} sem nome de atividade — será ignorada, não será criada.")
+                continue
+            novas += 1
+            if not l["codigo"]:
+                avisos.append(f"Atividade '{l['nome']}' será criada sem Código — uma reimportação futura não vai conseguir casar essa linha automaticamente.")
+        else:
+            atualizar += 1
+
         if l["etapa_txt"] and not _resolver_etapa_flat(l["etapa_txt"], etapas_existentes):
-            avisos.append(f"Etapa '{l['etapa_txt']}' (Código {l['codigo']}) não reconhecida — Etapa será mantida como está.")
+            if codigo_existe:
+                avisos.append(f"Etapa '{l['etapa_txt']}' (Código {l['codigo']}) não reconhecida — Etapa será mantida como está.")
+            elif l["etapa_txt"] not in etapas_novas_avisadas:
+                etapas_novas_avisadas.add(l["etapa_txt"])
+                avisos.append(f"Etapa '{l['etapa_txt']}' não existe no projeto — será criada automaticamente.")
         if l["frente_txt"] and not _resolver_frente_flat(l["frente_txt"], frentes_existentes):
-            avisos.append(f"Frente '{l['frente_txt']}' (Código {l['codigo']}) não reconhecida — Frente será mantida como está.")
+            if codigo_existe:
+                avisos.append(f"Frente '{l['frente_txt']}' (Código {l['codigo']}) não reconhecida — Frente será mantida como está.")
+            elif l["frente_txt"] not in frentes_novas_avisadas:
+                frentes_novas_avisadas.add(l["frente_txt"])
+                avisos.append(f"Frente '{l['frente_txt']}' não existe no projeto — será criada automaticamente.")
         if l["status_txt"] and l["status_txt"] not in STATUS_ATIVIDADE_VALIDOS:
-            avisos.append(f"Status '{l['status_txt']}' (Código {l['codigo']}) não reconhecido — status será mantido como está.")
+            if codigo_existe:
+                avisos.append(f"Status '{l['status_txt']}' (Código {l['codigo']}) não reconhecido — status será mantido como está.")
+            else:
+                avisos.append(f"Status '{l['status_txt']}' (Código {l['codigo'] or '—'}) não reconhecido — atividade será criada como 'Não iniciada'.")
         if l["prioridade_txt"] and l["prioridade_txt"] not in PRIORIDADE_VALIDOS:
-            avisos.append(f"Prioridade '{l['prioridade_txt']}' (Código {l['codigo']}) não reconhecida — prioridade será mantida como está.")
+            if codigo_existe:
+                avisos.append(f"Prioridade '{l['prioridade_txt']}' (Código {l['codigo']}) não reconhecida — prioridade será mantida como está.")
+            else:
+                avisos.append(f"Prioridade '{l['prioridade_txt']}' (Código {l['codigo'] or '—'}) não reconhecida — atividade será criada com prioridade 'Média'.")
         if l["eh_entregavel"]:
             marcados_entregavel += 1
         if l["eh_master"]:
@@ -811,7 +895,7 @@ def _preview_flat(projeto_id, resultado, file_bytes, filename):
     return {
         "token": token,
         "resumo": {
-            "atividades_novas": 0, "atividades_atualizar": atualizar,
+            "atividades_novas": novas, "atividades_atualizar": atualizar,
             "marcos_novos": 0, "marcos_atualizar": 0,
             "dependencias": 0, "horas_aproximadas": 0,
             "marcados_entregavel": marcados_entregavel, "marcados_master": marcados_master,
@@ -983,14 +1067,20 @@ def _executar_em_lotes(statements, rotulo, tamanho=LOTE_TAMANHO, timeout=180):
 
 
 def _confirmar_flat(projeto_id, resultado):
-    """Grava as atualizações do modo flat (round-trip da própria exportação):
-    SÓ atualiza atividades já existentes, casadas pela coluna Código — nunca
-    cria atividade, marco ou dependência nova, e nunca apaga um campo já
-    gravado só porque a célula da planilha veio em branco (mesma cautela já
-    aplicada a recursos/dependências/Master/Entregável no modo hierárquico,
-    aqui estendida a todos os campos, já que este é o próprio formato de
-    edição em massa do sistema — a planilha não carrega necessariamente TODOS
-    os campos da atividade, só os que interessam editar)."""
+    """Grava as atualizações do modo flat (round-trip da própria exportação).
+    Atividade JÁ EXISTENTE (casada pela coluna Código) é só ATUALIZADA — nunca
+    apaga um campo já gravado só porque a célula da planilha veio em branco
+    (mesma cautela já aplicada a recursos/dependências/Master/Entregável no
+    modo hierárquico, aqui estendida a todos os campos, já que este é o
+    próprio formato de edição em massa do sistema — a planilha não carrega
+    necessariamente TODOS os campos da atividade, só os que interessam
+    editar). Uma linha cujo Código NÃO é encontrado no projeto CRIA uma
+    atividade nova (42ª rodada — ver nota no topo do arquivo), criando também
+    a Etapa/Frente indicadas se ainda não existirem; isso é o que permite
+    restaurar/popular o cronograma inteiro a partir da própria planilha
+    exportada, num projeto vazio ou num projeto do zero. Ainda não cria
+    marco nem dependência (a planilha flat não carrega predecessoras, e
+    marco/atividade nesse formato são a mesma linha — ver cronograma_export.py)."""
     avisos = list(resultado["avisos"])
     erros = []
 
@@ -1004,48 +1094,142 @@ def _confirmar_flat(projeto_id, resultado):
 
     hoje = datetime.now().date().isoformat()
     statements = []
-    atualizadas = 0
+    atualizadas = criadas = 0
 
     for l in resultado["linhas"]:
         existente = por_codigo.get(l["codigo"]) if l["codigo"] else None
-        if not existente:
-            avisos.append(
-                f"Atividade '{l['nome'] or '(sem nome)'}' (Código {l['codigo'] or '—'}) não encontrada "
-                "no projeto — não foi atualizada."
-            )
-            continue
-        atividade_id = existente["id"]
 
-        campos = {}
-        if l["nome"]:
-            campos["nome"] = l["nome"][:250]
+        # ---------------------------------------------------------------
+        # Caminho 1: Código já existe no projeto -> ATUALIZA (comportamento
+        # original, inalterado)
+        # ---------------------------------------------------------------
+        if existente:
+            atividade_id = existente["id"]
+
+            campos = {}
+            if l["nome"]:
+                campos["nome"] = l["nome"][:250]
+            if l["etapa_txt"]:
+                etapa_id = _resolver_etapa_flat(l["etapa_txt"], etapas_existentes)
+                if etapa_id:
+                    campos["etapa_id"] = etapa_id
+                else:
+                    avisos.append(f"Etapa '{l['etapa_txt']}' (Código {l['codigo']}) não reconhecida — Etapa mantida.")
+            if l["frente_txt"]:
+                frente_id = _resolver_frente_flat(l["frente_txt"], frentes_existentes)
+                if frente_id:
+                    campos["frente_trabalho_id"] = frente_id
+                else:
+                    avisos.append(f"Frente '{l['frente_txt']}' (Código {l['codigo']}) não reconhecida — Frente mantida.")
+
+            status_novo = None
+            if l["status_txt"]:
+                if l["status_txt"] in STATUS_ATIVIDADE_VALIDOS:
+                    status_novo = l["status_txt"]
+                    if status_novo != existente.get("status"):
+                        campos["status"] = status_novo
+                else:
+                    avisos.append(f"Status '{l['status_txt']}' (Código {l['codigo']}) não reconhecido — status mantido.")
+            if l["prioridade_txt"]:
+                if l["prioridade_txt"] in PRIORIDADE_VALIDOS:
+                    campos["prioridade"] = l["prioridade_txt"]
+                else:
+                    avisos.append(f"Prioridade '{l['prioridade_txt']}' (Código {l['codigo']}) não reconhecida — prioridade mantida.")
+
+            if l["dtini_prev"] is not None:
+                campos["dtini_prev"] = l["dtini_prev"].isoformat()
+            if l["dtfim_prev"] is not None:
+                campos["dtfim_prev"] = l["dtfim_prev"].isoformat()
+            if l["dtini_real"] is not None:
+                campos["dtini_real"] = l["dtini_real"].isoformat()
+            if l["dtfim_real"] is not None:
+                campos["dtfim_real"] = l["dtfim_real"].isoformat()
+            if l["prazo_horas"] is not None:
+                campos["prazo_horas"] = l["prazo_horas"]
+            if l["horas_realizadas"] is not None:
+                campos["horas_realizadas"] = l["horas_realizadas"]
+            if l["pct"] is not None:
+                campos["percentual_concluido"] = l["pct"]
+            if l["observacoes"] is not None:
+                campos["observacoes"] = l["observacoes"]
+            # ★ Master / 💰 Entregável: mesmo espírito "só adiciona" do modo
+            # hierárquico — "Sim" na planilha liga a marcação; em branco nunca
+            # desliga uma já marcada na tela.
+            if l["eh_entregavel"]:
+                campos["eh_entregavel"] = True
+            if l["eh_master"]:
+                campos["eh_atividade_master"] = True
+
+            recursos_vinculados = 0
+            for nome_recurso in _resolver_recursos_flat(l["responsaveis_txt"]):
+                rid = recurso_id_by_nome.get(nome_recurso)
+                if rid:
+                    statements.append(
+                        f"INSERT INTO atividade_recurso (atividade_id, recurso_id) "
+                        f"VALUES ({db.q(atividade_id)}, {db.q(rid)}) "
+                        f"ON CONFLICT (atividade_id, recurso_id) DO NOTHING;"
+                    )
+                    recursos_vinculados += 1
+                else:
+                    avisos.append(f"Recurso '{nome_recurso}' (Código {l['codigo']}) não encontrado em Configurações — não vinculado.")
+
+            if status_novo and status_novo in STATUS_EXIGE_RELATO and status_novo != existente.get("status"):
+                statements.append(_sql_insert("atividade_relato", {
+                    "id": str(uuid_lib.uuid4()), "atividade_id": atividade_id,
+                    "autor_nome": "Importação de cronograma (planilha exportada)",
+                    "texto": f"Atualizado via reimportação da planilha exportada em {hoje}.",
+                }))
+
+            if campos:
+                statements.append(_sql_update("atividades", atividade_id, campos))
+            if campos or recursos_vinculados:
+                atualizadas += 1
+            continue
+
+        # ---------------------------------------------------------------
+        # Caminho 2: Código não encontrado -> CRIA (42ª rodada). Uma linha
+        # sem nome nenhum não tem o que criar — ignorada com aviso, igual ao
+        # comportamento de "linha inválida" já aplicado na análise da planilha.
+        # ---------------------------------------------------------------
+        if not l["nome"]:
+            avisos.append(f"Linha com Código {l['codigo'] or '—'} sem nome de atividade — ignorada, não foi criada.")
+            continue
+
+        atividade_id = str(uuid_lib.uuid4())
+
+        etapa_id = None
         if l["etapa_txt"]:
             etapa_id = _resolver_etapa_flat(l["etapa_txt"], etapas_existentes)
-            if etapa_id:
-                campos["etapa_id"] = etapa_id
-            else:
-                avisos.append(f"Etapa '{l['etapa_txt']}' (Código {l['codigo']}) não reconhecida — Etapa mantida.")
+            if not etapa_id:
+                etapa_id = _criar_etapa_flat(l["etapa_txt"], projeto_id, etapas_existentes, statements)
+                avisos.append(f"Etapa '{l['etapa_txt']}' não existia no projeto — criada automaticamente para a atividade '{l['nome']}' (Código {l['codigo'] or '—'}).")
+
+        frente_id = None
         if l["frente_txt"]:
             frente_id = _resolver_frente_flat(l["frente_txt"], frentes_existentes)
-            if frente_id:
-                campos["frente_trabalho_id"] = frente_id
-            else:
-                avisos.append(f"Frente '{l['frente_txt']}' (Código {l['codigo']}) não reconhecida — Frente mantida.")
+            if not frente_id:
+                frente_id = _criar_frente_flat(l["frente_txt"], projeto_id, frentes_existentes, statements)
+                avisos.append(f"Frente '{l['frente_txt']}' não existia no projeto — criada automaticamente para a atividade '{l['nome']}' (Código {l['codigo'] or '—'}).")
 
-        status_novo = None
+        status_novo = "Não iniciada"
         if l["status_txt"]:
             if l["status_txt"] in STATUS_ATIVIDADE_VALIDOS:
                 status_novo = l["status_txt"]
-                if status_novo != existente.get("status"):
-                    campos["status"] = status_novo
             else:
-                avisos.append(f"Status '{l['status_txt']}' (Código {l['codigo']}) não reconhecido — status mantido.")
+                avisos.append(f"Status '{l['status_txt']}' (Código {l['codigo'] or '—'}) não reconhecido — atividade criada como 'Não iniciada'.")
+
+        prioridade_nova = "Média"
         if l["prioridade_txt"]:
             if l["prioridade_txt"] in PRIORIDADE_VALIDOS:
-                campos["prioridade"] = l["prioridade_txt"]
+                prioridade_nova = l["prioridade_txt"]
             else:
-                avisos.append(f"Prioridade '{l['prioridade_txt']}' (Código {l['codigo']}) não reconhecida — prioridade mantida.")
+                avisos.append(f"Prioridade '{l['prioridade_txt']}' (Código {l['codigo'] or '—'}) não reconhecida — atividade criada com prioridade 'Média'.")
 
+        campos = {
+            "id": atividade_id, "projeto_id": projeto_id, "nome": l["nome"][:250],
+            "codigo_wbs": l["codigo"], "etapa_id": etapa_id, "frente_trabalho_id": frente_id,
+            "status": status_novo, "prioridade": prioridade_nova,
+        }
         if l["dtini_prev"] is not None:
             campos["dtini_prev"] = l["dtini_prev"].isoformat()
         if l["dtfim_prev"] is not None:
@@ -1062,13 +1246,17 @@ def _confirmar_flat(projeto_id, resultado):
             campos["percentual_concluido"] = l["pct"]
         if l["observacoes"] is not None:
             campos["observacoes"] = l["observacoes"]
-        # ★ Master / 💰 Entregável: mesmo espírito "só adiciona" do modo
-        # hierárquico — "Sim" na planilha liga a marcação; em branco nunca
-        # desliga uma já marcada na tela.
         if l["eh_entregavel"]:
             campos["eh_entregavel"] = True
         if l["eh_master"]:
             campos["eh_atividade_master"] = True
+
+        statements.append(_sql_insert("atividades", campos))
+
+        if l["codigo"]:
+            por_codigo[l["codigo"]] = {"id": atividade_id, "codigo_wbs": l["codigo"], "status": status_novo}
+        else:
+            avisos.append(f"Atividade '{l['nome']}' criada sem Código — uma reimportação futura não vai conseguir casar essa linha automaticamente; preencha o Código pela tela.")
 
         recursos_vinculados = 0
         for nome_recurso in _resolver_recursos_flat(l["responsaveis_txt"]):
@@ -1081,24 +1269,21 @@ def _confirmar_flat(projeto_id, resultado):
                 )
                 recursos_vinculados += 1
             else:
-                avisos.append(f"Recurso '{nome_recurso}' (Código {l['codigo']}) não encontrado em Configurações — não vinculado.")
+                avisos.append(f"Recurso '{nome_recurso}' (Código {l['codigo'] or '—'}) não encontrado em Configurações — não vinculado.")
 
-        if status_novo and status_novo in STATUS_EXIGE_RELATO and status_novo != existente.get("status"):
+        if status_novo in STATUS_EXIGE_RELATO:
             statements.append(_sql_insert("atividade_relato", {
                 "id": str(uuid_lib.uuid4()), "atividade_id": atividade_id,
                 "autor_nome": "Importação de cronograma (planilha exportada)",
-                "texto": f"Atualizado via reimportação da planilha exportada em {hoje}.",
+                "texto": f"Criada via importação da planilha exportada em {hoje}, já como status '{status_novo}'.",
             }))
 
-        if campos:
-            statements.append(_sql_update("atividades", atividade_id, campos))
-        if campos or recursos_vinculados:
-            atualizadas += 1
+        criadas += 1
 
     _executar_em_lotes(statements, "atividades (planilha exportada)")
 
     return {
-        "atividades_criadas": 0, "atividades_atualizadas": atualizadas,
+        "atividades_criadas": criadas, "atividades_atualizadas": atualizadas,
         "marcos_criados": 0, "marcos_atualizados": 0,
         "dependencias_criadas": 0, "dependencias_existentes": 0,
         "horas_aproximadas": 0,
@@ -1122,6 +1307,7 @@ def confirmar(token, projeto_id, mapeamento_etapas, mapeamento_frentes):
         ret = _confirmar_flat(projeto_id, resultado)
         _remover_temp(token)
         print(f"[cronograma_import] confirmar() [flat]: concluído em {time.monotonic() - inicio:.1f}s — "
+              f"{ret['atividades_criadas']} atividade(s) criada(s), "
               f"{ret['atividades_atualizadas']} atividade(s) atualizada(s)", flush=True)
         return ret
 
