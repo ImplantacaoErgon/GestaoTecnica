@@ -1594,6 +1594,16 @@
       caindo ou data adiada; a caixa de relato aparece na prévia, linha a linha. Atividades concluídas ou canceladas não
       podem ser editadas aqui — use o modal de edição individual. Nada é gravado até você confirmar.</p>
 
+      <div class="filters" id="el-filtros">
+        <select id="el-f-etapa"><option value="">Etapa (todas)</option></select>
+        <select id="el-f-frente"><option value="">Frente (todas)</option></select>
+        <input type="date" id="el-f-periodo-ini" title="Mostra só atividades cujo período previsto cruza com esta data em diante">
+        <span class="muted" style="font-size:12.5px;">até</span>
+        <input type="date" id="el-f-periodo-fim" title="Deixe em branco para não limitar o fim do período">
+        <button class="btn secondary small" id="el-f-limpar" type="button">Limpar filtros</button>
+        <span class="muted" id="el-f-contagem" style="font-size:12.5px;"></span>
+      </div>
+
       <div class="table-wrap" style="max-height:400px;margin-bottom:14px;">
         <table>
           <thead><tr>
@@ -4628,6 +4638,21 @@ function wireEdicaoLoteCronograma(){
   $("el-analisar").addEventListener("click", analisarEdicaoLote);
   $("el-gerar-versao").addEventListener("change", ()=>{ $("el-rotulo-wrap").hidden = !$("el-gerar-versao").checked; });
   $("el-confirmar").addEventListener("click", confirmarEdicaoLote);
+
+  // Filtro (Etapa/Frente/período) — só mostra/esconde linhas já montadas (não
+  // re-renderiza), pra nunca perder uma edição em andamento numa linha que
+  // saia de vista por causa do filtro. O filtro é aplicado sobre o valor
+  // ORIGINAL (de quando o modal abriu) de cada atividade, não sobre o que
+  // está sendo digitado agora — ver data-f-* em linhaEdicaoLote().
+  ["el-f-etapa","el-f-frente","el-f-periodo-ini","el-f-periodo-fim"].forEach(id=>{
+    $(id).addEventListener("input", aplicarFiltroEdicaoLote);
+    $(id).addEventListener("change", aplicarFiltroEdicaoLote);
+  });
+  $("el-f-limpar").addEventListener("click", ()=>{
+    $("el-f-etapa").value=""; $("el-f-frente").value="";
+    $("el-f-periodo-ini").value=""; $("el-f-periodo-fim").value="";
+    aplicarFiltroEdicaoLote();
+  });
   // Qualquer alteração num campo depois de já ter analisado invalida a análise —
   // evita confirmar um resultado que não corresponde mais ao que está na tela
   // (mesma cautela do rp-ancora no Replanejamento, ver analisarReplanejamento).
@@ -4653,6 +4678,36 @@ function wireEdicaoLoteCronograma(){
     fecharPopupRecursosLote();
   });
   document.addEventListener("keydown", e=>{ if(e.key === "Escape") fecharPopupRecursosLote(); });
+}
+
+// Mostra/esconde as linhas já montadas em #el-linhas-tbody conforme os
+// filtros de Etapa, Frente de trabalho e período previsto (mesma lógica de
+// cruzamento de período usada em applyFilters()/periodRange() do Cronograma:
+// entra quem tem alguma sobreposição com o intervalo informado). Não afeta
+// quais linhas entram em "Analisar alterações"/"Confirmar" — isso já é
+// resolvido sozinho em coletarEdicoesLote(), que só considera o que foi de
+// fato alterado, esteja a linha visível ou escondida pelo filtro.
+function aplicarFiltroEdicaoLote(){
+  const etapa = $("el-f-etapa").value;
+  const frente = $("el-f-frente").value;
+  const ini = $("el-f-periodo-ini").value;
+  const fim = $("el-f-periodo-fim").value;
+  let visiveis = 0, total = 0;
+  $("el-linhas-tbody").querySelectorAll("tr[data-id]").forEach(tr=>{
+    total++;
+    let ok = true;
+    if(etapa && tr.dataset.fEtapa !== etapa) ok = false;
+    if(ok && frente && tr.dataset.fFrente !== frente) ok = false;
+    if(ok && (ini || fim)){
+      const aIni = tr.dataset.fIni, aFim = tr.dataset.fFim;
+      if(!aIni || !aFim) ok = false;
+      else if(ini && aFim < ini) ok = false;
+      else if(fim && aIni > fim) ok = false;
+    }
+    tr.hidden = !ok;
+    if(ok) visiveis++;
+  });
+  $("el-f-contagem").textContent = total ? `Mostrando ${visiveis} de ${total} atividade(s).` : "";
 }
 
 function fecharPopupRecursosLote(){
@@ -4700,7 +4755,7 @@ function linhaEdicaoLote(a, predecessoras, sucessoras){
     .map(p=>`<option value="${p}" ${a.prioridade===p?"selected":""}>${p}</option>`).join("");
 
   return `
-    <tr data-id="${a.id}">
+    <tr data-id="${a.id}" data-f-etapa="${a.etapa_id||""}" data-f-frente="${a.frente_trabalho_id||""}" data-f-ini="${a.dtini_prev||""}" data-f-fim="${a.dtfim_prev||""}">
       <td class="mono">${esc(a.codigo_wbs||"—")}</td>
       <td>
         <input type="text" data-campo="nome" value="${esc(a.nome||"")}" ${dis} style="margin-bottom:2px;display:block;">
@@ -4734,6 +4789,13 @@ async function abrirEdicaoLoteModal(){
   $("el-rotulo-wrap").hidden = false;
   $("el-rotulo-versao").value = `Antes da edição em massa de ${new Date().toLocaleDateString('pt-BR')}`;
 
+  $("el-f-etapa").innerHTML = `<option value="">Etapa (todas)</option>` +
+    ETAPAS.map(e=>`<option value="${e.id}">${e.numero} — ${esc(e.nome)}</option>`).join("");
+  $("el-f-frente").innerHTML = `<option value="">Frente (todas)</option>` +
+    FRENTES.map(f=>`<option value="${f.id}">${esc(f.nome)}${f.ativo===false?" (inativa)":""}</option>`).join("");
+  $("el-f-etapa").value = ""; $("el-f-frente").value = "";
+  $("el-f-periodo-ini").value = ""; $("el-f-periodo-fim").value = "";
+
   let deps = [];
   try{ deps = await api(`/projetos/${PROJETO.id}/dependencias`); }catch(e){}
   const predecessoras = {}, sucessoras = {};
@@ -4754,6 +4816,7 @@ async function abrirEdicaoLoteModal(){
   $("el-linhas-tbody").querySelectorAll("button[data-recursos-btn]").forEach(btn=>{
     btn.addEventListener("click", ()=> abrirPopupRecursosLote(btn, btn.dataset.recursosBtn));
   });
+  aplicarFiltroEdicaoLote();
   $("overlay-edicao-lote-cronograma").hidden = false;
 }
 function fecharEdicaoLoteModal(){ $("overlay-edicao-lote-cronograma").hidden = true; fecharPopupRecursosLote(); }

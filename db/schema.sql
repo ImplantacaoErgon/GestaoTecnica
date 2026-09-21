@@ -308,25 +308,19 @@ CREATE TRIGGER trg_atividades_historico
 
 -- Relatos de andamento (consultores/cliente) — log temporal, append-only (sem UPDATE/DELETE pela aplicação).
 -- Toda atividade com status diferente de "Não iniciada"/"Concluída" precisa ter ao menos um relato
--- (regra aplicada no backend). Quando eh_pendencia = true, guarda quem precisa resolver, um prazo
--- possível e uma data limite — insumo para futuras análises/relatórios executivos (IA analisa, não decide).
+-- (regra aplicada no backend). Até a migração 026 este relato também podia ser marcado como
+-- "pendência" (eh_pendencia + campos pendencia_*); a migração 027 removeu esses campos — sinalizar
+-- uma pendência a partir de uma atividade agora é feito pelo cadastro formal `pendencias` (ver
+-- abaixo), pré-preenchido com a atividade, aberto pela própria aba "Pendências" do modal.
 CREATE TABLE atividade_relato (
   id                        uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   atividade_id              uuid NOT NULL REFERENCES atividades(id) ON DELETE CASCADE,
   autor_id                  uuid REFERENCES recursos(id),      -- autor cadastrado como recurso (consultor da consultoria ou do cliente)
   autor_nome                text,                              -- alternativa livre, caso o autor não esteja cadastrado em recursos
   texto                     text NOT NULL,
-  eh_pendencia              boolean NOT NULL DEFAULT false,
-  pendencia_responsavel_id  uuid REFERENCES recursos(id),      -- obrigatório quando eh_pendencia = true
-  pendencia_prazo_possivel  date,                              -- estimativa realista de resolução — obrigatório quando eh_pendencia = true
-  pendencia_data_limite     date,                              -- prazo máximo tolerável — obrigatório quando eh_pendencia = true
-  pendencia_resolvida       boolean NOT NULL DEFAULT false,
-  pendencia_resolvida_em    timestamptz,
-  criado_em                 timestamptz NOT NULL DEFAULT now(),
-  CHECK (NOT eh_pendencia OR (pendencia_responsavel_id IS NOT NULL AND pendencia_prazo_possivel IS NOT NULL AND pendencia_data_limite IS NOT NULL))
+  criado_em                 timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_relato_atividade ON atividade_relato(atividade_id, criado_em DESC);
-CREATE INDEX idx_relato_pendencia_aberta ON atividade_relato(atividade_id) WHERE eh_pendencia AND NOT pendencia_resolvida;
 COMMENT ON TABLE atividade_relato IS 'Registro temporal (append-only) de relatos de andamento — insumo futuro para análise de IA e relatórios executivos (a IA analisa e sugere, não decide/coordena).';
 
 -- ============================================================================
@@ -470,6 +464,50 @@ CREATE TABLE riscos (
 );
 CREATE TRIGGER trg_riscos_atualizado_em BEFORE UPDATE ON riscos
   FOR EACH ROW EXECUTE FUNCTION set_atualizado_em();
+
+-- ============================================================================
+-- 12B. PENDÊNCIAS (41ª rodada, migração 027)
+-- ============================================================================
+-- Situação distinta de risco (evento futuro possível) e marco (data
+-- contratual): um problema JÁ em curso, com responsável de cada lado
+-- (consultoria e cliente) e prazo cobrando solução. Pode ou não estar
+-- ligada a uma atividade e/ou a um risco já cadastrado. Sem rota de
+-- exclusão (mesmo padrão de riscos/marcos/requisitos) — usar status
+-- 'Cancelada' em vez de apagar.
+CREATE TYPE status_pendencia_enum AS ENUM ('Aberta','Em andamento','Resolvida','Cancelada');
+
+CREATE TABLE pendencias (
+  id                          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  projeto_id                  uuid NOT NULL REFERENCES projetos(id) ON DELETE CASCADE,
+  codigo                      text NOT NULL,        -- gerado pelo backend, formato "PND-001" (sequencial por projeto)
+  titulo                      text NOT NULL,
+  frente_trabalho_id          uuid NOT NULL REFERENCES frentes_trabalho(id),
+  atividade_id                uuid REFERENCES atividades(id) ON DELETE SET NULL,
+  risco_id                    uuid REFERENCES riscos(id) ON DELETE SET NULL,
+  descricao                   text NOT NULL,
+  impactos                    text,
+  responsavel_consultoria_id  uuid NOT NULL REFERENCES recursos(id),  -- tipo_vinculo = 'Consultoria' (validado no backend)
+  responsavel_cliente_id      uuid NOT NULL REFERENCES recursos(id),  -- tipo_vinculo <> 'Consultoria' (validado no backend)
+  data_identificacao          date NOT NULL DEFAULT CURRENT_DATE,
+  data_limite                 date NOT NULL,
+  data_prevista                date,
+  data_real                   date,
+  status                      status_pendencia_enum NOT NULL DEFAULT 'Aberta',
+  prioridade                  prioridade_enum NOT NULL DEFAULT 'Média',
+  categoria                   text,
+  acoes_necessarias           text,
+  observacoes                 text,
+  criado_em                   timestamptz NOT NULL DEFAULT now(),
+  atualizado_em                timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (projeto_id, codigo)
+);
+CREATE INDEX idx_pendencias_projeto ON pendencias(projeto_id);
+CREATE INDEX idx_pendencias_atividade ON pendencias(atividade_id) WHERE atividade_id IS NOT NULL;
+CREATE INDEX idx_pendencias_risco ON pendencias(risco_id) WHERE risco_id IS NOT NULL;
+CREATE INDEX idx_pendencias_abertas ON pendencias(projeto_id, data_limite) WHERE status NOT IN ('Resolvida','Cancelada');
+CREATE TRIGGER trg_pendencias_atualizado_em BEFORE UPDATE ON pendencias
+  FOR EACH ROW EXECUTE FUNCTION set_atualizado_em();
+COMMENT ON TABLE pendencias IS 'Registro formal de pendências (RAID log).';
 
 -- ============================================================================
 -- 13. CALENDÁRIO ÚTIL (feriados/fins de semana do cliente — usado no CPM)
@@ -937,7 +975,7 @@ documentacao (singleton por tipo — este documento e o Documento Executivo)
 
 ### 6.2 Tipos enumerados (vocabulário fechado)
 
-`prioridade_enum` (Urgente/Alta/Média/Baixa) · `status_atividade_enum` (Não iniciada/Em andamento/Bloqueada/Concluída/Cancelada) · `tipo_dependencia_enum` (FS/SS/FF/SF) · `classificacao_tr_enum` · `atendimento_tr_enum` · `status_requisito_enum` · `cobranca_enum` (Sim/Não/N-A) · `tipo_requisito_enum` (Funcional/Não Funcional) · `tipo_vinculo_enum` (Consultoria/Cliente/Terceirizado) · `nivel_risco_enum` (Baixo/Médio/Alto) · `status_risco_enum` (Aberto/Mitigado/Encerrado) · `entidade_anexo_enum` (atividade/requisito/risco/marco/projeto).
+`prioridade_enum` (Urgente/Alta/Média/Baixa) · `status_atividade_enum` (Não iniciada/Em andamento/Bloqueada/Concluída/Cancelada) · `tipo_dependencia_enum` (FS/SS/FF/SF) · `classificacao_tr_enum` · `atendimento_tr_enum` · `status_requisito_enum` · `cobranca_enum` (Sim/Não/N-A) · `tipo_requisito_enum` (Funcional/Não Funcional) · `tipo_vinculo_enum` (Consultoria/Cliente/Terceirizado) · `nivel_risco_enum` (Baixo/Médio/Alto) · `status_risco_enum` (Aberto/Mitigado/Encerrado) · `status_pendencia_enum` (Aberta/Em andamento/Resolvida/Cancelada) · `entidade_anexo_enum` (atividade/requisito/risco/marco/projeto).
 
 ### 6.3 Views
 
