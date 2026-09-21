@@ -1600,6 +1600,9 @@
         <input type="date" id="el-f-periodo-ini" title="Mostra só atividades cujo período previsto cruza com esta data em diante">
         <span class="muted" style="font-size:12.5px;">até</span>
         <input type="date" id="el-f-periodo-fim" title="Deixe em branco para não limitar o fim do período">
+        <label style="display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--text-muted);">
+          <input type="checkbox" id="el-f-concluidas"> mostrar concluídas
+        </label>
         <button class="btn secondary small" id="el-f-limpar" type="button">Limpar filtros</button>
         <span class="muted" id="el-f-contagem" style="font-size:12.5px;"></span>
       </div>
@@ -4644,13 +4647,14 @@ function wireEdicaoLoteCronograma(){
   // saia de vista por causa do filtro. O filtro é aplicado sobre o valor
   // ORIGINAL (de quando o modal abriu) de cada atividade, não sobre o que
   // está sendo digitado agora — ver data-f-* em linhaEdicaoLote().
-  ["el-f-etapa","el-f-frente","el-f-periodo-ini","el-f-periodo-fim"].forEach(id=>{
+  ["el-f-etapa","el-f-frente","el-f-periodo-ini","el-f-periodo-fim","el-f-concluidas"].forEach(id=>{
     $(id).addEventListener("input", aplicarFiltroEdicaoLote);
     $(id).addEventListener("change", aplicarFiltroEdicaoLote);
   });
   $("el-f-limpar").addEventListener("click", ()=>{
     $("el-f-etapa").value=""; $("el-f-frente").value="";
     $("el-f-periodo-ini").value=""; $("el-f-periodo-fim").value="";
+    $("el-f-concluidas").checked = false;
     aplicarFiltroEdicaoLote();
   });
   // Qualquer alteração num campo depois de já ter analisado invalida a análise —
@@ -4681,22 +4685,27 @@ function wireEdicaoLoteCronograma(){
 }
 
 // Mostra/esconde as linhas já montadas em #el-linhas-tbody conforme os
-// filtros de Etapa, Frente de trabalho e período previsto (mesma lógica de
+// filtros de Etapa, Frente de trabalho, período previsto (mesma lógica de
 // cruzamento de período usada em applyFilters()/periodRange() do Cronograma:
-// entra quem tem alguma sobreposição com o intervalo informado). Não afeta
-// quais linhas entram em "Analisar alterações"/"Confirmar" — isso já é
-// resolvido sozinho em coletarEdicoesLote(), que só considera o que foi de
-// fato alterado, esteja a linha visível ou escondida pelo filtro.
+// entra quem tem alguma sobreposição com o intervalo informado) e "mostrar
+// concluídas" (desmarcado por padrão — some as 4 variantes de concluída de
+// STATUS_FAMILIA_CONCLUIDA, que de qualquer forma já ficam não-editáveis
+// nesta grade; "Cancelada" não entra nesse filtro, continua sempre visível).
+// Não afeta quais linhas entram em "Analisar alterações"/"Confirmar" — isso
+// já é resolvido sozinho em coletarEdicoesLote(), que só considera o que foi
+// de fato alterado, esteja a linha visível ou escondida pelo filtro.
 function aplicarFiltroEdicaoLote(){
   const etapa = $("el-f-etapa").value;
   const frente = $("el-f-frente").value;
   const ini = $("el-f-periodo-ini").value;
   const fim = $("el-f-periodo-fim").value;
+  const mostrarConcluidas = $("el-f-concluidas").checked;
   let visiveis = 0, total = 0;
   $("el-linhas-tbody").querySelectorAll("tr[data-id]").forEach(tr=>{
     total++;
     let ok = true;
-    if(etapa && tr.dataset.fEtapa !== etapa) ok = false;
+    if(!mostrarConcluidas && tr.dataset.fConcluida === "1") ok = false;
+    if(ok && etapa && tr.dataset.fEtapa !== etapa) ok = false;
     if(ok && frente && tr.dataset.fFrente !== frente) ok = false;
     if(ok && (ini || fim)){
       const aIni = tr.dataset.fIni, aFim = tr.dataset.fFim;
@@ -4755,7 +4764,7 @@ function linhaEdicaoLote(a, predecessoras, sucessoras){
     .map(p=>`<option value="${p}" ${a.prioridade===p?"selected":""}>${p}</option>`).join("");
 
   return `
-    <tr data-id="${a.id}" data-f-etapa="${a.etapa_id||""}" data-f-frente="${a.frente_trabalho_id||""}" data-f-ini="${a.dtini_prev||""}" data-f-fim="${a.dtfim_prev||""}">
+    <tr data-id="${a.id}" data-f-etapa="${a.etapa_id||""}" data-f-frente="${a.frente_trabalho_id||""}" data-f-ini="${a.dtini_prev||""}" data-f-fim="${a.dtfim_prev||""}" data-f-concluida="${STATUS_FAMILIA_CONCLUIDA.includes(a.status)?"1":"0"}">
       <td class="mono">${esc(a.codigo_wbs||"—")}</td>
       <td>
         <input type="text" data-campo="nome" value="${esc(a.nome||"")}" ${dis} style="margin-bottom:2px;display:block;">
@@ -4795,6 +4804,7 @@ async function abrirEdicaoLoteModal(){
     FRENTES.map(f=>`<option value="${f.id}">${esc(f.nome)}${f.ativo===false?" (inativa)":""}</option>`).join("");
   $("el-f-etapa").value = ""; $("el-f-frente").value = "";
   $("el-f-periodo-ini").value = ""; $("el-f-periodo-fim").value = "";
+  $("el-f-concluidas").checked = false;
 
   let deps = [];
   try{ deps = await api(`/projetos/${PROJETO.id}/dependencias`); }catch(e){}
