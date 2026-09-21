@@ -630,6 +630,7 @@
       <input type="file" id="rf-csv-file" accept=".csv" hidden>
       <button class="btn secondary small" id="btn-import-csv">Importar CSV</button>
       <button class="btn secondary small" id="btn-import-tr">Importar do TR (documento)</button>
+      <button class="btn danger small" id="btn-remover-requisitos" title="Apaga todos os requisitos do TR deste projeto">Apagar todos os requisitos</button>
       <button class="btn small" id="btn-new-requisito">+ Novo requisito</button>
     </div>
     <div class="table-wrap">
@@ -1461,6 +1462,29 @@
   </div>
 </div>
 
+<!-- ================= MODAL: REMOVER TODOS OS REQUISITOS ================= -->
+<div class="overlay" id="overlay-remover-requisitos" hidden>
+  <div class="modal" style="max-width:480px;">
+    <div class="modal-head"><h2 style="color:var(--danger);">⚠ Apagar todos os requisitos</h2><button class="btn ghost" id="rq-close">✕</button></div>
+    <div class="modal-body single-col">
+      <p>Isso vai apagar <strong>permanentemente</strong>, do projeto <strong id="rq-nome-projeto"></strong>:</p>
+      <ul id="rq-resumo" style="margin:0 0 14px;padding-left:20px;line-height:1.7;"></ul>
+      <p class="muted" style="margin-bottom:14px;">Atividades do cronograma que apontavam para um desses requisitos não são apagadas — só perdem esse vínculo direto. Não existe desfazer.</p>
+      <div class="field full">
+        <label>Para confirmar, digite o nome do projeto exatamente como mostrado acima:</label>
+        <input type="text" id="rq-confirma-nome" autocomplete="off">
+      </div>
+    </div>
+    <div class="modal-foot">
+      <span></span>
+      <div style="display:flex;gap:8px;">
+        <button class="btn secondary" id="rq-cancel">Cancelar</button>
+        <button class="btn danger" id="rq-confirmar" disabled>Apagar todos os requisitos</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ================= MODAL: VERSÕES DO CRONOGRAMA (histórico) ================= -->
 <div class="overlay" id="overlay-versoes-cronograma" hidden>
   <div class="modal" style="max-width:900px;">
@@ -2113,7 +2137,7 @@ async function afterProjetoReady(){
   ]);
   aplicarMarcaNoTopo();
   fillStaticSelects();
-  wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireRemoverCronograma(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma();
+  wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireRemoverCronograma(); wireRemoverRequisitos(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma();
   wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal();
   setupCsvTemplateLink();
   await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias()]);
@@ -2205,8 +2229,17 @@ function fillStaticSelects(){
   // Pendências (41ª rodada): responsável consultoria/cliente são sempre um
   // recurso cadastrado (sem "nome sem cadastro" — o usuário foi explícito:
   // "tem que ser recurso do projeto"), reaproveitando o mesmo filtro por lado.
-  $("pend-responsavel-consultoria").innerHTML = `<option value="">Selecione…</option>` + recursoOptsConsultoria;
-  $("pend-responsavel-cliente").innerHTML = `<option value="">Selecione…</option>` + recursoOptsCliente;
+  // Quando não existe NENHUM recurso daquele lado ainda, o placeholder avisa
+  // isso explicitamente (em vez de um "Selecione…" que parece só esquecimento
+  // do usuário, mas na real não tem nada pra selecionar) — achado real num
+  // cadastro de pendência: o campo ficava vazio porque não havia recurso
+  // Cliente cadastrado, e a mensagem genérica de validação não deixava claro.
+  $("pend-responsavel-consultoria").innerHTML = recursoOptsConsultoria
+    ? `<option value="">Selecione…</option>` + recursoOptsConsultoria
+    : `<option value="">Nenhum recurso Consultoria cadastrado — cadastre em Configurações → Recursos</option>`;
+  $("pend-responsavel-cliente").innerHTML = recursoOptsCliente
+    ? `<option value="">Selecione…</option>` + recursoOptsCliente
+    : `<option value="">Nenhum recurso Cliente/Terceirizado cadastrado — cadastre em Configurações → Recursos</option>`;
 
   const statusAtiv = ["Não iniciada","Em andamento","Bloqueada",
     "Concluída","Concluída com atraso","Concluída com esforço maior","Concluída com atraso e esforço maior",
@@ -3198,9 +3231,19 @@ async function savePendencia(){
     acoes_necessarias: $("pend-acoes").value.trim() || null,
     observacoes: $("pend-observacoes").value.trim() || null,
   };
-  if(!data.titulo || !data.descricao || !data.frente_trabalho_id || !data.responsavel_consultoria_id
-     || !data.responsavel_cliente_id || !data.data_limite){
-    toast("Informe identificação, descrição, frente, responsáveis (consultoria e cliente) e data limite.", true);
+  // Mensagem aponta exatamente o que falta (em vez de uma frase genérica
+  // listando todos os campos obrigatórios) — um cadastro real mostrou que,
+  // com vários campos já preenchidos corretamente, a mensagem genérica não
+  // deixava claro qual dos seis campos ainda faltava.
+  const faltando = [];
+  if(!data.titulo) faltando.push("Identificação");
+  if(!data.descricao) faltando.push("Descrição");
+  if(!data.frente_trabalho_id) faltando.push("Frente de trabalho");
+  if(!data.responsavel_consultoria_id) faltando.push("Responsável — Consultoria");
+  if(!data.responsavel_cliente_id) faltando.push("Responsável — Cliente");
+  if(!data.data_limite) faltando.push("Data limite");
+  if(faltando.length){
+    toast(`Preencha os campos obrigatórios: ${faltando.join(", ")}.`, true);
     return;
   }
   if(!editingPendenciaId) data.projeto_id = PROJETO.id;
@@ -4258,6 +4301,70 @@ async function removerCronogramaConfirmado(){
   rcRemovendo = false;
   $("rc-confirmar").textContent = "Remover cronograma inteiro";
   $("rc-confirmar").disabled = $("rc-confirma-nome").value.trim() !== PROJETO.nome;
+}
+
+// ================= APAGAR TODOS OS REQUISITOS (mesmo padrão do remover cronograma) =================
+// Apaga todos os requisitos_tr do projeto e, em cascata, os vínculos N:N com
+// atividades e as referências de manuais. Atividades ligadas diretamente
+// (requisito_tr_id) não são apagadas — só perdem esse vínculo. Confirmação
+// exige digitar o nome exato do projeto, conferido de novo no servidor.
+let rqRemovendo = false;
+
+function wireRemoverRequisitos(){
+  $("btn-remover-requisitos").addEventListener("click", abrirRemoverRequisitosModal);
+  $("rq-close").addEventListener("click", fecharRemoverRequisitosModal);
+  $("rq-cancel").addEventListener("click", fecharRemoverRequisitosModal);
+  $("overlay-remover-requisitos").addEventListener("click", e=>{ if(e.target.id==="overlay-remover-requisitos") fecharRemoverRequisitosModal(); });
+  $("rq-confirma-nome").addEventListener("input", ()=>{
+    $("rq-confirmar").disabled = $("rq-confirma-nome").value.trim() !== PROJETO.nome;
+  });
+  $("rq-confirmar").addEventListener("click", removerRequisitosConfirmado);
+}
+
+async function abrirRemoverRequisitosModal(){
+  $("rq-nome-projeto").textContent = PROJETO.nome;
+  $("rq-confirma-nome").value = "";
+  $("rq-confirmar").disabled = true;
+  $("rq-confirmar").textContent = "Apagar todos os requisitos";
+  $("rq-resumo").innerHTML = `<li class="muted">Carregando…</li>`;
+  $("overlay-remover-requisitos").hidden = false;
+  try{
+    const r = await api(`/requisitos/resumo-remocao?projeto_id=${PROJETO.id}`);
+    if(!r.requisitos){
+      $("rq-resumo").innerHTML = `<li class="muted">Não há requisitos cadastrados neste projeto — nada a remover.</li>`;
+    }else{
+      $("rq-resumo").innerHTML = [
+        [r.requisitos, "requisito(s) do TR"],
+        [r.vinculos_atividade, "vínculo(s) requisito↔atividade"],
+        [r.referencias_manual, "referência(s) de manual (Analisar Requisitos)"],
+        [r.atividades_perdem_vinculo, "atividade(s) que perdem o vínculo direto com o requisito"],
+      ].map(([n,l])=>`<li><strong>${n}</strong> ${l}</li>`).join("");
+    }
+  }catch(e){
+    $("rq-resumo").innerHTML = `<li class="muted">Não foi possível carregar a prévia — confira sua conexão e tente de novo.</li>`;
+  }
+}
+function fecharRemoverRequisitosModal(){ $("overlay-remover-requisitos").hidden = true; }
+
+async function removerRequisitosConfirmado(){
+  if(rqRemovendo) return;
+  const digitado = $("rq-confirma-nome").value.trim();
+  if(digitado !== PROJETO.nome) return;
+  rqRemovendo = true;
+  $("rq-confirmar").disabled = true; $("rq-confirmar").textContent = "Apagando…";
+  try{
+    await api("/requisitos/remover-todos", {
+      method: "POST",
+      body: JSON.stringify({ projeto_id: PROJETO.id, confirmacao: digitado }),
+    });
+    toast("Requisitos removidos: todos os requisitos do TR deste projeto foram apagados.");
+    await Promise.all([loadRequisitos(), loadAtividades()]);
+    renderRequisitos(); renderCronograma(); renderDashboard();
+    fecharRemoverRequisitosModal();
+  }catch(e){}
+  rqRemovendo = false;
+  $("rq-confirmar").textContent = "Apagar todos os requisitos";
+  $("rq-confirmar").disabled = $("rq-confirma-nome").value.trim() !== PROJETO.nome;
 }
 
 // ================= VERSÕES DO CRONOGRAMA (histórico sob demanda) =================
