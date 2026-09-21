@@ -127,6 +127,49 @@ COLUNA_ALIASES = {
 }
 COLUNAS_OBRIGATORIAS = ("edt", "id", "nome", "duracao")
 
+# ============================================================================
+# Modo "flat" (round-trip) — reconhece a própria planilha gerada pelo botão
+# "Exportar Cronograma (Excel)" (ver cronograma_export.py) quando o usuário a
+# reimporta depois de editar. Diferente do modo acima (pensado para uma
+# planilha do MS Project, com WBS/EDT e uma coluna "Id" própria de onde se
+# monta a árvore de Etapa/Frente/Atividade), aqui cada linha já É uma
+# atividade existente do projeto — identificada diretamente pela coluna
+# "Código" (o codigo_wbs já gravado no banco) — então não há árvore pra
+# montar nem Etapa/Frente novas pra criar: só ATUALIZA o que já existe,
+# casado pelo Código. Detecção pelo "fingerprint" do cabeçalho (ver
+# _eh_cabecalho_flat): a combinação Código+Atividade+Etapa+Frente+Status só
+# aparece nesta exportação — uma planilha do MS Project não tem essas cinco
+# colunas ao mesmo tempo (em especial "Frente" e "Código"), então não há
+# risco de confundir os dois formatos.
+FLAT_CABECALHO_FINGERPRINT = {"codigo", "atividade", "etapa", "frente", "status"}
+
+FLAT_COLUNA_ALIASES = {
+    "codigo": ["codigo"],
+    "nome": ["atividade", "nome da tarefa", "nome", "tarefa"],
+    "etapa": ["etapa"],
+    "frente": ["frente"],
+    "status": ["status"],
+    "prioridade": ["prioridade"],
+    "inicio_prev": ["inicio prev"],
+    "fim_prev": ["fim prev"],
+    "esforco_prev": ["esforco prev h"],
+    "inicio_real": ["inicio real"],
+    "fim_real": ["fim real"],
+    "horas_realizadas": ["horas realizadas h"],
+    "pct": ["% concluido", "concluido"],
+    "master": ["master"],
+    "entregavel": ["entregavel", "entregável"],
+    "responsaveis": ["responsaveis", "responsáveis"],
+    "observacoes": ["observacoes", "observações"],
+}
+
+STATUS_ATIVIDADE_VALIDOS = {
+    "Não iniciada", "Em andamento", "Bloqueada",
+    "Concluída", "Concluída com atraso", "Concluída com esforço maior",
+    "Concluída com atraso e esforço maior", "Cancelada",
+}
+PRIORIDADE_VALIDOS = {"Urgente", "Alta", "Média", "Baixa"}
+
 
 class ImportacaoError(ValueError):
     pass
@@ -180,6 +223,32 @@ def _mapear_colunas(headers_normalizados):
     return resultado
 
 
+def _eh_cabecalho_flat(headers_normalizados):
+    presentes = set(h for h in headers_normalizados if h)
+    return FLAT_CABECALHO_FINGERPRINT.issubset(presentes)
+
+
+def _mapear_colunas_flat(headers_normalizados):
+    idx_by_header = {}
+    for i, h in enumerate(headers_normalizados):
+        if h and h not in idx_by_header:
+            idx_by_header[h] = i
+    resultado = {}
+    for chave, aliases in FLAT_COLUNA_ALIASES.items():
+        for alias in aliases:
+            alias_norm = _normaliza_cabecalho(alias)
+            if alias_norm in idx_by_header:
+                resultado[chave] = idx_by_header[alias_norm]
+                break
+    if "pct" not in resultado:
+        usados = set(resultado.values())
+        for h, i in idx_by_header.items():
+            if "%" in h and i not in usados:
+                resultado["pct"] = i
+                break
+    return resultado
+
+
 def _ler_xlsx(file_bytes):
     try:
         wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
@@ -194,14 +263,15 @@ def _ler_xlsx(file_bytes):
         raise ImportacaoError("Não encontrei nenhuma aba com dados na planilha.")
     ws = wb[nome_aba]
     headers = [_normaliza_cabecalho(ws.cell(1, c).value) for c in range(1, ws.max_column + 1)]
-    colmap = _mapear_colunas(headers)
+    modo = "flat" if _eh_cabecalho_flat(headers) else "hierarquico"
+    colmap = _mapear_colunas_flat(headers) if modo == "flat" else _mapear_colunas(headers)
     linhas = []
     for r in range(2, ws.max_row + 1):
         vals = [ws.cell(r, c).value for c in range(1, ws.max_column + 1)]
         if all(v is None or str(v).strip() == "" for v in vals):
             continue
         linhas.append({chave: vals[idx] for chave, idx in colmap.items()})
-    return linhas
+    return linhas, modo
 
 
 def _ler_csv(file_bytes):
@@ -217,13 +287,14 @@ def _ler_csv(file_bytes):
     if not rows:
         raise ImportacaoError("Não foi possível ler o CSV.")
     headers = [_normaliza_cabecalho(h) for h in rows[0]]
-    colmap = _mapear_colunas(headers)
+    modo = "flat" if _eh_cabecalho_flat(headers) else "hierarquico"
+    colmap = _mapear_colunas_flat(headers) if modo == "flat" else _mapear_colunas(headers)
     linhas = []
     for row in rows[1:]:
         if all((c or "").strip() == "" for c in row):
             continue
         linhas.append({chave: (row[idx] if idx < len(row) else None) for chave, idx in colmap.items()})
-    return linhas
+    return linhas, modo
 
 
 def carregar_linhas(file_bytes, filename):
@@ -467,9 +538,120 @@ def _calcular_grupos_frente(nodes):
     return grupos
 
 
-def analisar_planilha(file_bytes, filename):
+# ============================================================================
+# Modo "flat" (round-trip da própria exportação) — parsing de linha
+# ============================================================================
+def _parse_numero_flat(v):
+    if v in (None, ""):
+        return None
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return float(v)
+    s = str(v).strip().replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _texto_ou_none(v):
+    if v in (None, ""):
+        return None
+    s = str(v).strip()
+    return s or None
+
+
+def _parse_linha_flat(l):
+    return {
+        "codigo": _valor_texto_ou_num(l.get("codigo")),
+        "nome": str(l.get("nome") or "").strip(),
+        "etapa_txt": _texto_ou_none(l.get("etapa")),
+        "frente_txt": _texto_ou_none(l.get("frente")),
+        "status_txt": _texto_ou_none(l.get("status")),
+        "prioridade_txt": _texto_ou_none(l.get("prioridade")),
+        "dtini_prev": parse_date(l.get("inicio_prev")),
+        "dtfim_prev": parse_date(l.get("fim_prev")),
+        "prazo_horas": _parse_numero_flat(l.get("esforco_prev")),
+        "dtini_real": parse_date(l.get("inicio_real")),
+        "dtfim_real": parse_date(l.get("fim_real")),
+        "horas_realizadas": _parse_numero_flat(l.get("horas_realizadas")),
+        "pct": parse_pct(l.get("pct")) if l.get("pct") not in (None, "") else None,
+        "eh_master": parse_bool_sim(l.get("master")),
+        "eh_entregavel": parse_bool_sim(l.get("entregavel")),
+        "responsaveis_txt": l.get("responsaveis"),
+        "observacoes": _texto_ou_none(l.get("observacoes")),
+    }
+
+
+def _analisar_planilha_flat(linhas):
     avisos = []
-    linhas = carregar_linhas(file_bytes, filename)
+    parsed = [_parse_linha_flat(l) for l in linhas]
+    validas = [p for p in parsed if p["codigo"] or p["nome"]]
+    ignoradas = len(parsed) - len(validas)
+    if ignoradas:
+        avisos.append(f"{ignoradas} linha(s) sem Código e sem Atividade — ignorada(s).")
+    if not validas:
+        raise ImportacaoError("Não encontrei nenhuma linha de dado válida na planilha.")
+    return {"modo": "flat", "linhas": validas, "avisos": avisos}
+
+
+def _resolver_etapa_flat(texto, etapas_existentes):
+    """etapas_existentes: lista de {id, numero, nome}. Casa preferencialmente
+    pelo número (formato exportado "N — Nome", robusto a uma Etapa renomeada
+    depois da exportação) e, na falta de um número reconhecível, pelo nome
+    (ignorando acento/caixa)."""
+    if not texto:
+        return None
+    m = re.match(r"^\s*(\d+)\s*(?:—|-)", texto)
+    if m:
+        numero = int(m.group(1))
+        for e in etapas_existentes:
+            if e["numero"] == numero:
+                return e["id"]
+    nome_sem_numero = re.sub(r"^\s*\d+\s*(?:—|-)\s*", "", texto).strip()
+    alvo = _normaliza_texto(texto)
+    alvo_sem_numero = _normaliza_texto(nome_sem_numero)
+    for e in etapas_existentes:
+        nome_norm = _normaliza_texto(e["nome"])
+        if nome_norm == alvo or nome_norm == alvo_sem_numero:
+            return e["id"]
+    return None
+
+
+def _resolver_frente_flat(texto, frentes_existentes):
+    if not texto:
+        return None
+    alvo = _normaliza_texto(texto)
+    for f in frentes_existentes:
+        if _normaliza_texto(f["nome"]) == alvo:
+            return f["id"]
+    return None
+
+
+def _resolver_recursos_flat(texto):
+    """'Fulano (Consultoria), Beltrano (Cliente)' -> ['Fulano', 'Beltrano'] —
+    mesmo formato que _responsaveis_txt monta em cronograma_export.py."""
+    if not texto:
+        return []
+    nomes = []
+    for token in str(texto).split(","):
+        token = token.strip()
+        if not token:
+            continue
+        nome = re.sub(r"\s*\([^)]*\)\s*$", "", token).strip()
+        if nome:
+            nomes.append(nome)
+    return nomes
+
+
+# ============================================================================
+# Análise da planilha (dispatcher: modo "flat" x modo "hierárquico")
+# ============================================================================
+def analisar_planilha(file_bytes, filename):
+    linhas, modo = carregar_linhas(file_bytes, filename)
+    if modo == "flat":
+        return _analisar_planilha_flat(linhas)
+
+    avisos = []
     nodes_validos = [Node(l) for l in linhas if l.get("edt") not in (None, "") and str(l.get("nome") or "").strip()]
     ignoradas = len(linhas) - len(nodes_validos)
     if ignoradas:
@@ -509,6 +691,7 @@ def analisar_planilha(file_bytes, filename):
         )
 
     return {
+        "modo": "hierarquico",
         "nodes": nodes, "etapas_nodes": etapas_nodes, "grupos_frente_nodes": grupos_frente_nodes,
         "atividade_nodes": atividade_nodes, "milestone_nodes": milestone_nodes, "avisos": avisos,
     }
@@ -585,8 +768,65 @@ def _sugerir_match(nome_planilha, existentes):
 # ============================================================================
 # Preview — não grava nada, só analisa e sugere
 # ============================================================================
+def _preview_flat(projeto_id, resultado, file_bytes, filename):
+    avisos = [
+        "Planilha reconhecida no formato de exportação desta tela (botão \"Exportar Cronograma\") — "
+        "atualiza apenas atividades já existentes no projeto, casadas pela coluna Código; não cria "
+        "atividades, marcos ou dependências novas. Campos deixados em branco na planilha NÃO apagam "
+        "o que já está gravado (para limpar um campo, edite pela tela)."
+    ] + list(resultado["avisos"])
+
+    existentes = db.fetch_all(
+        f"SELECT codigo_wbs FROM atividades WHERE projeto_id = {db.q(projeto_id)} AND codigo_wbs IS NOT NULL"
+    )
+    codigos_existentes = {r["codigo_wbs"] for r in existentes}
+    etapas_existentes = db.fetch_all(f"SELECT id, numero, nome FROM etapas WHERE projeto_id = {db.q(projeto_id)}")
+    frentes_existentes = db.fetch_all(f"SELECT id, nome FROM frentes_trabalho WHERE projeto_id = {db.q(projeto_id)}")
+
+    atualizar = marcados_entregavel = marcados_master = 0
+    for l in resultado["linhas"]:
+        if not (l["codigo"] and l["codigo"] in codigos_existentes):
+            avisos.append(
+                f"Atividade '{l['nome'] or '(sem nome)'}' (Código {l['codigo'] or '—'}) não encontrada "
+                "no projeto — não será atualizada."
+            )
+            continue
+        atualizar += 1
+        if l["etapa_txt"] and not _resolver_etapa_flat(l["etapa_txt"], etapas_existentes):
+            avisos.append(f"Etapa '{l['etapa_txt']}' (Código {l['codigo']}) não reconhecida — Etapa será mantida como está.")
+        if l["frente_txt"] and not _resolver_frente_flat(l["frente_txt"], frentes_existentes):
+            avisos.append(f"Frente '{l['frente_txt']}' (Código {l['codigo']}) não reconhecida — Frente será mantida como está.")
+        if l["status_txt"] and l["status_txt"] not in STATUS_ATIVIDADE_VALIDOS:
+            avisos.append(f"Status '{l['status_txt']}' (Código {l['codigo']}) não reconhecido — status será mantido como está.")
+        if l["prioridade_txt"] and l["prioridade_txt"] not in PRIORIDADE_VALIDOS:
+            avisos.append(f"Prioridade '{l['prioridade_txt']}' (Código {l['codigo']}) não reconhecida — prioridade será mantida como está.")
+        if l["eh_entregavel"]:
+            marcados_entregavel += 1
+        if l["eh_master"]:
+            marcados_master += 1
+
+    token = uuid_lib.uuid4().hex
+    _salvar_temp(token, projeto_id, file_bytes, filename)
+
+    return {
+        "token": token,
+        "resumo": {
+            "atividades_novas": 0, "atividades_atualizar": atualizar,
+            "marcos_novos": 0, "marcos_atualizar": 0,
+            "dependencias": 0, "horas_aproximadas": 0,
+            "marcados_entregavel": marcados_entregavel, "marcados_master": marcados_master,
+        },
+        "avisos": avisos,
+        "grupos_etapa": [],
+        "grupos_frente": [],
+    }
+
+
 def preview(projeto_id, file_bytes, filename):
     resultado = analisar_planilha(file_bytes, filename)
+    if resultado.get("modo") == "flat":
+        return _preview_flat(projeto_id, resultado, file_bytes, filename)
+
     avisos = list(resultado["avisos"])
 
     etapas_existentes = db.fetch_all(f"SELECT id, nome FROM etapas WHERE projeto_id = {db.q(projeto_id)}")
@@ -742,6 +982,130 @@ def _executar_em_lotes(statements, rotulo, tamanho=LOTE_TAMANHO, timeout=180):
               f"({len(lote)} statement(s)) gravado em {time.monotonic() - t0:.1f}s", flush=True)
 
 
+def _confirmar_flat(projeto_id, resultado):
+    """Grava as atualizações do modo flat (round-trip da própria exportação):
+    SÓ atualiza atividades já existentes, casadas pela coluna Código — nunca
+    cria atividade, marco ou dependência nova, e nunca apaga um campo já
+    gravado só porque a célula da planilha veio em branco (mesma cautela já
+    aplicada a recursos/dependências/Master/Entregável no modo hierárquico,
+    aqui estendida a todos os campos, já que este é o próprio formato de
+    edição em massa do sistema — a planilha não carrega necessariamente TODOS
+    os campos da atividade, só os que interessam editar)."""
+    avisos = list(resultado["avisos"])
+    erros = []
+
+    existentes = db.fetch_all(
+        f"SELECT id, codigo_wbs, status FROM atividades WHERE projeto_id = {db.q(projeto_id)} AND codigo_wbs IS NOT NULL"
+    )
+    por_codigo = {r["codigo_wbs"]: r for r in existentes}
+    etapas_existentes = db.fetch_all(f"SELECT id, numero, nome FROM etapas WHERE projeto_id = {db.q(projeto_id)}")
+    frentes_existentes = db.fetch_all(f"SELECT id, nome FROM frentes_trabalho WHERE projeto_id = {db.q(projeto_id)}")
+    recurso_id_by_nome = {r["nome"]: r["id"] for r in db.fetch_all("SELECT id, nome FROM recursos")}
+
+    hoje = datetime.now().date().isoformat()
+    statements = []
+    atualizadas = 0
+
+    for l in resultado["linhas"]:
+        existente = por_codigo.get(l["codigo"]) if l["codigo"] else None
+        if not existente:
+            avisos.append(
+                f"Atividade '{l['nome'] or '(sem nome)'}' (Código {l['codigo'] or '—'}) não encontrada "
+                "no projeto — não foi atualizada."
+            )
+            continue
+        atividade_id = existente["id"]
+
+        campos = {}
+        if l["nome"]:
+            campos["nome"] = l["nome"][:250]
+        if l["etapa_txt"]:
+            etapa_id = _resolver_etapa_flat(l["etapa_txt"], etapas_existentes)
+            if etapa_id:
+                campos["etapa_id"] = etapa_id
+            else:
+                avisos.append(f"Etapa '{l['etapa_txt']}' (Código {l['codigo']}) não reconhecida — Etapa mantida.")
+        if l["frente_txt"]:
+            frente_id = _resolver_frente_flat(l["frente_txt"], frentes_existentes)
+            if frente_id:
+                campos["frente_trabalho_id"] = frente_id
+            else:
+                avisos.append(f"Frente '{l['frente_txt']}' (Código {l['codigo']}) não reconhecida — Frente mantida.")
+
+        status_novo = None
+        if l["status_txt"]:
+            if l["status_txt"] in STATUS_ATIVIDADE_VALIDOS:
+                status_novo = l["status_txt"]
+                if status_novo != existente.get("status"):
+                    campos["status"] = status_novo
+            else:
+                avisos.append(f"Status '{l['status_txt']}' (Código {l['codigo']}) não reconhecido — status mantido.")
+        if l["prioridade_txt"]:
+            if l["prioridade_txt"] in PRIORIDADE_VALIDOS:
+                campos["prioridade"] = l["prioridade_txt"]
+            else:
+                avisos.append(f"Prioridade '{l['prioridade_txt']}' (Código {l['codigo']}) não reconhecida — prioridade mantida.")
+
+        if l["dtini_prev"] is not None:
+            campos["dtini_prev"] = l["dtini_prev"].isoformat()
+        if l["dtfim_prev"] is not None:
+            campos["dtfim_prev"] = l["dtfim_prev"].isoformat()
+        if l["dtini_real"] is not None:
+            campos["dtini_real"] = l["dtini_real"].isoformat()
+        if l["dtfim_real"] is not None:
+            campos["dtfim_real"] = l["dtfim_real"].isoformat()
+        if l["prazo_horas"] is not None:
+            campos["prazo_horas"] = l["prazo_horas"]
+        if l["horas_realizadas"] is not None:
+            campos["horas_realizadas"] = l["horas_realizadas"]
+        if l["pct"] is not None:
+            campos["percentual_concluido"] = l["pct"]
+        if l["observacoes"] is not None:
+            campos["observacoes"] = l["observacoes"]
+        # ★ Master / 💰 Entregável: mesmo espírito "só adiciona" do modo
+        # hierárquico — "Sim" na planilha liga a marcação; em branco nunca
+        # desliga uma já marcada na tela.
+        if l["eh_entregavel"]:
+            campos["eh_entregavel"] = True
+        if l["eh_master"]:
+            campos["eh_atividade_master"] = True
+
+        recursos_vinculados = 0
+        for nome_recurso in _resolver_recursos_flat(l["responsaveis_txt"]):
+            rid = recurso_id_by_nome.get(nome_recurso)
+            if rid:
+                statements.append(
+                    f"INSERT INTO atividade_recurso (atividade_id, recurso_id) "
+                    f"VALUES ({db.q(atividade_id)}, {db.q(rid)}) "
+                    f"ON CONFLICT (atividade_id, recurso_id) DO NOTHING;"
+                )
+                recursos_vinculados += 1
+            else:
+                avisos.append(f"Recurso '{nome_recurso}' (Código {l['codigo']}) não encontrado em Configurações — não vinculado.")
+
+        if status_novo and status_novo in STATUS_EXIGE_RELATO and status_novo != existente.get("status"):
+            statements.append(_sql_insert("atividade_relato", {
+                "id": str(uuid_lib.uuid4()), "atividade_id": atividade_id,
+                "autor_nome": "Importação de cronograma (planilha exportada)",
+                "texto": f"Atualizado via reimportação da planilha exportada em {hoje}.",
+            }))
+
+        if campos:
+            statements.append(_sql_update("atividades", atividade_id, campos))
+        if campos or recursos_vinculados:
+            atualizadas += 1
+
+    _executar_em_lotes(statements, "atividades (planilha exportada)")
+
+    return {
+        "atividades_criadas": 0, "atividades_atualizadas": atualizadas,
+        "marcos_criados": 0, "marcos_atualizados": 0,
+        "dependencias_criadas": 0, "dependencias_existentes": 0,
+        "horas_aproximadas": 0,
+        "erros": erros, "avisos": avisos,
+    }
+
+
 def confirmar(token, projeto_id, mapeamento_etapas, mapeamento_frentes):
     inicio = time.monotonic()
     print(f"[cronograma_import] confirmar(): iniciando — projeto_id={projeto_id} token={token}", flush=True)
@@ -753,6 +1117,14 @@ def confirmar(token, projeto_id, mapeamento_etapas, mapeamento_frentes):
         raise ImportacaoError("Projeto não confere com o da pré-visualização — refaça a análise.")
 
     resultado = analisar_planilha(file_bytes, meta.get("filename"))
+
+    if resultado.get("modo") == "flat":
+        ret = _confirmar_flat(projeto_id, resultado)
+        _remover_temp(token)
+        print(f"[cronograma_import] confirmar() [flat]: concluído em {time.monotonic() - inicio:.1f}s — "
+              f"{ret['atividades_atualizadas']} atividade(s) atualizada(s)", flush=True)
+        return ret
+
     avisos = list(resultado["avisos"])
     print(f"[cronograma_import] planilha reanalisada: {len(resultado['atividade_nodes'])} atividade(s), "
           f"{len(resultado['milestone_nodes'])} marco(s) candidato(s)", flush=True)
