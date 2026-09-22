@@ -1917,8 +1917,21 @@ def create_app():
             )
         sql = ATIVIDADE_SELECT + " WHERE " + " AND ".join(where) + " ORDER BY a.dtini_prev NULLS LAST, a.codigo_wbs"
         atividades = db.fetch_all(sql)
+        # Dependências do projeto inteiro (45ª rodada, coluna "Depende de" da
+        # planilha) — uma única consulta pra todo mundo, mesmo padrão de
+        # list_dependencias_projeto logo acima, em vez de uma por atividade.
+        deps_rows = db.fetch_all(
+            "SELECT ad.atividade_id, p.codigo_wbs AS predecessora_codigo_wbs, ad.tipo, ad.lag_horas "
+            "FROM atividade_dependencia ad "
+            "JOIN atividades p ON p.id = ad.predecessora_id "
+            "JOIN atividades s ON s.id = ad.atividade_id "
+            f"WHERE s.projeto_id = {db.q(projeto_id)} AND p.projeto_id = {db.q(projeto_id)}"
+        )
+        deps_por_atividade = {}
+        for r in deps_rows:
+            deps_por_atividade.setdefault(r["atividade_id"], []).append(r)
         try:
-            xlsx_bytes = cronograma_export.gerar_planilha_bytes(atividades)
+            xlsx_bytes = cronograma_export.gerar_planilha_bytes(atividades, deps_por_atividade)
         except Exception as e:
             print(f"[cronograma_export] erro ao gerar planilha: {e}", flush=True)
             import traceback

@@ -12,9 +12,40 @@ usada na tabela do Cronograma no front-end (ver renderAtividadesTable em
 frontend/index.html), com algumas colunas a mais que só cabem numa planilha
 (datas reais, observações, lista de responsáveis).
 
-`gerar_planilha_bytes(atividades)` recebe a lista de dicts já filtrada (cada
-item no formato devolvido por ATIVIDADE_SELECT, ver main.py) e devolve os
-bytes do .xlsx — nenhuma consulta ao banco acontece aqui, só formatação.
+`gerar_planilha_bytes(atividades, dependencias_por_atividade=None)` recebe a
+lista de dicts já filtrada (cada item no formato devolvido por
+ATIVIDADE_SELECT, ver main.py) e devolve os bytes do .xlsx — nenhuma consulta
+ao banco acontece aqui, só formatação. `dependencias_por_atividade` é opcional:
+um dict {atividade_id: [{predecessora_codigo_wbs, tipo, lag_horas}, ...]},
+usado só para preencher a coluna "Depende de" (ver abaixo).
+
+45ª rodada: pedido do usuário verbatim: *"A função extração deve extrair
+todos os campos, assim, posso fazer manutenção e carregar de novo."* — até
+então a planilha exportada não cobria todos os campos que a tela "Editar em
+massa" já permite editar (ver cronograma_edicao_lote.py, 43ª/44ª rodada):
+faltavam Tipo de atividade elementar, Item do TR, Depende de, Descrição e
+Objetivo. Os cinco foram adicionados como novas colunas, antes de
+"Observações" (que continua sendo a última, por ser o campo de texto livre
+mais comprido). Isso fecha o ciclo "exportar → editar no Excel → reimportar"
+pra QUALQUER campo de cadastro da atividade — o modo "flat" da importação
+(ver cronograma_import.py) já reconhece e regrava todas essas colunas de
+volta, com a mesma cautela de sempre: célula em branco NUNCA apaga o que já
+está gravado (pra limpar um campo, ou remover TODAS as predecessoras de uma
+atividade, use a tela "Editar em massa").
+
+- **Tipo de atividade elementar**: nome do tipo (cadastro global) — casado
+  por nome na reimportação, mesmo texto mostrado na tela.
+- **Item do TR**: "{Código} — {Título}" (mesmo formato usado na tela) —
+  casado pelo Código (a parte antes do travessão) na reimportação.
+- **Depende de**: cada predecessora como "{Código} (TIPO)" ou "{Código}
+  (TIPO, lag Xh)" quando há lag, várias separadas por "; " — ex.:
+  "A.1 (FS); A.3 (SS, lag 8h)". Predecessora sem Código (não dá pra
+  referenciar por texto) fica de fora da célula. Na reimportação, o texto da
+  célula é tratado como a lista COMPLETA de predecessoras daquela linha —
+  diferente dos outros campos, aqui uma célula preenchida também REMOVE uma
+  predecessora que estava gravada mas não está mais na lista (é a forma da
+  planilha de description "eu quero que a lista seja exatamente esta"); só
+  uma célula vazia não mexe em nada, mesma regra de sempre.
 """
 from io import BytesIO
 
@@ -28,9 +59,12 @@ CABECALHO = [
     "Código", "Atividade", "Etapa", "Frente", "Status", "Prioridade",
     "Início prev.", "Fim prev.", "Esforço prev. (h)",
     "Início real", "Fim real", "Horas realizadas (h)", "% concluído",
-    "Atrasada", "Master", "Entregável", "Responsáveis", "Observações",
+    "Atrasada", "Master", "Entregável", "Responsáveis",
+    "Tipo de atividade elementar", "Item do TR", "Depende de",
+    "Descrição", "Objetivo", "Observações",
 ]
-LARGURAS = [12, 36, 22, 20, 16, 11, 13, 13, 14, 13, 13, 15, 12, 10, 8, 10, 28, 34]
+LARGURAS = [12, 36, 22, 20, 16, 11, 13, 13, 14, 13, 13, 15, 12, 10, 8, 10, 28,
+            24, 26, 30, 34, 30, 34]
 
 
 def _estilo_cabecalho(ws, linha, n_colunas):
@@ -63,7 +97,43 @@ def _responsaveis_txt(responsaveis):
     return ", ".join(f"{r['nome']}" + (f" ({r['tipo_vinculo']})" if r.get("tipo_vinculo") else "") for r in responsaveis)
 
 
-def gerar_planilha_bytes(atividades):
+def _item_tr_txt(a):
+    codigo = a.get("requisito_tr_codigo")
+    if not codigo:
+        return ""
+    titulo = a.get("requisito_tr_titulo")
+    return f"{codigo} — {titulo}" if titulo else codigo
+
+
+def _lag_txt(lag_horas):
+    try:
+        lag = float(lag_horas) if lag_horas not in (None, "") else 0.0
+    except (TypeError, ValueError):
+        lag = 0.0
+    # sem casas decimais quando é um número redondo (ex.: 8, não 8.0)
+    return f"{lag:g}"
+
+
+def _depende_de_txt(deps):
+    if not deps:
+        return ""
+    itens = []
+    for d in deps:
+        codigo = d.get("predecessora_codigo_wbs")
+        if not codigo:
+            # sem Código não dá pra referenciar por texto numa reimportação —
+            # mesma limitação já existente pra qualquer outra coluna que casa
+            # atividades pelo Código (ver módulo cronograma_import.py).
+            continue
+        tipo = d.get("tipo") or "FS"
+        lag_horas = d.get("lag_horas")
+        lag = float(lag_horas) if lag_horas not in (None, "") else 0.0
+        itens.append(f"{codigo} ({tipo}, lag {_lag_txt(lag)}h)" if lag else f"{codigo} ({tipo})")
+    return "; ".join(itens)
+
+
+def gerar_planilha_bytes(atividades, dependencias_por_atividade=None):
+    dependencias_por_atividade = dependencias_por_atividade or {}
     wb = Workbook()
     ws = wb.active
     ws.title = "Cronograma"
@@ -89,6 +159,11 @@ def gerar_planilha_bytes(atividades):
             "Sim" if a.get("eh_atividade_master") else "",
             "Sim" if a.get("eh_entregavel") else "",
             _responsaveis_txt(a.get("responsaveis")),
+            a.get("tipo_nome") or "",
+            _item_tr_txt(a),
+            _depende_de_txt(dependencias_por_atividade.get(a.get("id"))),
+            a.get("descricao") or "",
+            a.get("objetivo") or "",
             a.get("observacoes") or "",
         ])
 

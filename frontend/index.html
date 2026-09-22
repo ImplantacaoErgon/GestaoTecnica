@@ -1609,8 +1609,8 @@
 <div class="overlay" id="overlay-edicao-lote-cronograma" hidden style="align-items:stretch;padding:14px;">
   <div class="modal" style="max-width:none;width:98vw;display:flex;flex-direction:column;">
     <div class="modal-head"><h2>📝 Editar em massa</h2><button class="btn ghost" id="el-close">✕</button></div>
-    <div class="modal-body single-col" style="display:flex;flex-direction:column;flex:1;min-height:0;max-height:none;overflow:hidden;">
-      <div id="el-topo-fixo" style="flex-shrink:0;">
+    <div class="modal-body single-col" style="flex:1;min-height:0;max-height:none;overflow-y:auto;">
+      <div id="el-topo-fixo">
         <p class="muted" style="margin-bottom:10px;">Edite quantas atividades e campos quiser abaixo — Código WBS, Nome,
         Tipo de atividade elementar, Item do TR, Etapa, Frente, Prioridade, datas/esforço previstos, Horas realizadas,
         % concluído, datas reais, ★Master, 💰Entregável, Recursos, Dependências, Descrição, Objetivo e Observações — e
@@ -1638,7 +1638,7 @@
         </div>
       </div>
 
-      <div class="table-wrap" style="flex:1 1 auto;min-height:160px;margin:10px 0 14px;">
+      <div class="table-wrap" style="margin:10px 0 14px;">
         <table>
           <thead><tr>
             <th>Código</th><th>Atividade</th><th>Tipo</th><th>Item do TR</th><th>Depende de</th><th>Etapa</th><th>Frente</th><th>Prioridade</th>
@@ -1652,7 +1652,7 @@
       <div id="el-recursos-popup" class="el-recursos-pop" hidden style="position:fixed;"></div>
       <div id="el-deps-popup" class="el-deps-pop" hidden style="position:fixed;"></div>
 
-      <div id="el-rodape-fixo" style="flex-shrink:0;max-height:42vh;overflow:auto;">
+      <div id="el-rodape-fixo">
         <div class="field full" style="display:flex;gap:12px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
           <button class="btn secondary" id="el-analisar">Analisar alterações</button>
           <span class="muted" id="el-contagem" style="font-size:12.5px;"></span>
@@ -4742,6 +4742,15 @@ async function confirmarReplanejamento(){
 // marcada — e ISSO entra na cascata de datas (adicionar/remover/trocar uma
 // predecessora pode mover a atividade e suas sucessoras, igual editar
 // Início/Fim/Esforço).
+//
+// Layout do modal (44ª/45ª rodada): o modal ocupa quase a tela inteira
+// (overlay com align-items:stretch + modal width:98vw) — pedido do usuário
+// verbatim: "aumentar essa página para cobrir toda a página". A 44ª rodada
+// tentou um bloco do topo (intro+filtros) FIXO, com só a tabela rolando por
+// dentro — o usuário não gostou ("a página com bloco fixo não ficou bom"),
+// então a 45ª rodada reverteu isso: agora #modal-body inteiro é UMA única
+// área de rolagem (overflow-y:auto), intro+filtros+tabela+rodapé rolam juntos
+// como uma página normal — só o tamanho do modal (tela cheia) foi mantido.
 let elAnalisando = false, elConfirmando = false, elUltimaAnaliseJSON = null;
 let elRecursosState = {};                                    // { atividadeId: Set(recurso_id) } — participantes atuais + edições do popup
 let elUltimoPreviewItens = [];                                // último resultado de /preview

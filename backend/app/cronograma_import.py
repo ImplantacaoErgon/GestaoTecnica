@@ -179,6 +179,15 @@ FLAT_COLUNA_ALIASES = {
     "master": ["master"],
     "entregavel": ["entregavel", "entregável"],
     "responsaveis": ["responsaveis", "responsáveis"],
+    # 45ª rodada: colunas novas da exportação (ver cronograma_export.py) —
+    # ausentes numa planilha exportada antes desta rodada, o que não quebra
+    # nada: _parse_linha_flat usa .get() e trata como "célula em branco"
+    # (não mexe no campo já gravado), mesma regra de sempre.
+    "tipo_atividade": ["tipo de atividade elementar", "tipo atividade elementar"],
+    "item_tr": ["item do tr", "item tr"],
+    "depende_de": ["depende de"],
+    "descricao": ["descricao"],
+    "objetivo": ["objetivo"],
     "observacoes": ["observacoes", "observações"],
 }
 
@@ -597,6 +606,11 @@ def _parse_linha_flat(l):
         "eh_master": parse_bool_sim(l.get("master")),
         "eh_entregavel": parse_bool_sim(l.get("entregavel")),
         "responsaveis_txt": l.get("responsaveis"),
+        "tipo_atividade_txt": _texto_ou_none(l.get("tipo_atividade")),
+        "item_tr_txt": _texto_ou_none(l.get("item_tr")),
+        "depende_de_txt": _texto_ou_none(l.get("depende_de")),
+        "descricao": _texto_ou_none(l.get("descricao")),
+        "objetivo": _texto_ou_none(l.get("objetivo")),
         "observacoes": _texto_ou_none(l.get("observacoes")),
     }
 
@@ -644,6 +658,79 @@ def _resolver_frente_flat(texto, frentes_existentes):
         if _normaliza_texto(f["nome"]) == alvo:
             return f["id"]
     return None
+
+
+def _resolver_tipo_atividade_flat(texto, tipos_existentes):
+    """tipos_existentes: lista de {id, nome} — cadastro GLOBAL de Tipos de
+    atividade elementar (não é por projeto). Casa pelo nome, ignorando
+    acento/caixa — mesmo texto que a coluna "Tipo de atividade elementar"
+    exporta (ver cronograma_export.py)."""
+    if not texto:
+        return None
+    alvo = _normaliza_texto(texto)
+    for t in tipos_existentes:
+        if _normaliza_texto(t["nome"]) == alvo:
+            return t["id"]
+    return None
+
+
+def _resolver_requisito_tr_flat(texto, requisitos_existentes):
+    """requisitos_existentes: lista de {id, codigo, titulo} do projeto. A
+    célula vem no formato exportado "Código — Título" (mesmo formato da
+    tela) — casa pelo Código, a parte antes do travessão/hífen isolado; se
+    a célula não tiver separador, tenta casar o texto inteiro como Código
+    (tolera quem edita a célula e apaga o título, deixando só o código)."""
+    if not texto:
+        return None
+    codigo_txt = re.split(r"\s+[—-]\s+", texto.strip(), maxsplit=1)[0].strip()
+    alvo = _normaliza_texto(codigo_txt)
+    for r in requisitos_existentes:
+        if _normaliza_texto(r["codigo"]) == alvo:
+            return r["id"]
+    return None
+
+
+TIPOS_DEPENDENCIA_FLAT_VALIDOS = {"FS", "SS", "FF", "SF"}
+
+
+def _parse_dependencias_flat_txt(texto):
+    """Parseia a célula "Depende de" no formato exportado por esta mesma
+    tela (ver _depende_de_txt em cronograma_export.py): "Código (TIPO)" ou
+    "Código (TIPO, lag Xh)", várias predecessoras separadas por ";". Tipo
+    ausente ou não reconhecido cai em FS (mesmo default do resto do
+    sistema). Retorna uma lista de {codigo, tipo, lag_horas} — o casamento
+    do Código com uma atividade de verdade (e a gravação em si) acontece
+    depois, em _confirmar_flat, usando a mesma lista `por_codigo` já usada
+    pra casar a própria linha (o que permite referenciar tanto uma
+    atividade já existente quanto uma criada mais cedo nesta mesma
+    planilha)."""
+    if not texto:
+        return []
+    out = []
+    for token in str(texto).split(";"):
+        token = token.strip()
+        if not token:
+            continue
+        m = re.match(r"^(.*?)(?:\(([^)]*)\))?$", token)
+        codigo = (m.group(1) or "").strip()
+        detalhe = (m.group(2) or "").strip()
+        if not codigo:
+            continue
+        tipo = "FS"
+        lag = 0.0
+        if detalhe:
+            partes = [p.strip() for p in detalhe.split(",")]
+            if partes and partes[0].upper() in TIPOS_DEPENDENCIA_FLAT_VALIDOS:
+                tipo = partes[0].upper()
+            for p in partes[1:]:
+                lm = re.match(r"lag\s*([+-]?[\d.,]+)\s*h", p, re.IGNORECASE)
+                if lm:
+                    try:
+                        lag = float(lm.group(1).replace(",", "."))
+                    except ValueError:
+                        lag = 0.0
+        out.append({"codigo": codigo, "tipo": tipo, "lag_horas": lag})
+    return out
 
 
 def _resolver_recursos_flat(texto):
@@ -847,9 +934,11 @@ def _preview_flat(projeto_id, resultado, file_bytes, filename):
     codigos_existentes = {r["codigo_wbs"] for r in existentes}
     etapas_existentes = db.fetch_all(f"SELECT id, numero, nome FROM etapas WHERE projeto_id = {db.q(projeto_id)}")
     frentes_existentes = db.fetch_all(f"SELECT id, nome FROM frentes_trabalho WHERE projeto_id = {db.q(projeto_id)}")
+    tipos_existentes = db.fetch_all("SELECT id, nome FROM tipos_atividade_elementar")
+    requisitos_existentes = db.fetch_all(f"SELECT id, codigo, titulo FROM requisitos_tr WHERE projeto_id = {db.q(projeto_id)}")
     etapas_novas_avisadas, frentes_novas_avisadas = set(), set()
 
-    novas = atualizar = marcados_entregavel = marcados_master = 0
+    novas = atualizar = marcados_entregavel = marcados_master = dependencias = 0
     for l in resultado["linhas"]:
         codigo_existe = bool(l["codigo"] and l["codigo"] in codigos_existentes)
         if not codigo_existe:
@@ -884,6 +973,19 @@ def _preview_flat(projeto_id, resultado, file_bytes, filename):
                 avisos.append(f"Prioridade '{l['prioridade_txt']}' (Código {l['codigo']}) não reconhecida — prioridade será mantida como está.")
             else:
                 avisos.append(f"Prioridade '{l['prioridade_txt']}' (Código {l['codigo'] or '—'}) não reconhecida — atividade será criada com prioridade 'Média'.")
+        if l["tipo_atividade_txt"] and not _resolver_tipo_atividade_flat(l["tipo_atividade_txt"], tipos_existentes):
+            if codigo_existe:
+                avisos.append(f"Tipo de atividade elementar '{l['tipo_atividade_txt']}' (Código {l['codigo']}) não reconhecido — tipo será mantido como está.")
+            else:
+                avisos.append(f"Tipo de atividade elementar '{l['tipo_atividade_txt']}' (Código {l['codigo'] or '—'}) não reconhecido — atividade será criada sem tipo definido.")
+        if l["item_tr_txt"] and not _resolver_requisito_tr_flat(l["item_tr_txt"], requisitos_existentes):
+            if codigo_existe:
+                avisos.append(f"Item do TR '{l['item_tr_txt']}' (Código {l['codigo']}) não encontrado no projeto — item será mantido como está.")
+            else:
+                avisos.append(f"Item do TR '{l['item_tr_txt']}' (Código {l['codigo'] or '—'}) não encontrado no projeto — atividade será criada sem item do TR.")
+        deps_linha = _parse_dependencias_flat_txt(l["depende_de_txt"])
+        if deps_linha:
+            dependencias += len(deps_linha)
         if l["eh_entregavel"]:
             marcados_entregavel += 1
         if l["eh_master"]:
@@ -897,7 +999,7 @@ def _preview_flat(projeto_id, resultado, file_bytes, filename):
         "resumo": {
             "atividades_novas": novas, "atividades_atualizar": atualizar,
             "marcos_novos": 0, "marcos_atualizar": 0,
-            "dependencias": 0, "horas_aproximadas": 0,
+            "dependencias": dependencias, "horas_aproximadas": 0,
             "marcados_entregavel": marcados_entregavel, "marcados_master": marcados_master,
         },
         "avisos": avisos,
@@ -1078,9 +1180,21 @@ def _confirmar_flat(projeto_id, resultado):
     atividade nova (42ª rodada — ver nota no topo do arquivo), criando também
     a Etapa/Frente indicadas se ainda não existirem; isso é o que permite
     restaurar/popular o cronograma inteiro a partir da própria planilha
-    exportada, num projeto vazio ou num projeto do zero. Ainda não cria
-    marco nem dependência (a planilha flat não carrega predecessoras, e
-    marco/atividade nesse formato são a mesma linha — ver cronograma_export.py)."""
+    exportada, num projeto vazio ou num projeto do zero.
+
+    45ª rodada: Tipo de atividade elementar, Item do TR, Descrição e
+    Objetivo seguem a mesma regra "célula em branco não apaga" de todos os
+    outros campos. "Depende de" é DIFERENTE — ver `_parse_dependencias_flat_txt`
+    e `_depende_de_txt` em cronograma_export.py: uma célula preenchida é
+    tratada como a lista COMPLETA de predecessoras da linha (adiciona as que
+    faltam, atualiza tipo/lag das que já existiam com valor diferente, e
+    REMOVE as que não estão mais na célula) — só uma célula vazia não mexe
+    em nada. Isso NÃO passa pelo motor de cascata de cronograma_edicao_lote.py
+    (a importação sempre foi assim — datas/esforço também são gravados
+    direto, sem recalcular sucessoras); e não detecta ciclo introduzido por
+    uma dependência nova (diferente da tela "Editar em massa", que valida
+    isso via topological_sort) — confie na planilha exportada como ponto de
+    partida em vez de inventar predecessoras novas à mão."""
     avisos = list(resultado["avisos"])
     erros = []
 
@@ -1090,11 +1204,63 @@ def _confirmar_flat(projeto_id, resultado):
     por_codigo = {r["codigo_wbs"]: r for r in existentes}
     etapas_existentes = db.fetch_all(f"SELECT id, numero, nome FROM etapas WHERE projeto_id = {db.q(projeto_id)}")
     frentes_existentes = db.fetch_all(f"SELECT id, nome FROM frentes_trabalho WHERE projeto_id = {db.q(projeto_id)}")
+    tipos_existentes = db.fetch_all("SELECT id, nome FROM tipos_atividade_elementar")
+    requisitos_existentes = db.fetch_all(f"SELECT id, codigo, titulo FROM requisitos_tr WHERE projeto_id = {db.q(projeto_id)}")
     recurso_id_by_nome = {r["nome"]: r["id"] for r in db.fetch_all("SELECT id, nome FROM recursos")}
+
+    # Dependências já gravadas de cada atividade do projeto — uma única
+    # consulta pra todo mundo (nunca uma por linha, ver nota de desempenho
+    # acima) — usada pra reconciliar contra o que a célula "Depende de" pede.
+    deps_existentes_rows = db.fetch_all(
+        "SELECT ad.atividade_id, ad.predecessora_id, ad.tipo, ad.lag_horas "
+        "FROM atividade_dependencia ad JOIN atividades s ON s.id = ad.atividade_id "
+        f"WHERE s.projeto_id = {db.q(projeto_id)}"
+    )
+    deps_existentes_por_atividade = {}
+    for r in deps_existentes_rows:
+        deps_existentes_por_atividade.setdefault(r["atividade_id"], {})[r["predecessora_id"]] = {
+            "tipo": r["tipo"], "lag_horas": r["lag_horas"],
+        }
 
     hoje = datetime.now().date().isoformat()
     statements = []
     atualizadas = criadas = 0
+
+    def _aplicar_dependencias(atividade_id, codigo_linha, depende_de_txt):
+        """Reconcilia as dependências de `atividade_id` com o que a célula
+        pede — só roda se a célula NÃO estiver em branco (ver docstring
+        acima). `por_codigo` já inclui atividades criadas mais cedo nesta
+        mesma planilha, então uma predecessora pode ser uma atividade nova
+        do próprio arquivo, desde que a linha dela venha ANTES na planilha."""
+        if depende_de_txt is None:
+            return
+        pedidas = {}
+        for d in _parse_dependencias_flat_txt(depende_de_txt):
+            pred = por_codigo.get(d["codigo"])
+            if not pred:
+                avisos.append(f"Predecessora '{d['codigo']}' (Código {codigo_linha}) não encontrada no projeto — dependência ignorada.")
+                continue
+            if pred["id"] == atividade_id:
+                avisos.append(f"'{codigo_linha}' não pode depender dela mesma — dependência ignorada.")
+                continue
+            pedidas[pred["id"]] = {"tipo": d["tipo"], "lag_horas": d["lag_horas"]}
+
+        atuais = deps_existentes_por_atividade.get(atividade_id, {})
+        for pred_id, info in pedidas.items():
+            atual = atuais.get(pred_id)
+            if not atual or atual["tipo"] != info["tipo"] or float(atual["lag_horas"] or 0) != float(info["lag_horas"] or 0):
+                statements.append(
+                    "INSERT INTO atividade_dependencia (atividade_id, predecessora_id, tipo, lag_horas) VALUES ("
+                    f"{db.q(atividade_id)}, {db.q(pred_id)}, {db.q(info['tipo'])}, {db.q(info['lag_horas'])}) "
+                    "ON CONFLICT (atividade_id, predecessora_id) DO UPDATE SET "
+                    "tipo=EXCLUDED.tipo, lag_horas=EXCLUDED.lag_horas;"
+                )
+        for pred_id in atuais:
+            if pred_id not in pedidas:
+                statements.append(
+                    f"DELETE FROM atividade_dependencia WHERE atividade_id={db.q(atividade_id)} "
+                    f"AND predecessora_id={db.q(pred_id)};"
+                )
 
     for l in resultado["linhas"]:
         existente = por_codigo.get(l["codigo"]) if l["codigo"] else None
@@ -1152,6 +1318,22 @@ def _confirmar_flat(projeto_id, resultado):
                 campos["percentual_concluido"] = l["pct"]
             if l["observacoes"] is not None:
                 campos["observacoes"] = l["observacoes"]
+            if l["descricao"] is not None:
+                campos["descricao"] = l["descricao"]
+            if l["objetivo"] is not None:
+                campos["objetivo"] = l["objetivo"]
+            if l["tipo_atividade_txt"]:
+                tipo_id = _resolver_tipo_atividade_flat(l["tipo_atividade_txt"], tipos_existentes)
+                if tipo_id:
+                    campos["tipo_atividade_elementar_id"] = tipo_id
+                else:
+                    avisos.append(f"Tipo de atividade elementar '{l['tipo_atividade_txt']}' (Código {l['codigo']}) não reconhecido — tipo mantido.")
+            if l["item_tr_txt"]:
+                req_id = _resolver_requisito_tr_flat(l["item_tr_txt"], requisitos_existentes)
+                if req_id:
+                    campos["requisito_tr_id"] = req_id
+                else:
+                    avisos.append(f"Item do TR '{l['item_tr_txt']}' (Código {l['codigo']}) não encontrado no projeto — item mantido.")
             # ★ Master / 💰 Entregável: mesmo espírito "só adiciona" do modo
             # hierárquico — "Sim" na planilha liga a marcação; em branco nunca
             # desliga uma já marcada na tela.
@@ -1173,6 +1355,10 @@ def _confirmar_flat(projeto_id, resultado):
                 else:
                     avisos.append(f"Recurso '{nome_recurso}' (Código {l['codigo']}) não encontrado em Configurações — não vinculado.")
 
+            deps_antes = len(statements)
+            _aplicar_dependencias(atividade_id, l["codigo"], l["depende_de_txt"])
+            deps_mudaram = len(statements) > deps_antes
+
             if status_novo and status_novo in STATUS_EXIGE_RELATO and status_novo != existente.get("status"):
                 statements.append(_sql_insert("atividade_relato", {
                     "id": str(uuid_lib.uuid4()), "atividade_id": atividade_id,
@@ -1182,7 +1368,7 @@ def _confirmar_flat(projeto_id, resultado):
 
             if campos:
                 statements.append(_sql_update("atividades", atividade_id, campos))
-            if campos or recursos_vinculados:
+            if campos or recursos_vinculados or deps_mudaram:
                 atualizadas += 1
             continue
 
@@ -1246,6 +1432,22 @@ def _confirmar_flat(projeto_id, resultado):
             campos["percentual_concluido"] = l["pct"]
         if l["observacoes"] is not None:
             campos["observacoes"] = l["observacoes"]
+        if l["descricao"] is not None:
+            campos["descricao"] = l["descricao"]
+        if l["objetivo"] is not None:
+            campos["objetivo"] = l["objetivo"]
+        if l["tipo_atividade_txt"]:
+            tipo_id = _resolver_tipo_atividade_flat(l["tipo_atividade_txt"], tipos_existentes)
+            if tipo_id:
+                campos["tipo_atividade_elementar_id"] = tipo_id
+            else:
+                avisos.append(f"Tipo de atividade elementar '{l['tipo_atividade_txt']}' (Código {l['codigo'] or '—'}) não reconhecido — atividade criada sem tipo definido.")
+        if l["item_tr_txt"]:
+            req_id = _resolver_requisito_tr_flat(l["item_tr_txt"], requisitos_existentes)
+            if req_id:
+                campos["requisito_tr_id"] = req_id
+            else:
+                avisos.append(f"Item do TR '{l['item_tr_txt']}' (Código {l['codigo'] or '—'}) não encontrado no projeto — atividade criada sem item do TR.")
         if l["eh_entregavel"]:
             campos["eh_entregavel"] = True
         if l["eh_master"]:
@@ -1270,6 +1472,8 @@ def _confirmar_flat(projeto_id, resultado):
                 recursos_vinculados += 1
             else:
                 avisos.append(f"Recurso '{nome_recurso}' (Código {l['codigo'] or '—'}) não encontrado em Configurações — não vinculado.")
+
+        _aplicar_dependencias(atividade_id, l["codigo"] or "—", l["depende_de_txt"])
 
         if status_novo in STATUS_EXIGE_RELATO:
             statements.append(_sql_insert("atividade_relato", {
