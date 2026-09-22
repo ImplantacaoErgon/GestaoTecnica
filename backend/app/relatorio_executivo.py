@@ -209,11 +209,15 @@ def _migracao_de_dados(projeto_id):
     deste módulo (a IA só formata a tabela, não recalcula nada — ver
     instrução no PROMPT_TEMPLATE). Um item com um único ciclo (ainda comum
     nesta fase do projeto) aparece com "ciclo_anterior": None e
-    "evolucao_percentual": None — não dá pra comparar o que não existe."""
+    "evolucao_percentual": None — não dá pra comparar o que não existe. Cada
+    ciclo (em "ultimo_ciclo"/"ciclo_anterior") também carrega "rejeitado" e
+    "percentual_rejeicao" (coluna gerada pelo banco), usados na tabela para
+    mostrar a taxa de rejeição do último ciclo por item."""
     linhas = db.fetch_all(f"""
         SELECT im.id AS item_id, im.nome_tabela_legado, im.nome_tabela_destino,
                im.qtd_registros_estimada, im.status,
-               c.numero_ciclo, c.data_execucao, c.qtd_registros_carregados
+               c.numero_ciclo, c.data_execucao, c.qtd_registros_carregados,
+               c.qtd_rejeicoes, c.percentual_rejeicao
         FROM itens_migracao im
         JOIN ciclos_migracao c ON c.item_migracao_id = im.id
         WHERE im.projeto_id = {db.q(projeto_id)}
@@ -236,6 +240,10 @@ def _migracao_de_dados(projeto_id):
             por_item[item_id]["ciclos"].append({
                 "numero": l["numero_ciclo"], "data": l["data_execucao"],
                 "carregado": l["qtd_registros_carregados"] or 0,
+                # 51ª rodada — % de rejeição do ciclo, já calculado pelo banco (coluna
+                # gerada ciclos_migracao.percentual_rejeicao) — só passa adiante, não recalcula.
+                "rejeitado": l["qtd_rejeicoes"] or 0,
+                "percentual_rejeicao": l.get("percentual_rejeicao"),
             })
 
     itens = []
@@ -535,17 +543,21 @@ Apresente um quadro comparativo, tabela a tabela, com todos os itens de
 com o carregado no último ciclo e o % de evolução (ou involução, se negativo). Monte essa
 tabela em sintaxe de tabela markdown (GFM: uma linha de cabeçalho, uma linha separadora
 "---" logo abaixo, células separadas por "|") com as colunas, nesta ordem: Tabela do
-legado | Destino | Carregado (ciclo anterior) | Carregado (último ciclo) | Evolução. Use
-EXATAMENTE os valores já calculados em "ultimo_ciclo.carregado", "ciclo_anterior.carregado"
-e "evolucao_percentual" — não recalcule nada. Quando "ciclo_anterior" for null, escreva "—"
-nas colunas de carregado do ciclo anterior/evolução e, na coluna Evolução, o texto de
-"evolucao_observacao" (ex: "sem ciclo anterior para comparação"). Na coluna Evolução, quando
-houver percentual, escreva no formato "+12,3%" (evolução) ou "-8,5%" (involução) — troque o
-ponto decimal do JSON por vírgula, e sempre com o sinal. Depois da tabela, escreva um
-parágrafo curto com o total geral (resumo.total_carregado_ultimo_ciclo,
-resumo.evolucao_percentual_global) e destacando por nome qualquer tabela com involução
-(percentual negativo), se houver — involução merece atenção da diretoria porque normalmente
-indica retrabalho ou erro de carga que precisou ser desfeito.
+legado | Destino | Carregado (ciclo anterior) | Carregado (último ciclo) | Evolução | %
+Rejeições (último ciclo). Use EXATAMENTE os valores já calculados em "ultimo_ciclo.carregado",
+"ciclo_anterior.carregado", "evolucao_percentual" e "ultimo_ciclo.percentual_rejeicao" — não
+recalcule nada. Quando "ciclo_anterior" for null, escreva "—" nas colunas de carregado do
+ciclo anterior/evolução e, na coluna Evolução, o texto de "evolucao_observacao" (ex: "sem
+ciclo anterior para comparação"). Na coluna Evolução, quando houver percentual, escreva no
+formato "+12,3%" (evolução) ou "-8,5%" (involução) — troque o ponto decimal do JSON por
+vírgula, e sempre com o sinal. Na coluna % Rejeições (último ciclo), escreva no formato
+"X,XX%" (troque o ponto decimal do JSON por vírgula, SEM sinal — é uma taxa, não uma
+evolução); quando não houver "ultimo_ciclo" ou "percentual_rejeicao" for null, escreva "—".
+Depois da tabela, escreva um parágrafo curto com o total geral
+(resumo.total_carregado_ultimo_ciclo, resumo.evolucao_percentual_global) e destacando por
+nome qualquer tabela com involução (percentual negativo) ou com taxa de rejeição alta, se
+houver — involução merece atenção da diretoria porque normalmente indica retrabalho ou erro
+de carga que precisou ser desfeito.
 
 ## Folha de Pagamento
 Este tema ainda está em levantamento/parametrização (ver

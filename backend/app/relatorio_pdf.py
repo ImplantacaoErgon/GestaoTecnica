@@ -30,6 +30,26 @@ _INLINE_ITALIC = re.compile(r"(?<!\*)\*([^*]+?)\*(?!\*)")
 _TABLE_ROW_RE = re.compile(r"^\|(.+)\|\s*$")
 # Linha separadora do cabeçalho (a 2ª linha de toda tabela GFM): só "-", ":", "|" e espaços.
 _TABLE_SEP_RE = re.compile(r"^\|?[\s:|-]+\|?\s*$")
+# 51ª rodada — a IA às vezes devolve uma linha de tabela sem o "|" de abertura/fechamento
+# (normalmente a última linha de uma tabela grande, por algum corte na geração). Com
+# _TABLE_ROW_RE estrita, essa linha caía fora da tabela e era desenhada como texto solto
+# com os "|" visíveis (bug reportado pelo usuário). _parece_linha_tabela() é tolerante: só
+# exige 2+ ocorrências de "|" na linha, o suficiente pra reconhecer uma linha de tabela com
+# várias colunas mesmo faltando uma borda — e _normaliza_linha_tabela() repõe as bordas
+# antes de mandar pro _split_table_row (que já tolera não ter "|" nas pontas).
+_PIPE_MIN_OCORRENCIAS = 2
+
+
+def _parece_linha_tabela(s):
+    return s.count("|") >= _PIPE_MIN_OCORRENCIAS
+
+
+def _normaliza_linha_tabela(s):
+    if not s.startswith("|"):
+        s = "|" + s
+    if not s.endswith("|"):
+        s = s + "|"
+    return s
 # Célula de evolução/involução no formato "+12,3%" / "-8,5%" — pinta de verde/vermelho.
 _EVOLUCAO_RE = re.compile(r"^([+-])\s*[\d.,]+\s*%")
 
@@ -157,10 +177,10 @@ def _markdown_para_flowables(conteudo_md, estilos):
         if buffer_tabela and len(buffer_tabela) == 1 and _TABLE_SEP_RE.match(linha_strip):
             buffer_tabela.append(linha_strip)
             continue
-        if _TABLE_ROW_RE.match(linha_strip):
+        if _TABLE_ROW_RE.match(linha_strip) or (buffer_tabela and _parece_linha_tabela(linha_strip)):
             if not buffer_tabela:
                 fecha_lista()
-            buffer_tabela.append(linha_strip)
+            buffer_tabela.append(_normaliza_linha_tabela(linha_strip))
             continue
         # linha não é de tabela: se tinha só uma linha bufferizada como possível cabeçalho
         # (sem separador confirmado logo depois), não era uma tabela de verdade — essa
