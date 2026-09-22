@@ -279,18 +279,33 @@
 
   /* ---- gantt ---- */
   .gantt-wrap{background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);overflow:auto;margin-bottom:16px;}
-  .gantt{display:grid;grid-template-columns:280px 1fr;}
+  /* 280px -> 840px (triplicado): pedido do usuário, 47ª rodada — "triplique
+     o tamanho do campo da atividade nessa página de Cronograma", porque os
+     nomes das atividades ficavam cortados (reticências) na coluna da
+     esquerda do Gantt. */
+  .gantt{display:grid;grid-template-columns:840px 1fr;}
   .gantt-labels{border-right:1px solid var(--border);}
   .gantt-label-row{height:30px;display:flex;align-items:center;padding:0 10px;font-size:12px;border-bottom:1px solid var(--border);gap:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .gantt-label-row .wbs{color:var(--text-faint);font-family:'IBM Plex Mono';font-size:11px;}
   .gantt-chart{position:relative;}
-  .gantt-header{height:22px;position:relative;border-bottom:1px solid var(--border);background:var(--surface-2);}
+  .gantt-header{height:22px;position:sticky;top:0;z-index:2;border-bottom:1px solid var(--border);background:var(--surface-2);}
   .gantt-header span{position:absolute;top:3px;font-size:10px;color:var(--text-faint);font-family:'IBM Plex Mono';}
   .gantt-row{height:30px;position:relative;border-bottom:1px solid var(--border);}
   .gantt-bar{position:absolute;top:6px;height:18px;border-radius:5px;opacity:.85;}
   .gantt-bar .fill{position:absolute;left:0;top:0;bottom:0;background:rgba(255,255,255,.35);border-radius:5px 0 0 5px;}
   .gantt-bar.critica{outline:2px solid var(--danger);outline-offset:1px;}
   .gantt-today{position:absolute;top:0;bottom:0;width:1px;background:var(--danger);z-index:5;}
+
+  /* Gantt e tabela da página de Cronograma limitados a ~25 linhas visíveis,
+     com rolagem própria pro resto — pedido do usuário, 47ª rodada: "colocar
+     uma barra de rolagem nesses dois blocos para que a página não fique tão
+     extensa. Deixe 25 linhas em cada bloco." Valores em px medidos na
+     renderização real (cabeçalho + 25 linhas de dados), não são um chute —
+     ver renderGantt()/renderAtividadesTable() no JS. Escopado só à página de
+     Cronograma (#view-cronograma) pra não afetar o .table-wrap genérico
+     usado em todas as outras telas do sistema. */
+  #view-cronograma .table-wrap{max-height:1072px;}
+  #view-cronograma .gantt-wrap{max-height:780px;}
 
   /* ---- modal ---- */
   .overlay{position:fixed;inset:0;background:rgba(10,14,17,.5);display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto;z-index:50;}
@@ -614,7 +629,7 @@
     <div class="table-wrap">
       <table>
         <thead><tr>
-          <th>Código</th><th>Atividade</th><th>Etapa/Frente</th><th>Status</th><th>Início prev.</th><th>Fim prev.</th><th>%</th><th>Horas (prev./real.)</th><th>Recursos</th><th>Crítica</th>
+          <th>Código</th><th style="min-width:350px;">Atividade</th><th>Etapa/Frente</th><th>Status</th><th>Início prev.</th><th>Fim prev.</th><th>%</th><th>Horas (prev./real.)</th><th>Recursos</th><th>Crítica</th>
         </tr></thead>
         <tbody id="atividades-tbody"></tbody>
       </table>
@@ -2678,6 +2693,14 @@ function responsaveisCell(a){
   return `<span title="${esc(nomes.join(", "))}">${esc(visiveis)}${resto}</span>`;
 }
 
+// Coluna "Status" com white-space:nowrap (47ª rodada): a coluna "Atividade"
+// ficou 3x mais larga (ver th "min-width:350px" no HTML) e isso deixou menos
+// espaço pras outras colunas — sem o nowrap, uma atividade "Atrasada" (2
+// selos, Status + Atrasada) quebrava em 2 linhas e deixava aquela linha
+// mais alta que as demais, desalinhando as ~25 linhas visíveis do bloco
+// (ver #view-cronograma .table-wrap{max-height} no CSS). Com nowrap a linha
+// toda vez que precisar de mais espaço estoura a largura da tabela (que já
+// tem rolagem horizontal própria), não a altura da linha.
 function renderAtividadesTable(list){
   if(!list.length){
     $("atividades-tbody").innerHTML = `<tr class="empty-row"><td colspan="10">Nenhuma atividade encontrada para os filtros atuais.</td></tr>`;
@@ -2688,7 +2711,7 @@ function renderAtividadesTable(list){
       <td class="mono">${esc(a.codigo_wbs||"—")}</td>
       <td>${a.eh_atividade_master?`<span title="Atividade master (entregável mestre do projeto)">★</span> `:""}${a.eh_entregavel?`<span title="Entregável (atrelado a faturamento)">💰</span> `:""}${esc(a.nome)}${a.requisito_tr_codigo?`<div class="muted" style="font-size:11px;">TR: ${esc(a.requisito_tr_codigo)}</div>`:""}</td>
       <td>${a.etapa_numero!=null?a.etapa_numero+".":""}${esc(a.frente_nome||"—")}</td>
-      <td>${pill(a.status, STATUS_COLOR[a.status]||"faint")}${a.atrasada?" "+pill("Atrasada","danger"):""}${a.esforco_estourado?" "+pill("Esforço acima do previsto","warn"):""}</td>
+      <td style="white-space:nowrap;">${pill(a.status, STATUS_COLOR[a.status]||"faint")}${a.atrasada?" "+pill("Atrasada","danger"):""}${a.esforco_estourado?" "+pill("Esforço acima do previsto","warn"):""}</td>
       <td class="mono">${fmtDate(a.dtini_prev)}</td>
       <td class="mono">${fmtDate(a.dtfim_prev)}</td>
       <td class="mono">${a.percentual_concluido}%</td>
@@ -2734,7 +2757,7 @@ function renderGantt(list){
   }).join("");
 
   el.innerHTML = `<div class="gantt">
-    <div class="gantt-labels"><div class="gantt-label-row" style="font-weight:700;border-bottom:2px solid var(--border);">Atividade</div>${labelsHtml}</div>
+    <div class="gantt-labels"><div class="gantt-label-row" style="font-weight:700;border-bottom:2px solid var(--border);position:sticky;top:0;z-index:3;background:var(--surface);">Atividade</div>${labelsHtml}</div>
     <div class="gantt-chart" style="min-width:${chartWidth}px;">
       <div class="gantt-header" style="width:${chartWidth}px;">${headerHtml}${todayLeft>=0&&todayLeft<=chartWidth?`<div class="gantt-today" style="left:${todayLeft}px;" title="Hoje"></div>`:""}</div>
       <div style="position:relative;">${todayLeft>=0&&todayLeft<=chartWidth?`<div class="gantt-today" style="left:${todayLeft}px;height:100%;"></div>`:""}${rowsHtml}</div>
