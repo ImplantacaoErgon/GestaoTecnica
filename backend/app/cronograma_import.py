@@ -527,6 +527,13 @@ class Node:
         self.etapa_key = None
         self.frente_key = None
         self.atividade_pai_node = None
+        # 49ª rodada — ver comentário em analisar_planilha() sobre "fase rasa
+        # (só 2 níveis de WBS)": eh_atividade_direta_da_fase marca um nó de
+        # 1 ponto no EDT (normalmente uma Etapa) que na verdade é uma tarefa-
+        # folha (sem filhos) — vira Atividade, não Etapa vazia. eh_pai_promovido
+        # marca o nó de 0 pontos (a fase) que assumiu o papel de Etapa nesse caso.
+        self.eh_atividade_direta_da_fase = False
+        self.eh_pai_promovido = False
 
 
 def _montar_arvore(nodes):
@@ -559,6 +566,12 @@ def _calcular_grupos_frente(nodes):
         return cur if (cur is not None and cur.dots == 2) else None
 
     for n in nodes:
+        # 49ª rodada: tarefa-folha promovida a Atividade direto na fase (ver
+        # analisar_planilha) nunca tem um ancestral de 2 pontos — cai na
+        # mesma "gestao" sintética que qualquer atividade solta sem sub-grupo.
+        if n.eh_atividade_direta_da_fase:
+            n.frente_key = "gestao"
+            continue
         if n.dots < 2:
             continue
         anc = nivel2_ancestor(n)
@@ -812,13 +825,54 @@ def analisar_planilha(file_bytes, filename):
 
     _montar_arvore(nodes)
 
-    etapas_nodes = [n for n in nodes if n.dots == 1]
+    # 49ª rodada — bug real encontrado: uma fase do WBS com só 2 níveis (a fase
+    # em si, EDT com 0 pontos tipo "5", e as tarefas direto abaixo dela, EDT
+    # com 1 ponto tipo "5.1" — SEM nenhum sub-grupo de 2+ pontos) fazia cada
+    # uma dessas tarefas virar uma Etapa VAZIA (o critério de Etapa é "EDT com
+    # 1 ponto", sem olhar se tem filho) — e como só o que tem 2+ pontos vira
+    # Atividade, nenhuma Atividade real era criada: a prévia mostrava os nomes
+    # das tarefas (como se fossem grupos de Etapa encontrados), mas a
+    # confirmação gravava 0 atividades. Reproduzido com um extrato de
+    # "Treinamentos e Go Live" do cronograma do projeto (fases inteiras assim,
+    # sem sub-grupo) — mesma fase existe também no cronograma completo, então
+    # o problema não é exclusivo desse extrato.
+    #
+    # Correção: uma "Etapa candidata" (1 ponto no EDT) que NÃO tem filho
+    # nenhum não vira uma Etapa vazia — ela mesma vira Atividade (folha), e
+    # quem assume o papel de Etapa é a fase (0 pontos) logo acima dela, usando
+    # o nome da fase (ex: "03.07-Treinamentos Transacionais..."). Uma fase
+    # pode ter os dois casos ao mesmo tempo (alguns ramos com sub-grupo,
+    # outros direto na fase) — só os ramos rasos entram na Etapa promovida.
+    etapas_candidatas = [n for n in nodes if n.dots == 1]
+    etapas_nodes = []
+    pais_promovidos_edts = set()
+    for n in etapas_candidatas:
+        if n.children:
+            etapas_nodes.append(n)
+        else:
+            n.eh_atividade_direta_da_fase = True
+            pai = n.parent
+            if pai is not None and pai.edt not in pais_promovidos_edts:
+                pais_promovidos_edts.add(pai.edt)
+                pai.eh_pai_promovido = True
+                etapas_nodes.append(pai)
+            elif pai is None:
+                avisos.append(
+                    f"Tarefa '{n.nome}' (EDT {n.edt}) está sem uma fase-mãe na planilha (EDT \"{n.edt.split('.')[0]}\" "
+                    "não encontrado) — importada como atividade, mas sem Etapa; configure manualmente no Cronograma."
+                )
+
     for etapa_node in etapas_nodes:
         def walk(n, ek):
             n.etapa_key = ek
             for c in n.children:
                 walk(c, ek)
-        walk(etapa_node, etapa_node.edt)
+        if etapa_node.eh_pai_promovido:
+            for c in etapa_node.children:
+                if c.eh_atividade_direta_da_fase:
+                    walk(c, etapa_node.edt)
+        else:
+            walk(etapa_node, etapa_node.edt)
 
     grupos_frente_nodes = _calcular_grupos_frente(nodes)
 
@@ -830,9 +884,10 @@ def analisar_planilha(file_bytes, filename):
             anc = anc.parent
         n.atividade_pai_node = anc
 
-    milestone_nodes = [n for n in nodes if n.dots >= 2 and eh_marco(n)]
+    eh_candidata_atividade = lambda n: n.dots >= 2 or n.eh_atividade_direta_da_fase
+    milestone_nodes = [n for n in nodes if eh_candidata_atividade(n) and eh_marco(n)]
     ms_ids = set(id(n) for n in milestone_nodes)
-    atividade_nodes = [n for n in nodes if n.dots >= 2 and id(n) not in ms_ids]
+    atividade_nodes = [n for n in nodes if eh_candidata_atividade(n) and id(n) not in ms_ids]
 
     if not etapas_nodes:
         raise ImportacaoError(
