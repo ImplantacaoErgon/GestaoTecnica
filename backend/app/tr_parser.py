@@ -3,7 +3,11 @@ Extração heurística de requisitos a partir de um Termo de Referência (TR).
 
 Não usa nenhum modelo de IA em tempo de execução (o backend não tem acesso
 a nenhuma API de LLM) — é um parser baseado em regras sobre a estrutura
-típica dos TRs de licitação pública brasileiros para sistemas de software:
+típica dos TRs de licitação pública brasileiros para sistemas de software.
+Reconhece dois formatos:
+
+FORMATO 1 — "narrativo" (o original, tratado pelas funções
+_find_functional_zone / _find_non_functional_zone / _extract_leaf_items):
 
   1. Um grande catálogo de "funcionalidades", organizado em módulos
      numerados com título em CAIXA ALTA ("1. ABRANGÊNCIA...",
@@ -16,7 +20,7 @@ típica dos TRs de licitação pública brasileiros para sistemas de software:
      segurança, integração, disponibilidade...) — tratado aqui como
      requisitos **Não Funcionais**.
 
-O algoritmo:
+  O algoritmo:
   - Converte o arquivo (HTML, TXT, DOCX ou PDF) em texto simples, uma
     linha por parágrafo/célula.
   - Localiza a sequência mais longa de títulos "N. TÍTULO EM CAIXA ALTA"
@@ -32,6 +36,43 @@ O algoritmo:
     de "módulo de origem" dos itens abaixo dela) em vez de um requisito
     em si — evita importar linhas como "2.2. Localização e busca de
     informações" como se fossem um requisito próprio.
+
+FORMATO 2 — "tabular" (50ª rodada; tratado pelas funções _looks_tabular /
+_find_nf_divider / _extract_tabular_items), usado por TRs publicados como
+uma tabela de 3 colunas — Descrição | Sub-item | Prazo — um requisito por
+linha da tabela (é o caso, por exemplo, do ANEXO I de Requisitos Funcionais
+e Não Funcionais do TR da Prefeitura do Recife). A diferença estrutural
+chave: quando esse tipo de PDF vira texto, o código e o prazo (a célula
+"Sub-item"/"Prazo" da linha) saem GRUDADOS NO FIM da descrição, não no
+início — ex: "...telas da SOLUÇÃO.1.4 Imediato" ou, quando o prazo é
+"Customizável Curto/Médio/Longo" e quebra em duas linhas no PDF,
+"...vigência contratual.1.6Customizável \nCurto". O parser detecta esse
+formato contando quantas vezes esse padrão "<código> <prazo>" aparece no
+documento (uma dúzia ou mais é sinal forte do formato tabular; o Formato 1
+nunca produz esse padrão, já que nele o código vem antes do texto). Dentro
+dele:
+  - Uma linha isolada e curta, começando com um código de até 3 níveis
+    (N, N.N ou N.N.N) e SEM a palavra "Imediato"/"Customizável", é um
+    título de seção/subseção (vira contexto de "módulo de origem",
+    empilhado por profundidade — mesma ideia do Formato 1).
+  - As demais linhas viram um buffer de descrição corrente; toda vez que
+    esse buffer contém "<código> <prazo>", tudo antes disso é a descrição
+    do item daquele código, e o restante do buffer volta a acumular para
+    o próximo item.
+  - Requisitos Funcionais x Não Funcionais aqui não vêm de um "ANEXO"
+    separado, e sim de um divisor de texto dentro do próprio documento,
+    algo como "... - Requisitos Não Funcionais" (ex: "Sistemas de RH -
+    Requisitos Não Funcionais"), a partir do qual todo o resto do
+    documento é tratado como Não Funcional; sem esse divisor, tudo vira
+    Funcional (mesmo default do Formato 1 quando não acha o anexo).
+  - Uma mesma linha de tabela às vezes solta o marcador "<código> <prazo>"
+    mais de uma vez (parágrafos com sub-bullets dentro da mesma célula,
+    ex: "Camada de Apresentação", "Camada de Negócio"...) — em vez de
+    tratar como itens/códigos duplicados (perdendo a 1ª metade do texto),
+    o parser concatena como continuação do mesmo item.
+  - O prazo (Imediato/Customizável Curto/Médio/Longo) não tem campo
+    próprio em requisitos_tr — é anexado ao final da descrição entre
+    parênteses, pra não se perder.
 
 É uma heurística, não uma leitura garantida — sempre precisa de revisão
 humana antes de confirmar a importação (por isso a rota correspondente
@@ -59,6 +100,26 @@ NF_KEYWORDS = [
 TOP_HEADING_RE = re.compile(r"^(\d{1,2})\.\s*(.{4,90}?):?\s*$")
 LEAF_RE = re.compile(r"^(\d{1,2}(?:\.\d{1,3}){1,4})\.?\s+(.{2,}?)\s*$")
 ANEXO_RE = re.compile(r"^ANEXO\s+\S{1,15}\s*[\-–—]\s*(.{3,120})$", re.IGNORECASE)
+
+# ---- Formato 2 (tabular): ver docstring do módulo.
+# Código+prazo colado no FIM da descrição (não no início) — ex:
+# "...telas da SOLUÇÃO.1.4 Imediato" ou "...contratual.1.6Customizável \nCurto".
+TABULAR_ITEM_END_RE = re.compile(
+    r"(\d{1,2}(?:\.\d{1,3}){1,4})\s*(Imediato|Customiz[aá]vel\s*\n?\s*(?:Curto|M[eé]dio|Longo))",
+    re.IGNORECASE,
+)
+# Linha isolada e curta "<código até 3 níveis> <título>", sem "Imediato"/
+# "Customizável" — título de seção/subseção (não um requisito em si).
+TABULAR_HEADING_RE = re.compile(r"^(\d{1,2}(?:\.\d{1,2}){0,3})\s+(.{2,90})$")
+# Divisor textual entre a zona Funcional e a zona Não Funcional, dentro do
+# mesmo documento (não é um "ANEXO" separado como no Formato 1).
+TABULAR_NF_DIVIDER_RE = re.compile(r"requisitos\s+n[aã]o[\s-]*funcionais", re.IGNORECASE)
+# Cabeçalhos de coluna da tabela que aparecem soltos numa linha própria
+# (repetição do cabeçalho da tabela ao trocar de zona/seção).
+TABULAR_TABLE_HEADER_RE = re.compile(
+    r"^(item\s+)?sub-?item\s+prazo\s*$|^requisito\s+item\s+classifica[cç][aã]o\s*$",
+    re.IGNORECASE,
+)
 
 
 class TrParseError(Exception):
@@ -158,6 +219,89 @@ def _text_from_pdf(raw_bytes):
 
     reader = pypdf.PdfReader(io.BytesIO(raw_bytes))
     return "\n".join((page.extract_text() or "") for page in reader.pages)
+
+
+# ---------------------------------------------------------------- formato 2 (tabular)
+
+def _looks_tabular(lines):
+    """Um TR do Formato 2 (ver docstring do módulo) tem dezenas/centenas de
+    ocorrências do padrão '<código> <prazo>' colado no fim da descrição; o
+    Formato 1 nunca produz esse padrão (nele o código vem antes do texto, e
+    a palavra 'Prazo'/'Imediato' nem aparece). >=15 ocorrências é sinal
+    forte o bastante pra não confundir com uma citação numérica isolada."""
+    return len(TABULAR_ITEM_END_RE.findall("\n".join(lines))) >= 15
+
+
+def _find_nf_divider(lines):
+    """Acha o divisor textual (linha curta e isolada) que marca onde começa
+    a zona Não Funcional dentro do mesmo documento — ver docstring."""
+    for i, line in enumerate(lines):
+        s = line.strip()
+        if len(s) < 80 and TABULAR_NF_DIVIDER_RE.search(s):
+            return i
+    return None
+
+
+def _extract_tabular_items(lines):
+    """Extrai itens do Formato 2. Percorre linha a linha: linhas de título
+    de seção atualizam uma pilha de contexto por profundidade (mesma ideia
+    de heading_stack usada em _extract_leaf_items); as demais linhas viram
+    um buffer de descrição corrente, cortado toda vez que aparece um
+    marcador '<código> <prazo>' no fim — o texto antes do marcador é a
+    descrição do item daquele código. Quando o mesmo código aparece mais de
+    uma vez (célula com sub-bullets soltando o marcador no meio), concatena
+    em vez de sobrescrever, pra não perder a primeira metade do texto."""
+    heading_stack = {}
+    buffer = []
+    por_codigo = {}
+    ordem = []
+
+    def flush_heading(codigo, titulo):
+        depth = codigo.count(".") + 1
+        for d in list(heading_stack):
+            if d >= depth:
+                del heading_stack[d]
+        heading_stack[depth] = f"{codigo} {titulo}"
+
+    def modulo_origem_for(item_depth):
+        path = [heading_stack[d] for d in sorted(heading_stack) if d < item_depth]
+        return " > ".join(path) if path else None
+
+    for raw in lines:
+        s = raw.strip()
+        if not s or TABULAR_TABLE_HEADER_RE.match(s):
+            continue
+        h = TABULAR_HEADING_RE.match(s)
+        if h and not re.search(r"imediato|customiz[aá]vel", s, re.IGNORECASE):
+            titulo = re.sub(r"\s+(item\s+)?sub-?item\s+prazo\s*$", "", h.group(2), flags=re.IGNORECASE).strip()
+            if titulo:
+                flush_heading(h.group(1), titulo)
+                buffer = []  # descarta preâmbulo (ex: título do anexo) antes do 1º item real
+                continue
+        buffer.append(s)
+        blob = " ".join(buffer)
+        while True:
+            m = TABULAR_ITEM_END_RE.search(blob)
+            if not m:
+                break
+            codigo = m.group(1)
+            prazo = re.sub(r"\s+", " ", m.group(2)).strip()
+            texto = re.sub(r"\s+", " ", blob[:m.start()]).strip(" -–—")
+            if texto:
+                depth = codigo.count(".") + 1
+                if codigo in por_codigo:
+                    por_codigo[codigo]["texto"] = (por_codigo[codigo]["texto"] + " " + texto).strip()
+                else:
+                    por_codigo[codigo] = {
+                        "codigo": codigo,
+                        "texto": texto,
+                        "prazo": prazo,
+                        "modulo_origem": modulo_origem_for(depth),
+                    }
+                    ordem.append(codigo)
+            blob = blob[m.end():].strip()
+            buffer = [blob] if blob else []
+    return [por_codigo[c] for c in ordem]
 
 
 # ---------------------------------------------------------------- localização das zonas
@@ -281,11 +425,16 @@ def _titulo_from_texto(texto):
     return base
 
 
-def _build_item(codigo, texto, modulo_origem, prefixo, tipo):
+def _build_item(codigo, texto, modulo_origem, prefixo, tipo, prazo=None):
+    descricao = texto
+    if prazo:
+        # requisitos_tr não tem coluna própria pra isso — anexa ao final da
+        # descrição pra não perder essa informação do TR original.
+        descricao = f"{texto} (Prazo no TR: {prazo})"
     return {
         "codigo": f"{prefixo}-{codigo}",
         "titulo": _titulo_from_texto(texto),
-        "descricao": texto,
+        "descricao": descricao,
         "modulo_origem": modulo_origem,
         "tipo_requisito": tipo,
     }
@@ -301,48 +450,71 @@ def parse_tr_document(raw_bytes, filename):
     lines = text.split("\n")
     avisos = []
 
-    anexo_heads = _find_anexo_headings(lines)
-    func_zone = _find_functional_zone(lines)
-    nf_zone = _find_non_functional_zone(anexo_heads, len(lines))
-
     itens = []
 
-    if func_zone:
-        start_line = func_zone[0][0]
-        # limite da zona funcional: o anexo de requisitos não funcionais, se achado;
-        # senão, o próximo título de anexo qualquer (evita "vazar" para dentro de um
-        # anexo não reconhecido); senão, uma janela de segurança.
-        proximo_anexo = next((i for i, _ in anexo_heads if i > func_zone[-1][0]), None)
-        if nf_zone:
-            end_line = nf_zone[0]
-        elif proximo_anexo is not None:
-            end_line = proximo_anexo
-        else:
-            end_line = func_zone[-1][0] + 400
-        end_line = min(end_line, len(lines))
-        for it in _extract_leaf_items(lines, start_line, end_line):
-            itens.append(_build_item(it["codigo"], it["texto"], it["modulo_origem"], "RF", "Funcional"))
-    else:
-        avisos.append(
-            "Não foi possível identificar automaticamente o catálogo de funcionalidades "
-            "(nenhuma sequência de módulos numerados 1, 2, 3... em caixa alta foi encontrada)."
-        )
+    if _looks_tabular(lines):
+        # Formato 2 — ver docstring do módulo. Requisitos Funcionais/Não
+        # Funcionais aqui não vêm de um ANEXO separado, e sim de um divisor
+        # de texto dentro do próprio documento.
+        nf_idx = _find_nf_divider(lines)
+        func_lines = lines[:nf_idx] if nf_idx is not None else lines
+        nf_lines = lines[nf_idx + 1:] if nf_idx is not None else []
 
-    if nf_zone:
-        start_line, end_line = nf_zone
-        for it in _extract_leaf_items(lines, start_line, end_line):
-            itens.append(_build_item(it["codigo"], it["texto"], it["modulo_origem"], "RNF", "Não Funcional"))
+        for it in _extract_tabular_items(func_lines):
+            itens.append(_build_item(it["codigo"], it["texto"], it["modulo_origem"], "RF", "Funcional", it["prazo"]))
+        for it in _extract_tabular_items(nf_lines):
+            itens.append(_build_item(it["codigo"], it["texto"], it["modulo_origem"], "RNF", "Não Funcional", it["prazo"]))
+
+        if nf_idx is None:
+            avisos.append(
+                "Não foi encontrado, dentro do documento, um divisor de texto indicando o início "
+                "dos Requisitos Não Funcionais (ex: '... - Requisitos Não Funcionais') — todos os "
+                "itens foram importados como Funcionais; separe manualmente se for o caso."
+            )
     else:
-        avisos.append(
-            "Não foi encontrado um anexo de 'Requisitos Técnicos'/'Requisitos Não Funcionais' — "
-            "se o seu TR tiver essa seção com outro nome, os itens dela não foram capturados."
-        )
+        # Formato 1 (narrativo) — ver docstring do módulo.
+        anexo_heads = _find_anexo_headings(lines)
+        func_zone = _find_functional_zone(lines)
+        nf_zone = _find_non_functional_zone(anexo_heads, len(lines))
+
+        if func_zone:
+            start_line = func_zone[0][0]
+            # limite da zona funcional: o anexo de requisitos não funcionais, se achado;
+            # senão, o próximo título de anexo qualquer (evita "vazar" para dentro de um
+            # anexo não reconhecido); senão, uma janela de segurança.
+            proximo_anexo = next((i for i, _ in anexo_heads if i > func_zone[-1][0]), None)
+            if nf_zone:
+                end_line = nf_zone[0]
+            elif proximo_anexo is not None:
+                end_line = proximo_anexo
+            else:
+                end_line = func_zone[-1][0] + 400
+            end_line = min(end_line, len(lines))
+            for it in _extract_leaf_items(lines, start_line, end_line):
+                itens.append(_build_item(it["codigo"], it["texto"], it["modulo_origem"], "RF", "Funcional"))
+        else:
+            avisos.append(
+                "Não foi possível identificar automaticamente o catálogo de funcionalidades "
+                "(nenhuma sequência de módulos numerados 1, 2, 3... em caixa alta foi encontrada)."
+            )
+
+        if nf_zone:
+            start_line, end_line = nf_zone
+            for it in _extract_leaf_items(lines, start_line, end_line):
+                itens.append(_build_item(it["codigo"], it["texto"], it["modulo_origem"], "RNF", "Não Funcional"))
+        else:
+            avisos.append(
+                "Não foi encontrado um anexo de 'Requisitos Técnicos'/'Requisitos Não Funcionais' — "
+                "se o seu TR tiver essa seção com outro nome, os itens dela não foram capturados."
+            )
 
     if not itens:
         raise TrParseError(
             "Não foi possível reconhecer a estrutura de requisitos deste documento. "
-            "Ele precisa ter um catálogo de módulos numerados (ex: '4. GESTÃO DA FOLHA DE PAGAMENTO') "
-            "com itens numerados hierarquicamente (ex: '4.3.2.'). Considere usar a importação por CSV."
+            "Formatos aceitos: um catálogo de módulos numerados em caixa alta "
+            "(ex: '4. GESTÃO DA FOLHA DE PAGAMENTO') com itens numerados hierarquicamente "
+            "(ex: '4.3.2.'); ou uma tabela de 3 colunas (Descrição | Sub-item | Prazo), um "
+            "requisito por linha. Considere usar a importação por CSV."
         )
 
     # checagem de qualidade: numa lista real de requisitos funcionais, a maioria das
