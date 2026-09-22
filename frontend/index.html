@@ -835,7 +835,7 @@
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Tabela do legado</th><th>Destino/Sistema</th><th>Meta</th><th>Carregado</th><th>%</th><th>Ciclos</th><th>Status</th><th>Responsável</th></tr></thead>
+        <thead><tr><th>Tabela do legado</th><th>Destino/Sistema</th><th>Meta</th><th>Carregado</th><th>% Carregados</th><th>Rejeitado</th><th>% Rejeitados</th><th>Ciclos</th><th>Status</th><th>Responsável</th></tr></thead>
         <tbody id="migracao-tbody"></tbody>
       </table>
     </div>
@@ -3688,11 +3688,13 @@ function renderItensMigracao(){
       <td class="mono">${m.qtd_registros_estimada!=null ? Number(m.qtd_registros_estimada).toLocaleString('pt-BR') : "—"}</td>
       <td class="mono">${Number(m.qtd_registros_carregados||0).toLocaleString('pt-BR')}</td>
       <td>${pct===null ? "—" : pct.toFixed(2)+"%"}</td>
+      <td class="mono">${Number(m.qtd_rejeicoes||0).toLocaleString('pt-BR')}</td>
+      <td>${m.percentual_rejeicao!=null ? Number(m.percentual_rejeicao).toFixed(2)+"%" : "—"}</td>
       <td class="mono">${m.qtd_ciclos||0}</td>
       <td>${pill(m.status, STATUS_MIGRACAO_COLOR[m.status]||"faint")}</td>
       <td>${esc(m.responsavel_nome||"—")}</td>
     </tr>`;
-  }).join("") : `<tr class="empty-row"><td colspan="8">Nenhum item de migração cadastrado.</td></tr>`;
+  }).join("") : `<tr class="empty-row"><td colspan="10">Nenhum item de migração cadastrado.</td></tr>`;
   $("migracao-tbody").querySelectorAll("tr[data-id]").forEach(tr=>{
     tr.addEventListener("click", ()=>openItemMigracaoModal(byId(ITENS_MIGRACAO, tr.dataset.id)));
   });

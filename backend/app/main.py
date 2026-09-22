@@ -1829,6 +1829,12 @@ def create_app():
                    COALESCE((SELECT c.qtd_registros_carregados FROM ciclos_migracao c
                              WHERE c.item_migracao_id = im.id
                              ORDER BY c.numero_ciclo DESC LIMIT 1), 0) AS qtd_registros_carregados,
+                   COALESCE((SELECT c.qtd_rejeicoes FROM ciclos_migracao c
+                             WHERE c.item_migracao_id = im.id
+                             ORDER BY c.numero_ciclo DESC LIMIT 1), 0) AS qtd_rejeicoes,
+                   (SELECT c.percentual_rejeicao FROM ciclos_migracao c
+                    WHERE c.item_migracao_id = im.id
+                    ORDER BY c.numero_ciclo DESC LIMIT 1) AS percentual_rejeicao,
                    (SELECT count(*) FROM ciclos_migracao c WHERE c.item_migracao_id = im.id) AS qtd_ciclos,
                    (SELECT max(c.data_execucao) FROM ciclos_migracao c WHERE c.item_migracao_id = im.id) AS ultima_execucao
             FROM itens_migracao im
