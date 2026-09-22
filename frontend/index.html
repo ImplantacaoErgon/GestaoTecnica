@@ -243,6 +243,31 @@
     display:flex;align-items:center;gap:7px;padding:3px 2px;font-size:12px;font-weight:400;cursor:pointer;
   }
   .el-recursos-pop input[type=checkbox]{width:15px;height:15px;}
+  .el-deps-cell{position:relative;}
+  .el-deps-btn{
+    background:transparent;border:1px solid var(--border);border-radius:6px;padding:4px 9px;
+    font-size:12px;cursor:pointer;color:var(--text);font-family:inherit;white-space:nowrap;
+  }
+  .el-deps-btn:hover{background:var(--surface-2);}
+  .el-deps-pop{
+    position:absolute;top:100%;left:0;z-index:60;width:440px;max-height:380px;
+    display:flex;flex-direction:column;
+    background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow);
+    padding:8px;margin-top:4px;
+  }
+  .el-deps-pop .el-deps-filtro{
+    width:100%;flex-shrink:0;margin-bottom:6px;box-sizing:border-box;
+    background:var(--surface);border:1px solid var(--border);border-radius:6px;
+    padding:5px 7px;font-size:12px;color:var(--text);font-family:inherit;
+  }
+  .el-deps-pop .el-deps-lista{overflow:auto;flex:1;min-height:0;}
+  .el-deps-pop .el-dep-row{
+    display:flex;align-items:center;gap:6px;padding:3px 2px;font-size:12px;font-weight:400;cursor:pointer;
+  }
+  .el-deps-pop .el-dep-row input[type=checkbox]{width:15px;height:15px;flex-shrink:0;}
+  .el-deps-pop .el-dep-nome{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .el-deps-pop select[data-dep-tipo]{width:54px;font-size:11px;padding:2px 3px;flex-shrink:0;}
+  .el-deps-pop input[data-dep-lag]{width:52px;font-size:11px;padding:2px 3px;flex-shrink:0;}
   .el-relato-box{
     margin-top:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;
   }
@@ -1581,65 +1606,73 @@
 </div>
 
 <!-- ================= MODAL: EDIÇÃO EM MASSA DO CRONOGRAMA ================= -->
-<div class="overlay" id="overlay-edicao-lote-cronograma" hidden>
-  <div class="modal" style="max-width:1640px;width:96vw;">
+<div class="overlay" id="overlay-edicao-lote-cronograma" hidden style="align-items:stretch;padding:14px;">
+  <div class="modal" style="max-width:none;width:98vw;display:flex;flex-direction:column;">
     <div class="modal-head"><h2>📝 Editar em massa</h2><button class="btn ghost" id="el-close">✕</button></div>
-    <div class="modal-body single-col">
-      <p class="muted" style="margin-bottom:10px;">Edite quantas atividades e campos quiser abaixo (datas/esforço previstos,
-      % concluído, datas reais, Etapa, Frente, Prioridade, Nome, Observações, ★Master, 💰Entregável e Recursos) e clique em
-      "Analisar alterações". <strong>Início/Fim previsto e Esforço</strong> propagam automaticamente o efeito pelas
-      atividades <strong>dependentes</strong> (respeitando FS/SS/FF/SF e o calendário útil) — os demais campos mudam só na
-      própria linha. A coluna "Depende de" mostra as predecessoras, e "⤷N" ao lado do nome avisa quantas outras dependem
-      dela. Editar <strong>% concluído</strong> ou uma <strong>data real</strong> pode pedir um relato: opcional (com texto
-      padrão sugerido) quando é uma melhora — % subindo ou data antecipada — e obrigatório quando é um retrocesso — %
-      caindo ou data adiada; a caixa de relato aparece na prévia, linha a linha. Atividades concluídas ou canceladas não
-      podem ser editadas aqui — use o modal de edição individual. Nada é gravado até você confirmar.</p>
+    <div class="modal-body single-col" style="display:flex;flex-direction:column;flex:1;min-height:0;max-height:none;overflow:hidden;">
+      <div id="el-topo-fixo" style="flex-shrink:0;">
+        <p class="muted" style="margin-bottom:10px;">Edite quantas atividades e campos quiser abaixo — Código WBS, Nome,
+        Tipo de atividade elementar, Item do TR, Etapa, Frente, Prioridade, datas/esforço previstos, Horas realizadas,
+        % concluído, datas reais, ★Master, 💰Entregável, Recursos, Dependências, Descrição, Objetivo e Observações — e
+        clique em "Analisar alterações". <strong>Início/Fim previsto e Esforço</strong> propagam automaticamente o efeito
+        pelas atividades <strong>dependentes</strong> (respeitando FS/SS/FF/SF e o calendário útil) — os demais campos
+        mudam só na própria linha. A coluna "Depende de" mostra e permite editar as predecessoras (clique no botão pra
+        abrir a lista, marcar/desmarcar e ajustar tipo/lag) — adicionar, remover ou trocar uma predecessora também entra
+        na cascata de datas, igual a editar Início/Fim/Esforço; "⤷N" ao lado do nome avisa quantas outras dependem dela.
+        Editar <strong>% concluído</strong> ou uma <strong>data real</strong> pode pedir um relato: opcional (com texto
+        padrão sugerido) quando é uma melhora — % subindo ou data antecipada — e obrigatório quando é um retrocesso — %
+        caindo ou data adiada; a caixa de relato aparece na prévia, linha a linha. Atividades concluídas ou canceladas não
+        podem ser editadas aqui — use o modal de edição individual. Nada é gravado até você confirmar.</p>
 
-      <div class="filters" id="el-filtros">
-        <select id="el-f-etapa"><option value="">Etapa (todas)</option></select>
-        <select id="el-f-frente"><option value="">Frente (todas)</option></select>
-        <input type="date" id="el-f-periodo-ini" title="Mostra só atividades cujo período previsto cruza com esta data em diante">
-        <span class="muted" style="font-size:12.5px;">até</span>
-        <input type="date" id="el-f-periodo-fim" title="Deixe em branco para não limitar o fim do período">
-        <label style="display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--text-muted);">
-          <input type="checkbox" id="el-f-concluidas"> mostrar concluídas
-        </label>
-        <button class="btn secondary small" id="el-f-limpar" type="button">Limpar filtros</button>
-        <span class="muted" id="el-f-contagem" style="font-size:12.5px;"></span>
+        <div class="filters" id="el-filtros">
+          <select id="el-f-etapa"><option value="">Etapa (todas)</option></select>
+          <select id="el-f-frente"><option value="">Frente (todas)</option></select>
+          <input type="date" id="el-f-periodo-ini" title="Mostra só atividades cujo período previsto cruza com esta data em diante">
+          <span class="muted" style="font-size:12.5px;">até</span>
+          <input type="date" id="el-f-periodo-fim" title="Deixe em branco para não limitar o fim do período">
+          <label style="display:flex;align-items:center;gap:5px;font-size:12.5px;color:var(--text-muted);">
+            <input type="checkbox" id="el-f-concluidas"> mostrar concluídas
+          </label>
+          <button class="btn secondary small" id="el-f-limpar" type="button">Limpar filtros</button>
+          <span class="muted" id="el-f-contagem" style="font-size:12.5px;"></span>
+        </div>
       </div>
 
-      <div class="table-wrap" style="max-height:400px;margin-bottom:14px;">
+      <div class="table-wrap" style="flex:1 1 auto;min-height:160px;margin:10px 0 14px;">
         <table>
           <thead><tr>
-            <th>Código</th><th>Atividade</th><th>Depende de</th><th>Etapa</th><th>Frente</th><th>Prioridade</th>
-            <th>Início prev.</th><th>Fim prev.</th><th>Esforço (h)</th>
+            <th>Código</th><th>Atividade</th><th>Tipo</th><th>Item do TR</th><th>Depende de</th><th>Etapa</th><th>Frente</th><th>Prioridade</th>
+            <th>Início prev.</th><th>Fim prev.</th><th>Esforço prev. (h)</th><th>Horas realiz. (h)</th>
             <th>% concl.</th><th>Início real</th><th>Fim real</th>
-            <th>★</th><th>💰</th><th>Recursos</th><th>Observações</th>
+            <th>★</th><th>💰</th><th>Recursos</th><th>Descrição</th><th>Objetivo</th><th>Observações</th>
           </tr></thead>
           <tbody id="el-linhas-tbody"></tbody>
         </table>
       </div>
       <div id="el-recursos-popup" class="el-recursos-pop" hidden style="position:fixed;"></div>
+      <div id="el-deps-popup" class="el-deps-pop" hidden style="position:fixed;"></div>
 
-      <div class="field full" style="display:flex;gap:12px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
-        <button class="btn secondary" id="el-analisar">Analisar alterações</button>
-        <span class="muted" id="el-contagem" style="font-size:12.5px;"></span>
-      </div>
+      <div id="el-rodape-fixo" style="flex-shrink:0;max-height:42vh;overflow:auto;">
+        <div class="field full" style="display:flex;gap:12px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
+          <button class="btn secondary" id="el-analisar">Analisar alterações</button>
+          <span class="muted" id="el-contagem" style="font-size:12.5px;"></span>
+        </div>
 
-      <div class="field full" style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
-        <input type="checkbox" id="el-gerar-versao" checked style="width:auto;">
-        <label for="el-gerar-versao" style="margin:0;">Gerar uma versão do cronograma atual antes de aplicar (recomendado)</label>
-      </div>
-      <div class="field full" id="el-rotulo-wrap" style="margin-bottom:14px;">
-        <input type="text" id="el-rotulo-versao" placeholder="Rótulo da versão (opcional) — ex.: Antes da edição em massa de ..." autocomplete="off">
-      </div>
+        <div class="field full" style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+          <input type="checkbox" id="el-gerar-versao" checked style="width:auto;">
+          <label for="el-gerar-versao" style="margin:0;">Gerar uma versão do cronograma atual antes de aplicar (recomendado)</label>
+        </div>
+        <div class="field full" id="el-rotulo-wrap" style="margin-bottom:14px;">
+          <input type="text" id="el-rotulo-versao" placeholder="Rótulo da versão (opcional) — ex.: Antes da edição em massa de ..." autocomplete="off">
+        </div>
 
-      <div id="el-resultado" hidden>
-        <div id="el-resumo" class="muted" style="margin-bottom:10px;"></div>
-        <div class="table-wrap"><table>
-          <thead><tr><th>Código</th><th>Atividade</th><th>Origem</th><th>Início prev. (atual → novo)</th><th>Fim prev. (atual → novo)</th><th>Esforço (atual → novo)</th><th>Outras alterações</th></tr></thead>
-          <tbody id="el-preview-tbody"></tbody>
-        </table></div>
+        <div id="el-resultado" hidden>
+          <div id="el-resumo" class="muted" style="margin-bottom:10px;"></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Código</th><th>Atividade</th><th>Origem</th><th>Início prev. (atual → novo)</th><th>Fim prev. (atual → novo)</th><th>Esforço (atual → novo)</th><th>Outras alterações</th></tr></thead>
+            <tbody id="el-preview-tbody"></tbody>
+          </table></div>
+        </div>
       </div>
     </div>
     <div class="modal-foot">
@@ -4699,14 +4732,23 @@ async function confirmarReplanejamento(){
 // Fim previsto/Esforço propagam em cascata pelas sucessoras no grafo de
 // dependências (ver backend/app/cronograma_edicao_lote.py); % concluído/Início
 // real/Fim real/Etapa/Frente/Prioridade/Nome/Observações/Master/Entregável/
-// Recursos (40ª rodada) mudam só na própria linha, nunca cascateiam — % e
-// datas reais podem pedir um relato (opcional com texto padrão numa melhora,
-// obrigatório numa piora), mostrado inline na prévia. Mesmo padrão
-// preview→confirmar do Replanejamento acima.
+// Recursos (40ª rodada) e, a partir da 43ª rodada, também Código WBS/Tipo de
+// atividade elementar/Item do TR/Horas realizadas/Descrição/Objetivo — mudam
+// só na própria linha, nunca cascateiam — % e datas reais podem pedir um
+// relato (opcional com texto padrão numa melhora, obrigatório numa piora),
+// mostrado inline na prévia. Mesmo padrão preview→confirmar do Replanejamento
+// acima. A partir da 44ª rodada, a própria coluna "Depende de" é editável —
+// popup de checklist igual ao de Recursos, mas com tipo/lag por predecessora
+// marcada — e ISSO entra na cascata de datas (adicionar/remover/trocar uma
+// predecessora pode mover a atividade e suas sucessoras, igual editar
+// Início/Fim/Esforço).
 let elAnalisando = false, elConfirmando = false, elUltimaAnaliseJSON = null;
 let elRecursosState = {};                                    // { atividadeId: Set(recurso_id) } — participantes atuais + edições do popup
 let elUltimoPreviewItens = [];                                // último resultado de /preview
 let elRecursosPopupAtividadeId = null, elRecursosPopupBtn = null;
+let elDependenciasState = {};      // { atividadeId: Map(predecessora_id -> {tipo, lag_horas}) } — editável pelo popup
+let elDependenciasOriginais = {};  // mesma forma, snapshot imutável de quando o modal abriu (pra diff em coletarEdicoesLote)
+let elDepsPopupAtividadeId = null, elDepsPopupBtn = null;
 
 function wireEdicaoLoteCronograma(){
   $("btn-edicao-lote-cronograma").addEventListener("click", abrirEdicaoLoteModal);
@@ -4756,7 +4798,16 @@ function wireEdicaoLoteCronograma(){
     if(pop.contains(e.target) || e.target.closest(".el-recursos-btn")) return;
     fecharPopupRecursosLote();
   });
-  document.addEventListener("keydown", e=>{ if(e.key === "Escape") fecharPopupRecursosLote(); });
+  // Popup de Dependências (44ª rodada) — mesmo padrão do de Recursos acima.
+  document.addEventListener("click", e=>{
+    const pop = $("el-deps-popup");
+    if(pop.hidden) return;
+    if(pop.contains(e.target) || e.target.closest(".el-deps-btn")) return;
+    fecharPopupDependenciasLote();
+  });
+  document.addEventListener("keydown", e=>{
+    if(e.key === "Escape"){ fecharPopupRecursosLote(); fecharPopupDependenciasLote(); }
+  });
 }
 
 // Mostra/esconde as linhas já montadas em #el-linhas-tbody conforme os
@@ -4824,10 +4875,105 @@ function abrirPopupRecursosLote(btn, atividadeId){
   pop.hidden = false;
 }
 
+function fecharPopupDependenciasLote(){
+  $("el-deps-popup").hidden = true;
+  elDepsPopupAtividadeId = null; elDepsPopupBtn = null;
+}
+
+function rotuloDepsBtn(atividadeId){
+  const n = (elDependenciasState[atividadeId] || new Map()).size;
+  return n ? `🔗 ${n}` : "🔗 —";
+}
+
+// Popup de Dependências (44ª rodada) — igual ao de Recursos (checklist
+// flutuante), mas cada atividade marcada como predecessora tem também um
+// tipo (FS/SS/FF/SF) e um lag (h) editáveis inline, só habilitados quando
+// marcada. Tem um filtro de busca no topo porque um projeto pode ter
+// centenas de atividades candidatas a predecessora. Marcar/desmarcar, ou
+// mudar tipo/lag de uma já marcada, grava direto em
+// elDependenciasState[atividadeId] (um Map por atividade) — coletarEdicoesLote()
+// depois compara esse Map contra elDependenciasOriginais pra montar
+// dependencias_adicionar/dependencias_remover.
+function abrirPopupDependenciasLote(btn, atividadeId){
+  if(elDepsPopupAtividadeId === atividadeId && !$("el-deps-popup").hidden){ fecharPopupDependenciasLote(); return; }
+  elDepsPopupAtividadeId = atividadeId; elDepsPopupBtn = btn;
+  const selecionadas = elDependenciasState[atividadeId] || (elDependenciasState[atividadeId] = new Map());
+  const candidatas = ATIVIDADES.filter(a=>a.id!==atividadeId)
+    .slice().sort((a,b)=>(a.codigo_wbs||"zzzz").localeCompare(b.codigo_wbs||"zzzz", undefined, {numeric:true}));
+
+  const renderLista = (filtro) => {
+    const termo = (filtro||"").trim().toLowerCase();
+    const visiveis = termo
+      ? candidatas.filter(a=>`${a.codigo_wbs||""} ${a.nome||""}`.toLowerCase().includes(termo))
+      : candidatas;
+    return visiveis.length ? visiveis.map(a=>{
+      const atual = selecionadas.get(a.id);
+      const marcado = !!atual;
+      const tipo = atual ? atual.tipo : "FS";
+      const lag = atual ? atual.lag_horas : 0;
+      return `<label class="el-dep-row" data-dep-row="${a.id}">
+        <input type="checkbox" data-dep-check="${a.id}" ${marcado?"checked":""}>
+        <span class="el-dep-nome" title="${esc(a.nome||"")}">${esc(a.codigo_wbs||"—")} ${esc(a.nome||"")}</span>
+        <select data-dep-tipo="${a.id}" ${marcado?"":"disabled"} onclick="event.stopPropagation()">
+          ${["FS","SS","FF","SF"].map(t=>`<option value="${t}" ${tipo===t?"selected":""}>${t}</option>`).join("")}
+        </select>
+        <input type="number" data-dep-lag="${a.id}" value="${lag}" placeholder="lag(h)" title="lag (h)" ${marcado?"":"disabled"} onclick="event.stopPropagation()">
+      </label>`;
+    }).join("") : `<span class="muted" style="font-size:12px;">Nenhuma atividade encontrada.</span>`;
+  };
+
+  const pop = $("el-deps-popup");
+  pop.innerHTML = `
+    <input type="text" class="el-deps-filtro" placeholder="Buscar por código ou nome…" autocomplete="off">
+    <div class="el-deps-lista">${renderLista("")}</div>
+  `;
+
+  const wireLinhas = () => {
+    pop.querySelectorAll("input[data-dep-check]").forEach(cb=>cb.addEventListener("change", ()=>{
+      const pid = cb.dataset.depCheck;
+      const tipoSel = pop.querySelector(`select[data-dep-tipo="${pid}"]`);
+      const lagInp = pop.querySelector(`input[data-dep-lag="${pid}"]`);
+      if(cb.checked){
+        selecionadas.set(pid, {tipo: tipoSel.value, lag_horas: Number(lagInp.value||0)});
+        tipoSel.disabled = false; lagInp.disabled = false;
+      } else {
+        selecionadas.delete(pid);
+        tipoSel.disabled = true; lagInp.disabled = true;
+      }
+      if(elDepsPopupBtn) elDepsPopupBtn.textContent = rotuloDepsBtn(atividadeId);
+      if(elUltimaAnaliseJSON !== null){ elUltimaAnaliseJSON = null; $("el-confirmar").disabled = true; $("el-resultado").hidden = true; }
+    }));
+    pop.querySelectorAll("select[data-dep-tipo]").forEach(sel=>sel.addEventListener("change", ()=>{
+      const pid = sel.dataset.depTipo;
+      if(selecionadas.has(pid)){
+        selecionadas.get(pid).tipo = sel.value;
+        if(elUltimaAnaliseJSON !== null){ elUltimaAnaliseJSON = null; $("el-confirmar").disabled = true; $("el-resultado").hidden = true; }
+      }
+    }));
+    pop.querySelectorAll("input[data-dep-lag]").forEach(inp=>inp.addEventListener("input", ()=>{
+      const pid = inp.dataset.depLag;
+      if(selecionadas.has(pid)){
+        selecionadas.get(pid).lag_horas = Number(inp.value||0);
+        if(elUltimaAnaliseJSON !== null){ elUltimaAnaliseJSON = null; $("el-confirmar").disabled = true; $("el-resultado").hidden = true; }
+      }
+    }));
+  };
+  wireLinhas();
+
+  pop.querySelector(".el-deps-filtro").addEventListener("input", (e)=>{
+    pop.querySelector(".el-deps-lista").innerHTML = renderLista(e.target.value);
+    wireLinhas();
+  });
+
+  const r = btn.getBoundingClientRect();
+  pop.style.left = Math.round(Math.min(r.left, window.innerWidth - 460)) + "px";
+  pop.style.top = Math.round(r.bottom + 4) + "px";
+  pop.hidden = false;
+  pop.querySelector(".el-deps-filtro").focus();
+}
+
 function linhaEdicaoLote(a, predecessoras, sucessoras){
   const bloqueada = STATUS_FAMILIA_CONCLUIDA.includes(a.status) || a.status === "Cancelada";
-  const preds = predecessoras[a.id] || [];
-  const predTxt = preds.length ? preds.map(p=>`${esc(p.codigo||"—")} (${p.tipo})`).join(", ") : "—";
   const succCount = (sucessoras[a.id] || []).length;
   const avisoBloqueada = bloqueada ? ` <span class="muted" style="font-size:10.5px;">(${esc(a.status)} — não editável)</span>` : "";
   const dis = bloqueada ? "disabled" : "";
@@ -4837,27 +4983,36 @@ function linhaEdicaoLote(a, predecessoras, sucessoras){
     .map(f=>`<option value="${f.id}" ${a.frente_trabalho_id===f.id?"selected":""}>${esc(f.nome)}</option>`).join("");
   const prioridadeOpts = `<option value="">—</option>` + ["Urgente","Alta","Média","Baixa"]
     .map(p=>`<option value="${p}" ${a.prioridade===p?"selected":""}>${p}</option>`).join("");
+  const tipoOpts = `<option value="">—</option>` + (typeof TIPOS!=="undefined"?TIPOS:[])
+    .map(t=>`<option value="${t.id}" ${a.tipo_atividade_elementar_id===t.id?"selected":""}>${esc(t.nome)}${t.ativo===false?" (inativo)":""}</option>`).join("");
+  const requisitoOpts = `<option value="">—</option>` + (typeof REQUISITOS!=="undefined"?REQUISITOS:[])
+    .map(r=>`<option value="${r.id}" ${a.requisito_tr_id===r.id?"selected":""}>${esc(r.codigo)} — ${esc(r.titulo)}</option>`).join("");
 
   return `
     <tr data-id="${a.id}" data-f-etapa="${a.etapa_id||""}" data-f-frente="${a.frente_trabalho_id||""}" data-f-ini="${a.dtini_prev||""}" data-f-fim="${a.dtfim_prev||""}" data-f-concluida="${STATUS_FAMILIA_CONCLUIDA.includes(a.status)?"1":"0"}">
-      <td class="mono">${esc(a.codigo_wbs||"—")}</td>
+      <td><input type="text" class="mono" data-campo="codigo_wbs" value="${esc(a.codigo_wbs||"")}" ${dis} style="width:90px;"></td>
       <td>
         <input type="text" data-campo="nome" value="${esc(a.nome||"")}" ${dis} style="margin-bottom:2px;display:block;">
         ${succCount?`<span class="muted" title="${succCount} atividade(s) dependem desta e podem ser recalculadas" style="font-size:11px;">⤷${succCount}</span>`:""}${avisoBloqueada}
       </td>
-      <td class="muted" style="font-size:12px;">${predTxt}</td>
+      <td><select data-campo="tipo_atividade_elementar_id" ${dis}>${tipoOpts}</select></td>
+      <td><select data-campo="requisito_tr_id" ${dis} style="min-width:160px;">${requisitoOpts}</select></td>
+      <td class="el-deps-cell"><button type="button" class="btn ghost el-deps-btn" data-deps-btn="${a.id}" ${dis}>${rotuloDepsBtn(a.id)}</button></td>
       <td><select data-campo="etapa_id" ${dis}>${etapaOpts}</select></td>
       <td><select data-campo="frente_trabalho_id" ${dis}>${frenteOpts}</select></td>
       <td><select data-campo="prioridade" ${dis}>${prioridadeOpts}</select></td>
       <td><input type="date" data-campo="dtini_prev" value="${a.dtini_prev||""}" ${dis}></td>
       <td><input type="date" data-campo="dtfim_prev" value="${a.dtfim_prev||""}" ${dis}></td>
       <td><input type="number" step="0.5" min="0.5" data-campo="prazo_horas" value="${a.prazo_horas??""}" ${dis}></td>
+      <td><input type="number" step="0.5" min="0" data-campo="horas_realizadas" value="${a.horas_realizadas??""}" ${dis}></td>
       <td><input type="number" step="1" min="0" max="100" data-campo="percentual_concluido" value="${a.percentual_concluido??0}" ${dis}></td>
       <td><input type="date" data-campo="dtini_real" value="${a.dtini_real||""}" ${dis}></td>
       <td><input type="date" data-campo="dtfim_real" value="${a.dtfim_real||""}" ${dis}></td>
       <td style="text-align:center;"><input type="checkbox" data-campo="eh_atividade_master" ${a.eh_atividade_master?"checked":""} ${dis} title="Atividade master"></td>
       <td style="text-align:center;"><input type="checkbox" data-campo="eh_entregavel" ${a.eh_entregavel?"checked":""} ${dis} title="Entregável"></td>
       <td class="el-recursos-cell"><button type="button" class="btn ghost el-recursos-btn" data-recursos-btn="${a.id}" ${dis}>${rotuloRecursosBtn(a.id)}</button></td>
+      <td class="el-td-obs"><input type="text" data-campo="descricao" value="${esc(a.descricao||"")}" ${dis}></td>
+      <td class="el-td-obs"><input type="text" data-campo="objetivo" value="${esc(a.objetivo||"")}" ${dis}></td>
       <td class="el-td-obs"><input type="text" data-campo="observacoes" value="${esc(a.observacoes||"")}" ${dis}></td>
     </tr>`;
 }
@@ -4869,6 +5024,7 @@ async function abrirEdicaoLoteModal(){
   elUltimaAnaliseJSON = null;
   elUltimoPreviewItens = [];
   fecharPopupRecursosLote();
+  fecharPopupDependenciasLote();
   $("el-gerar-versao").checked = true;
   $("el-rotulo-wrap").hidden = false;
   $("el-rotulo-versao").value = `Antes da edição em massa de ${new Date().toLocaleDateString('pt-BR')}`;
@@ -4886,25 +5042,42 @@ async function abrirEdicaoLoteModal(){
   const predecessoras = {}, sucessoras = {};
   deps.forEach(d=>{
     if(!predecessoras[d.atividade_id]) predecessoras[d.atividade_id] = [];
-    predecessoras[d.atividade_id].push({codigo: d.predecessora_codigo_wbs, tipo: d.tipo});
+    predecessoras[d.atividade_id].push({
+      id: d.predecessora_id, codigo: d.predecessora_codigo_wbs, nome: d.predecessora_nome,
+      tipo: d.tipo, lag_horas: d.lag_horas,
+    });
     if(!sucessoras[d.predecessora_id]) sucessoras[d.predecessora_id] = [];
     sucessoras[d.predecessora_id].push({codigo: d.sucessora_codigo_wbs, tipo: d.tipo});
   });
 
   const lista = ATIVIDADES.slice().sort((a,b)=>(a.codigo_wbs||"zzzz").localeCompare(b.codigo_wbs||"zzzz", undefined, {numeric:true}));
   elRecursosState = {};
-  lista.forEach(a=>{ elRecursosState[a.id] = new Set((a.responsaveis||[]).map(r=>r.id)); });
+  elDependenciasState = {}; elDependenciasOriginais = {};
+  lista.forEach(a=>{
+    elRecursosState[a.id] = new Set((a.responsaveis||[]).map(r=>r.id));
+    const mapa = new Map();
+    (predecessoras[a.id]||[]).forEach(p=>{ if(p.id) mapa.set(p.id, {tipo: p.tipo, lag_horas: Number(p.lag_horas||0)}); });
+    elDependenciasOriginais[a.id] = mapa;
+    elDependenciasState[a.id] = new Map(mapa); // cópia editável, independente da snapshot original
+  });
 
   $("el-linhas-tbody").innerHTML = lista.length
     ? lista.map(a=>linhaEdicaoLote(a, predecessoras, sucessoras)).join("")
-    : `<tr class="empty-row"><td colspan="16">Este projeto ainda não tem atividades.</td></tr>`;
+    : `<tr class="empty-row"><td colspan="21">Este projeto ainda não tem atividades.</td></tr>`;
   $("el-linhas-tbody").querySelectorAll("button[data-recursos-btn]").forEach(btn=>{
     btn.addEventListener("click", ()=> abrirPopupRecursosLote(btn, btn.dataset.recursosBtn));
+  });
+  $("el-linhas-tbody").querySelectorAll("button[data-deps-btn]").forEach(btn=>{
+    btn.addEventListener("click", ()=> abrirPopupDependenciasLote(btn, btn.dataset.depsBtn));
   });
   aplicarFiltroEdicaoLote();
   $("overlay-edicao-lote-cronograma").hidden = false;
 }
-function fecharEdicaoLoteModal(){ $("overlay-edicao-lote-cronograma").hidden = true; fecharPopupRecursosLote(); }
+function fecharEdicaoLoteModal(){
+  $("overlay-edicao-lote-cronograma").hidden = true;
+  fecharPopupRecursosLote();
+  fecharPopupDependenciasLote();
+}
 
 // Compara os valores atuais dos campos da grade (+ do popup de Recursos) com o
 // que veio de ATIVIDADES (snapshot de quando o modal abriu) e devolve só as
@@ -4931,6 +5104,15 @@ function coletarEdicoesLote(){
     const nomeNovo = nomeInput.value.trim();
     if(nomeNovo && nomeNovo !== (original.nome||"")) edicao.nome = nomeNovo;
 
+    const codigoNovo = campo("codigo_wbs").value.trim();
+    if(codigoNovo !== (original.codigo_wbs||"")) edicao.codigo_wbs = codigoNovo;
+
+    const descNovo = campo("descricao").value;
+    if(descNovo !== (original.descricao||"")) edicao.descricao = descNovo;
+
+    const objNovo = campo("objetivo").value;
+    if(objNovo !== (original.objetivo||"")) edicao.objetivo = objNovo;
+
     const obsNovo = campo("observacoes").value;
     if(obsNovo !== (original.observacoes||"")) edicao.observacoes = obsNovo;
 
@@ -4938,6 +5120,10 @@ function coletarEdicoesLote(){
     if((etapaSel.value||null) !== (original.etapa_id||null)) edicao.etapa_id = etapaSel.value || "";
     const frenteSel = campo("frente_trabalho_id");
     if((frenteSel.value||null) !== (original.frente_trabalho_id||null)) edicao.frente_trabalho_id = frenteSel.value || "";
+    const tipoSel = campo("tipo_atividade_elementar_id");
+    if((tipoSel.value||null) !== (original.tipo_atividade_elementar_id||null)) edicao.tipo_atividade_elementar_id = tipoSel.value || "";
+    const requisitoSel = campo("requisito_tr_id");
+    if((requisitoSel.value||null) !== (original.requisito_tr_id||null)) edicao.requisito_tr_id = requisitoSel.value || "";
     const prioSel = campo("prioridade");
     if((prioSel.value||null) !== (original.prioridade||null)) edicao.prioridade = prioSel.value || "";
 
@@ -4945,6 +5131,11 @@ function coletarEdicoesLote(){
     if(masterChk.checked !== !!original.eh_atividade_master) edicao.eh_atividade_master = masterChk.checked;
     const entregavelChk = campo("eh_entregavel");
     if(entregavelChk.checked !== !!original.eh_entregavel) edicao.eh_entregavel = entregavelChk.checked;
+
+    const horasRealInput = campo("horas_realizadas");
+    const horasRealNovo = horasRealInput.value === "" ? null : Number(horasRealInput.value);
+    const horasRealOriginal = original.horas_realizadas==null ? null : Number(original.horas_realizadas);
+    if(horasRealNovo !== null && horasRealNovo !== horasRealOriginal) edicao.horas_realizadas = horasRealNovo;
 
     const pctInput = campo("percentual_concluido");
     const pctNovo = pctInput.value === "" ? null : Number(pctInput.value);
@@ -4961,6 +5152,23 @@ function coletarEdicoesLote(){
     const remover = [...atuaisIds].filter(rid=>!selecionadosIds.has(rid));
     if(adicionar.length) edicao.recursos_adicionar = adicionar;
     if(remover.length) edicao.recursos_remover = remover;
+
+    // Dependências (44ª rodada) — compara o Map editável (elDependenciasState)
+    // contra a snapshot imutável de quando o modal abriu (elDependenciasOriginais):
+    // nova ou com tipo/lag diferente entra em dependencias_adicionar (upsert no
+    // backend); a que sumiu do Map entra em dependencias_remover.
+    const depsOriginais = elDependenciasOriginais[id] || new Map();
+    const depsAtuais = elDependenciasState[id] || new Map();
+    const depsAdicionar = [], depsRemover = [];
+    depsAtuais.forEach((v, predId)=>{
+      const antes = depsOriginais.get(predId);
+      if(!antes || antes.tipo !== v.tipo || Number(antes.lag_horas) !== Number(v.lag_horas)){
+        depsAdicionar.push({predecessora_id: predId, tipo: v.tipo, lag_horas: Number(v.lag_horas||0)});
+      }
+    });
+    depsOriginais.forEach((_, predId)=>{ if(!depsAtuais.has(predId)) depsRemover.push(predId); });
+    if(depsAdicionar.length) edicao.dependencias_adicionar = depsAdicionar;
+    if(depsRemover.length) edicao.dependencias_remover = depsRemover;
 
     if(Object.keys(edicao).length){ edicao.id = id; edicoes.push(edicao); }
   });
@@ -4999,6 +5207,9 @@ function atualizarConfirmarHabilitadoLote(){
 function rotuloEtapaLote(id){ const e = byId(ETAPAS, id); return e ? `${e.numero} — ${e.nome}` : "— sem etapa —"; }
 function rotuloFrenteLote(id){ const f = byId(FRENTES, id); return f ? f.nome : "— sem frente —"; }
 function rotuloRecursoLote(id){ const r = byId(RECURSOS, id); return r ? r.nome : "?"; }
+function rotuloTipoLote(id){ const t = byId(TIPOS, id); return t ? t.nome : "— sem tipo —"; }
+function rotuloRequisitoLote(id){ const r = byId(REQUISITOS, id); return r ? `${r.codigo} — ${r.titulo}` : "— sem item do TR —"; }
+function rotuloAtividadeLote(id){ const a = byId(ATIVIDADES, id); return a ? `${a.codigo_wbs||"—"} ${a.nome}` : "?"; }
 
 // Monta o texto da coluna "Outras alterações" da prévia (tudo que não é
 // cascata de datas) + a caixa de relato inline, quando a linha mexeu em %
@@ -5007,9 +5218,15 @@ function descreverOutrasAlteracoesLote(item){
   const partes = [];
   const s = item.simples || {};
   if("nome" in s) partes.push(`Nome: "${esc(s.nome.atual||"")}" → "${esc(s.nome.novo)}"`);
+  if("codigo_wbs" in s) partes.push(`Código WBS: "${esc(s.codigo_wbs.atual||"—")}" → "${esc(s.codigo_wbs.novo||"—")}"`);
   if("etapa_id" in s) partes.push(`Etapa: ${esc(rotuloEtapaLote(s.etapa_id.atual))} → ${esc(rotuloEtapaLote(s.etapa_id.novo))}`);
   if("frente_trabalho_id" in s) partes.push(`Frente: ${esc(rotuloFrenteLote(s.frente_trabalho_id.atual))} → ${esc(rotuloFrenteLote(s.frente_trabalho_id.novo))}`);
+  if("tipo_atividade_elementar_id" in s) partes.push(`Tipo: ${esc(rotuloTipoLote(s.tipo_atividade_elementar_id.atual))} → ${esc(rotuloTipoLote(s.tipo_atividade_elementar_id.novo))}`);
+  if("requisito_tr_id" in s) partes.push(`Item do TR: ${esc(rotuloRequisitoLote(s.requisito_tr_id.atual))} → ${esc(rotuloRequisitoLote(s.requisito_tr_id.novo))}`);
   if("prioridade" in s) partes.push(`Prioridade: ${esc(s.prioridade.atual||"—")} → ${esc(s.prioridade.novo||"—")}`);
+  if("horas_realizadas" in s) partes.push(`Horas realizadas: ${s.horas_realizadas.atual??"—"}h → ${s.horas_realizadas.novo??"—"}h`);
+  if("descricao" in s) partes.push(`Descrição alterada`);
+  if("objetivo" in s) partes.push(`Objetivo alterado`);
   if("observacoes" in s) partes.push(`Observações alteradas`);
   if("eh_atividade_master" in s) partes.push(`★Master: ${s.eh_atividade_master.novo ? "marcada" : "desmarcada"}`);
   if("eh_entregavel" in s) partes.push(`💰Entregável: ${s.eh_entregavel.novo ? "marcado" : "desmarcado"}`);
@@ -5022,6 +5239,9 @@ function descreverOutrasAlteracoesLote(item){
 
   if(item.recursos_adicionar && item.recursos_adicionar.length) partes.push(`+ Recurso(s): ${item.recursos_adicionar.map(id=>esc(rotuloRecursoLote(id))).join(", ")}`);
   if(item.recursos_remover && item.recursos_remover.length) partes.push(`− Recurso(s): ${item.recursos_remover.map(id=>esc(rotuloRecursoLote(id))).join(", ")}`);
+
+  if(item.dependencias_adicionar && item.dependencias_adicionar.length) partes.push(`Depende de — adiciona/atualiza: ${item.dependencias_adicionar.map(d=>`${esc(rotuloAtividadeLote(d.predecessora_id))} (${d.tipo}${d.lag_horas?`, lag ${d.lag_horas}h`:""})`).join(", ")}`);
+  if(item.dependencias_remover && item.dependencias_remover.length) partes.push(`Depende de — remove: ${item.dependencias_remover.map(id=>esc(rotuloAtividadeLote(id))).join(", ")}`);
 
   let html = partes.length ? partes.map(t=>`<div>${t}</div>`).join("") : `<span class="muted">—</span>`;
 
