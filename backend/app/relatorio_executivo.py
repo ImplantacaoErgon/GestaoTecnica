@@ -597,7 +597,16 @@ def chamar_ia(prompt):
     try:
         resposta = client.messages.create(
             model=ANTHROPIC_MODEL,
-            max_tokens=4000,
+            # 52ª rodada — bug real encontrado: com 4000 o relatório vinha sendo cortado
+            # ANTES de chegar nas duas últimas seções (Migração de Dados / Folha de
+            # Pagamento — ver PROMPT_TEMPLATE, elas ficam no fim de propósito). O sintoma
+            # era o quadro de Migração de Dados simplesmente sumir do relatório, sem
+            # nenhum erro — a IA nunca chegava a escrever aquele "##". Os logs de geração
+            # mostravam ~80s toda vez (perto do teto de tokens), o que é o padrão de uma
+            # resposta batendo no limite. Com 8 seções e uma tabela por item de migração,
+            # 4000 tokens ficou pequeno demais; 8000 dá folga confortável mesmo com
+            # bastante atividade atrasada/itens de migração listados.
+            max_tokens=8000,
             messages=[{"role": "user", "content": prompt}],
         )
     except anthropic.AuthenticationError:
@@ -606,6 +615,18 @@ def chamar_ia(prompt):
         raise RelatorioExecutivoError("Limite de uso da API da Anthropic atingido — tente novamente em alguns minutos.")
     except anthropic.APIError as e:
         raise RelatorioExecutivoError(f"Erro ao chamar a API da Anthropic: {e}")
+    if getattr(resposta, "stop_reason", None) == "max_tokens":
+        # Não falha o relatório por causa disso (o texto gerado até aqui ainda pode ser
+        # útil), mas registra no log pra não repetir o mesmo "quadro sumiu" sem
+        # explicação — se isso aparecer de novo, é sinal de que o limite precisa subir
+        # de novo (ou o prompt precisa ficar mais enxuto).
+        print(
+            "[relatorio_executivo] AVISO: resposta da IA cortada por atingir max_tokens "
+            f"({resposta.usage.output_tokens if getattr(resposta, 'usage', None) else '?'} tokens gerados) — "
+            "o relatório pode estar incompleto (seções do fim, como Migração de Dados/Folha "
+            "de Pagamento, podem ter ficado de fora).",
+            flush=True,
+        )
     texto = "".join(bloco.text for bloco in resposta.content if getattr(bloco, "type", None) == "text")
     if not texto.strip():
         raise RelatorioExecutivoError("A IA retornou uma resposta vazia — tente gerar novamente.")
