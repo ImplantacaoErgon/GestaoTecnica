@@ -3025,13 +3025,33 @@ function renderDashboard(){
   const atrasadas = ATIVIDADES.filter(a=>a.atrasada).length;
   const emAndamento = ATIVIDADES.filter(a=>a.status==="Em andamento").length;
   const criticas = ATIVIDADES.filter(a=>a.cpm_critica).length;
+  const pctConcluida = total?Math.round(100*concluidas/total):0;
+
+  // "Deveria estar concluído hoje" (48ª rodada): % PLANEJADO pro dia de hoje,
+  // calculado com o mesmo critério da % REAL acima — pra dar pra comparar
+  // uma com a outra direto (mesmo denominador `total`). Conta como "deveria
+  // estar concluída" toda atividade cujo prazo final PREVISTO (dtfim_prev,
+  // a data do plano — nunca muda sozinha, diferente da data real/projetada)
+  // já passou ou é hoje. Atividade sem dtfim_prev cadastrado nunca entra
+  // nessa conta (não dá pra dizer que "deveria" ter terminado sem um prazo).
+  // É uma leitura simples, por contagem (não ponderada por horas/duração) —
+  // combina com o jeito que "Concluídas" já é calculado nesta tela.
+  const hojeISO = toISO(new Date());
+  const deveriaConcluidas = ATIVIDADES.filter(a=>a.dtfim_prev && a.dtfim_prev <= hojeISO).length;
+  const pctDeveria = total?Math.round(100*deveriaConcluidas/total):0;
+  const diffPP = pctConcluida - pctDeveria; // pontos percentuais: negativo = atrasado em relação ao plano
+
   $("dash-kpis").innerHTML = [
     {l:"Total de atividades", v:total},
-    {l:"Concluídas", v:`${concluidas} (${total?Math.round(100*concluidas/total):0}%)`, c:"ok"},
+    {l:"Concluídas", v:`${concluidas} (${pctConcluida}%)`, c:"ok"},
+    {l:"Deveria estar concluído (hoje)", v:`${deveriaConcluidas} (${pctDeveria}%)`,
+      title:"Quantas atividades já deveriam ter passado do prazo final previsto até hoje — mesmo critério de contagem do card 'Concluídas', pra poder comparar direto."},
+    {l:"Aderência ao prazo", v:`${diffPP>0?"+":""}${diffPP} p.p.`, c: diffPP<0?"danger":(diffPP>0?"ok":""),
+      title:"Diferença entre o % real concluído e o % que deveria estar concluído hoje segundo o plano. Negativo = atrasado em relação ao cronograma."},
     {l:"Em andamento", v:emAndamento},
     {l:"Atrasadas", v:atrasadas, c: atrasadas? "danger":""},
     {l:"No caminho crítico", v:criticas},
-  ].map(k=>`<div class="kpi"><div class="label">${k.l}</div><div class="value ${k.c||''}">${k.v}</div></div>`).join("");
+  ].map(k=>`<div class="kpi" ${k.title?`title="${esc(k.title)}"`:""}><div class="label">${k.l}</div><div class="value ${k.c||''}">${k.v}</div></div>`).join("");
 
   api(`/relatorios/resumo-frentes?projeto_id=${PROJETO.id}`).then(rows=>{
     $("dash-frentes").innerHTML = rows.filter(r=>r.total_atividades>0).map(r=>{
