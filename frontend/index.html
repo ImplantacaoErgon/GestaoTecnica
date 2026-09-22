@@ -278,34 +278,60 @@
   .el-relato-box input.el-relato-obrigatorio{border-color:var(--danger, #d33);}
 
   /* ---- gantt ---- */
-  .gantt-wrap{background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);overflow:auto;margin-bottom:16px;}
-  /* 280px -> 840px (triplicado): pedido do usuário, 47ª rodada — "triplique
-     o tamanho do campo da atividade nessa página de Cronograma", porque os
-     nomes das atividades ficavam cortados (reticências) na coluna da
-     esquerda do Gantt. */
-  .gantt{display:grid;grid-template-columns:840px 1fr;}
+  /* Histórico da largura da coluna "Atividade" (47ª rodada, 3 ajustes
+     seguidos): 280px -> 840px (triplicado, achou exagerado) -> 420px (metade,
+     com quebra de linha) -> agora REDIMENSIONÁVEL COM O MOUSE, como numa
+     planilha — pedido final do usuário: "esse bloco não poderia se comportar
+     como uma planilha, onde eu possa ajustar os tamanhos dos campos com o
+     mouse? Mexer na granularidade do período?". 420px continua sendo só o
+     valor inicial (ver GANTT_ESTADO no JS); o usuário arrasta
+     .gantt-resize-handle pra mudar, e o valor escolhido fica salvo no
+     localStorage do navegador (por isso sobrevive a um F5). A quebra de
+     linha em .gantt-label-row continua existindo (pra quando a coluna fica
+     estreita) — e como a altura de cada linha de rótulo pode variar, o JS
+     (renderGantt()/_ganttSincronizarAlturas()) mede a altura real de cada
+     rótulo depois de desenhado (e de novo depois de cada redimensionamento)
+     e aplica a mesma altura na barra correspondente do lado direito, pra não
+     desalinhar rótulo × barra. */
+  .gantt-wrap{background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);margin-bottom:16px;overflow:hidden;}
+  .gantt-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--surface-2);flex-wrap:wrap;}
+  .gantt-toolbar .zoom-group{display:flex;gap:4px;}
+  .gantt-toolbar .zoom-group button{background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:5px 10px;font-size:12px;font-family:inherit;cursor:pointer;color:var(--text-muted);}
+  .gantt-toolbar .zoom-group button.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .gantt-toolbar .hint{font-size:11px;color:var(--text-faint);}
+  /* a rolagem (25 linhas ~ pedido da rodada anterior) fica só nesta camada
+     interna, embaixo da toolbar — que assim nunca some ao rolar. */
+  .gantt-scroll{overflow:auto;max-height:750px;}
+  .gantt{display:grid;} /* grid-template-columns é definido inline por render, conforme GANTT_ESTADO.largura */
   .gantt-labels{border-right:1px solid var(--border);}
-  .gantt-label-row{height:30px;display:flex;align-items:center;padding:0 10px;font-size:12px;border-bottom:1px solid var(--border);gap:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .gantt-label-row .wbs{color:var(--text-faint);font-family:'IBM Plex Mono';font-size:11px;}
+  .gantt-resize-handle{cursor:col-resize;position:relative;background:transparent;}
+  .gantt-resize-handle::after{content:"";position:absolute;left:2px;top:0;bottom:0;width:2px;background:var(--border);}
+  .gantt-resize-handle:hover::after,.gantt-resize-handle.dragging::after{left:1px;width:4px;background:var(--accent);}
+  .gantt-label-row{min-height:30px;display:flex;align-items:center;padding:4px 10px;font-size:12px;border-bottom:1px solid var(--border);gap:6px;line-height:1.3;}
+  .gantt-label-row.linha-par{background:rgba(127,127,127,.05);}
+  .gantt-label-row .wbs{color:var(--text-faint);font-family:'IBM Plex Mono';font-size:11px;flex-shrink:0;}
   .gantt-chart{position:relative;}
-  .gantt-header{height:22px;position:sticky;top:0;z-index:2;border-bottom:1px solid var(--border);background:var(--surface-2);}
-  .gantt-header span{position:absolute;top:3px;font-size:10px;color:var(--text-faint);font-family:'IBM Plex Mono';}
+  .gantt-header{height:24px;position:sticky;top:0;z-index:2;border-bottom:1px solid var(--border);background:var(--surface-2);}
+  .gantt-header span{position:absolute;top:5px;font-size:10px;color:var(--text-faint);font-family:'IBM Plex Mono';white-space:nowrap;}
+  .gantt-header span.major{color:var(--text-muted);font-weight:600;}
+  .gantt-grid-line{position:absolute;top:0;bottom:0;width:1px;background:var(--border);opacity:.5;}
+  .gantt-grid-line.major{opacity:1;}
   .gantt-row{height:30px;position:relative;border-bottom:1px solid var(--border);}
-  .gantt-bar{position:absolute;top:6px;height:18px;border-radius:5px;opacity:.85;}
+  .gantt-row.linha-par{background:rgba(127,127,127,.05);}
+  .gantt-bar{position:absolute;top:6px;height:18px;border-radius:5px;opacity:.85;z-index:1;}
   .gantt-bar .fill{position:absolute;left:0;top:0;bottom:0;background:rgba(255,255,255,.35);border-radius:5px 0 0 5px;}
   .gantt-bar.critica{outline:2px solid var(--danger);outline-offset:1px;}
   .gantt-today{position:absolute;top:0;bottom:0;width:1px;background:var(--danger);z-index:5;}
 
-  /* Gantt e tabela da página de Cronograma limitados a ~25 linhas visíveis,
-     com rolagem própria pro resto — pedido do usuário, 47ª rodada: "colocar
-     uma barra de rolagem nesses dois blocos para que a página não fique tão
-     extensa. Deixe 25 linhas em cada bloco." Valores em px medidos na
-     renderização real (cabeçalho + 25 linhas de dados), não são um chute —
-     ver renderGantt()/renderAtividadesTable() no JS. Escopado só à página de
-     Cronograma (#view-cronograma) pra não afetar o .table-wrap genérico
-     usado em todas as outras telas do sistema. */
+  /* Tabela abaixo do Gantt, na página de Cronograma: limitada a ~25 linhas
+     visíveis com rolagem própria pro resto — pedido do usuário, 47ª rodada:
+     "colocar uma barra de rolagem nesses dois blocos para que a página não
+     fique tão extensa. Deixe 25 linhas em cada bloco." Valor em px medido na
+     renderização real (cabeçalho + 25 linhas de dados), não é um chute — ver
+     renderAtividadesTable() no JS. Escopado só à página de Cronograma
+     (#view-cronograma) pra não afetar o .table-wrap genérico usado em todas
+     as outras telas do sistema. */
   #view-cronograma .table-wrap{max-height:1072px;}
-  #view-cronograma .gantt-wrap{max-height:780px;}
 
   /* ---- modal ---- */
   .overlay{position:fixed;inset:0;background:rgba(10,14,17,.5);display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto;z-index:50;}
@@ -624,7 +650,18 @@
       <button class="btn secondary small" id="btn-clear-filters">Limpar</button>
     </div>
 
-    <div class="gantt-wrap"><div id="gantt"></div></div>
+    <div class="gantt-wrap">
+      <div class="gantt-toolbar">
+        <div class="zoom-group" id="gantt-zoom-group" title="Granularidade do período mostrado no gráfico">
+          <button data-zoom="dia">Dia</button>
+          <button data-zoom="semana">Semana</button>
+          <button data-zoom="mes">Mês</button>
+          <button data-zoom="trimestre">Trimestre</button>
+        </div>
+        <span class="hint">arraste a borda entre "Atividade" e o gráfico para redimensionar</span>
+      </div>
+      <div class="gantt-scroll"><div id="gantt"></div></div>
+    </div>
 
     <div class="table-wrap">
       <table>
@@ -2244,7 +2281,7 @@ async function afterProjetoReady(){
   ]);
   aplicarMarcaNoTopo();
   fillStaticSelects();
-  wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireExportarCronograma(); wireRemoverCronograma(); wireRemoverRequisitos(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma();
+  wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireGanttToolbar(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireExportarCronograma(); wireRemoverCronograma(); wireRemoverRequisitos(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma();
   wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal();
   setupCsvTemplateLink();
   await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias()]);
@@ -2572,6 +2609,15 @@ function goToView(view){
   });
   const viewReal = VIEW_ALIAS[view] || view;
   document.querySelectorAll(".view").forEach(v=>v.classList.toggle("active", v.id==="view-"+viewReal));
+  // O Gantt do Cronograma é desenhado logo na carga da página (dentro de
+  // recarregarDadosDoProjeto()), quando a aba Dashboard é que está visível —
+  // nesse momento #view-cronograma ainda está com display:none, então
+  // .offsetHeight de cada rótulo dá 0 e a sincronização rótulo×barra (ver
+  // _ganttSincronizarAlturas()) trava a altura de toda barra em 30px, errado
+  // pras que têm nome comprido. Por isso essa mesma sincronização roda de
+  // novo aqui, assim que a aba realmente fica visível e as medidas passam a
+  // valer.
+  if(view==="cronograma") _ganttSincronizarAlturas();
   if(view==="critico") loadCaminhoCritico();
   if(view==="minhas-atividades") carregarMinhasAtividades();
   if(view==="analisar-requisitos") renderAnalisarRequisitos();
@@ -2724,6 +2770,111 @@ function renderAtividadesTable(list){
   });
 }
 
+// ---- Gantt: zoom (granularidade do período) e largura da coluna
+// "Atividade" — ambos ajustáveis pelo usuário com o mouse, tipo planilha, e
+// persistidos no localStorage do navegador (sobrevivem a F5). 47ª rodada,
+// 3º ajuste, pedido verbatim depois de ver a versão com largura fixa (3x, e
+// depois metade): "esse bloco não poderia se comportar como uma planilha,
+// onde eu possa ajustar os tamanhos dos campos com o mouse? Mexer na
+// granularidade do período?"
+const GANTT_ZOOMS = {
+  dia:       { label: "Dia",       pxPerDay: 30  },
+  semana:    { label: "Semana",    pxPerDay: 12  },
+  mes:       { label: "Mês",       pxPerDay: 5   },
+  trimestre: { label: "Trimestre", pxPerDay: 1.8 },
+};
+function _ganttLerEstado(){
+  let zoom = "mes", largura = 420;
+  try{
+    const z = localStorage.getItem("cronogramaGanttZoom");
+    if(z && GANTT_ZOOMS[z]) zoom = z;
+    const l = parseInt(localStorage.getItem("cronogramaGanttLargura"), 10);
+    if(!isNaN(l) && l>=160 && l<=900) largura = l;
+  }catch(e){ /* localStorage indisponível (aba anônima etc.) — segue com o padrão */ }
+  return { zoom, largura };
+}
+function _ganttSalvarEstado(){
+  try{
+    localStorage.setItem("cronogramaGanttZoom", GANTT_ESTADO.zoom);
+    localStorage.setItem("cronogramaGanttLargura", String(GANTT_ESTADO.largura));
+  }catch(e){}
+}
+let GANTT_ESTADO = _ganttLerEstado();
+
+function wireGanttToolbar(){
+  document.querySelectorAll("#gantt-zoom-group button").forEach(b=>{
+    b.classList.toggle("active", b.dataset.zoom===GANTT_ESTADO.zoom);
+  });
+  $("gantt-zoom-group").addEventListener("click", e=>{
+    const btn = e.target.closest("button"); if(!btn) return;
+    GANTT_ESTADO.zoom = btn.dataset.zoom;
+    document.querySelectorAll("#gantt-zoom-group button").forEach(b=>b.classList.toggle("active", b===btn));
+    _ganttSalvarEstado();
+    renderCronograma();
+  });
+}
+
+// Marcações do cabeçalho/grade vertical do Gantt, conforme a granularidade
+// escolhida — dia, semana, mês (padrão) ou trimestre. Uma marcação "fora" do
+// intervalo [minDate,maxDate] (ex.: o início da semana/trimestre que contém
+// minDate, mas é anterior a ele) é gerada aqui mesmo assim — quem descarta
+// (via left<0) é o chamador, em renderGantt(), pra manter a lógica de corte
+// num único lugar.
+function _ganttMarcacoes(minDate, maxDate, zoom){
+  const marcacoes = [];
+  if(zoom==="dia"){
+    for(let d=new Date(minDate); d<=maxDate; d.setDate(d.getDate()+1)){
+      const major = d.getDate()===1;
+      marcacoes.push({data:new Date(d), major, label: major ? d.toLocaleDateString('pt-BR',{day:'2-digit',month:'short'}) : String(d.getDate())});
+    }
+  } else if(zoom==="semana"){
+    let d = new Date(minDate);
+    d.setDate(d.getDate() + (d.getDay()===0 ? -6 : 1-d.getDay())); // volta pra segunda-feira
+    for(; d<=maxDate; d.setDate(d.getDate()+7)){
+      marcacoes.push({data:new Date(d), major: d.getDate()<=7, label: d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'})});
+    }
+  } else if(zoom==="trimestre"){
+    for(let d=new Date(minDate.getFullYear(), Math.floor(minDate.getMonth()/3)*3, 1); d<=maxDate; d.setMonth(d.getMonth()+3)){
+      marcacoes.push({data:new Date(d), major:true, label:`T${Math.floor(d.getMonth()/3)+1}/${d.getFullYear()}`});
+    }
+  } else { // "mes" (padrão)
+    for(let d=new Date(minDate); d<=maxDate; d.setDate(d.getDate()+1)){
+      if(d.getDate()===1){
+        marcacoes.push({data:new Date(d), major:true, label: d.toLocaleDateString('pt-BR',{month:'short',year:'2-digit'})});
+      }
+    }
+  }
+  return marcacoes;
+}
+
+// Rótulo (coluna esquerda) e barra (coluna direita) são duas árvores DOM
+// separadas lado a lado. Desde o ajuste anterior da 47ª rodada, o nome da
+// atividade pode quebrar em 2+ linhas (ver .gantt-label-row sem altura fixa
+// no CSS) — e agora a largura da coluna também muda com o arrasto do mouse,
+// o que muda onde o texto quebra. Sem sincronizar, rótulo e barra
+// desalinhariam a partir da primeira atividade com nome comprido. Chamada
+// depois de desenhar o Gantt E depois de cada redimensionamento — e também
+// depois que as fontes (Google Fonts, carregadas por @import) terminam de
+// carregar (ver "document.fonts.ready" em renderGantt()): a primeira medição
+// acontece com a fonte de fallback do navegador, que pode quebrar o texto
+// diferente da IBM Plex Sans depois de trocada — sem essa segunda passada, a
+// barra ficava com a altura "errada" (medida antes da troca de fonte) até o
+// próximo re-render.
+function _ganttSincronizarAlturas(){
+  const el = $("gantt");
+  if(!el) return;
+  const labelRows = el.querySelectorAll(".gantt-labels .gantt-label-row");
+  const chartRows = el.querySelectorAll(".gantt-chart .gantt-row");
+  chartRows.forEach((row, i)=>{
+    const labelRow = labelRows[i+1]; // +1 pula o cabeçalho "Atividade"
+    if(!labelRow) return;
+    const h = Math.max(30, labelRow.offsetHeight);
+    row.style.height = h+"px";
+    const bar = row.querySelector(".gantt-bar");
+    if(bar) bar.style.top = Math.round((h-18)/2)+"px";
+  });
+}
+
 function renderGantt(list){
   const withDates = list.filter(a=>a.dtini_prev && a.dtfim_prev);
   const el = $("gantt");
@@ -2732,37 +2883,75 @@ function renderGantt(list){
   const minDate = new Date(Math.min(...withDates.map(a=>new Date(a.dtini_prev+"T00:00:00"))));
   const maxDate = new Date(Math.max(...withDates.map(a=>new Date(a.dtfim_prev+"T00:00:00"))));
   const totalDays = Math.max(1, Math.round((maxDate-minDate)/86400000)+7);
-  const pxPerDay = totalDays>140 ? 6 : totalDays>70 ? 10 : 18;
+  const pxPerDay = (GANTT_ZOOMS[GANTT_ESTADO.zoom] || GANTT_ZOOMS.mes).pxPerDay;
   const chartWidth = totalDays*pxPerDay;
 
-  let headerHtml = "";
-  for(let d=new Date(minDate); d<=maxDate; d.setDate(d.getDate()+1)){
-    if(d.getDate()===1){
-      const left = Math.round((d-minDate)/86400000)*pxPerDay;
-      headerHtml += `<span style="left:${left}px;">${d.toLocaleDateString('pt-BR',{month:'short',year:'2-digit'})}</span>`;
-    }
-  }
+  let headerHtml = "", gridLinesHtml = "";
+  _ganttMarcacoes(minDate, maxDate, GANTT_ESTADO.zoom).forEach(m=>{
+    const left = Math.round((m.data-minDate)/86400000)*pxPerDay;
+    if(left<0 || left>chartWidth) return;
+    headerHtml += `<span class="${m.major?'major':''}" style="left:${left}px;">${m.label}</span>`;
+    gridLinesHtml += `<div class="gantt-grid-line ${m.major?'major':''}" style="left:${left}px;"></div>`;
+  });
+
   const today = new Date(new Date().toDateString());
   const todayLeft = Math.round((today-minDate)/86400000)*pxPerDay;
 
-  const labelsHtml = list.map(a=>`<div class="gantt-label-row" title="${esc(a.nome)}"><span class="wbs">${esc(a.codigo_wbs||"")}</span> ${esc(a.nome)}</div>`).join("");
-  const rowsHtml = list.map(a=>{
-    if(!(a.dtini_prev && a.dtfim_prev)) return `<div class="gantt-row"></div>`;
+  const labelsHtml = list.map((a,i)=>`<div class="gantt-label-row ${i%2?'linha-par':''}" title="${esc(a.nome)}"><span class="wbs">${esc(a.codigo_wbs||"")}</span> ${esc(a.nome)}</div>`).join("");
+  const rowsHtml = list.map((a,i)=>{
+    const parClass = i%2?'linha-par':'';
+    if(!(a.dtini_prev && a.dtfim_prev)) return `<div class="gantt-row ${parClass}"></div>`;
     const left = Math.round((new Date(a.dtini_prev+"T00:00:00")-minDate)/86400000)*pxPerDay;
     const width = Math.max(pxPerDay, (Math.round((new Date(a.dtfim_prev+"T00:00:00")-new Date(a.dtini_prev+"T00:00:00"))/86400000)+1)*pxPerDay);
     const cor = a.frente_cor || "var(--accent)";
-    return `<div class="gantt-row"><div class="gantt-bar ${a.cpm_critica?'critica':''}" style="left:${left}px;width:${width}px;background:${cor};" title="${esc(a.nome)} (${a.percentual_concluido}%)">
+    return `<div class="gantt-row ${parClass}"><div class="gantt-bar ${a.cpm_critica?'critica':''}" style="left:${left}px;width:${width}px;background:${cor};" title="${esc(a.nome)} (${a.percentual_concluido}%)">
       <div class="fill" style="width:${100-a.percentual_concluido}%;right:0;left:auto;"></div>
     </div></div>`;
   }).join("");
 
-  el.innerHTML = `<div class="gantt">
+  const largura = GANTT_ESTADO.largura;
+  el.innerHTML = `<div class="gantt" style="grid-template-columns:${largura}px 6px 1fr;">
     <div class="gantt-labels"><div class="gantt-label-row" style="font-weight:700;border-bottom:2px solid var(--border);position:sticky;top:0;z-index:3;background:var(--surface);">Atividade</div>${labelsHtml}</div>
+    <div class="gantt-resize-handle" id="gantt-resize-handle" title="Arraste para redimensionar"></div>
     <div class="gantt-chart" style="min-width:${chartWidth}px;">
       <div class="gantt-header" style="width:${chartWidth}px;">${headerHtml}${todayLeft>=0&&todayLeft<=chartWidth?`<div class="gantt-today" style="left:${todayLeft}px;" title="Hoje"></div>`:""}</div>
-      <div style="position:relative;">${todayLeft>=0&&todayLeft<=chartWidth?`<div class="gantt-today" style="left:${todayLeft}px;height:100%;"></div>`:""}${rowsHtml}</div>
+      <div style="position:relative;">${gridLinesHtml}${todayLeft>=0&&todayLeft<=chartWidth?`<div class="gantt-today" style="left:${todayLeft}px;height:100%;"></div>`:""}${rowsHtml}</div>
     </div>
   </div>`;
+
+  // Redimensionamento da coluna "Atividade" arrastando o mouse. Os
+  // listeners de mousemove/mouseup em document só existem DURANTE o
+  // arrasto — adicionados no mousedown, removidos no mouseup — pra não
+  // acumular um listener novo em document a cada nova chamada de
+  // renderGantt() (toda troca de filtro re-renderiza o Gantt do zero).
+  const handle = $("gantt-resize-handle");
+  const gridEl = el.querySelector(".gantt");
+  handle.addEventListener("mousedown", (e)=>{
+    const startX = e.clientX, startW = GANTT_ESTADO.largura;
+    handle.classList.add("dragging");
+    document.body.style.userSelect = "none";
+    e.preventDefault();
+    function onMove(ev){
+      const w = Math.max(160, Math.min(900, startW + (ev.clientX - startX)));
+      GANTT_ESTADO.largura = w;
+      gridEl.style.gridTemplateColumns = `${w}px 6px 1fr`;
+    }
+    function onUp(){
+      handle.classList.remove("dragging");
+      document.body.style.userSelect = "";
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      _ganttSalvarEstado();
+      _ganttSincronizarAlturas(); // a largura mudou, o texto pode ter quebrado diferente
+    }
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  });
+
+  _ganttSincronizarAlturas();
+  if(document.fonts && document.fonts.ready){
+    document.fonts.ready.then(_ganttSincronizarAlturas).catch(()=>{});
+  }
 }
 
 // ================= DASHBOARD =================
