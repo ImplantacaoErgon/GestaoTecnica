@@ -164,8 +164,17 @@ PENDENCIA_FIELDS = [
     "data_identificacao", "data_limite", "data_prevista", "data_real",
     "status", "prioridade", "categoria", "acoes_necessarias", "observacoes",
 ]
-CICLO_FIELDS = ["atividade_id", "numero_ciclo", "data_execucao", "qtd_registros_extraidos",
+CICLO_FIELDS = ["item_migracao_id", "atividade_id", "numero_ciclo", "data_execucao", "qtd_registros_extraidos",
                 "qtd_registros_carregados", "qtd_rejeicoes", "observacoes"]
+# 48ª rodada: catálogo de itens de migração (tabelas do legado a migrar pro
+# Ergon) — cada item tem uma meta (qtd_registros_estimada) e, através dos
+# ciclos_migracao vinculados a ele (item_migracao_id), quanto já foi
+# carregado. atividade_id aqui é o vínculo opcional com o cronograma (a
+# atividade de migração que contém este item), não obrigatório.
+ITEM_MIGRACAO_FIELDS = [
+    "projeto_id", "atividade_id", "nome_tabela_legado", "nome_tabela_destino",
+    "sistema_origem", "qtd_registros_estimada", "status", "responsavel_id", "observacoes",
+]
 # valor_liquido NÃO entra aqui — é coluna GENERATED (valor_total - impostos), o
 # próprio Postgres calcula, nunca é inserida/atualizada diretamente. nome/cargo
 # do responsável pelo recebimento entram aqui porque também podem ser digitados
@@ -1776,15 +1785,93 @@ def create_app():
     @app.get("/api/ciclos-migracao")
     def list_ciclos():
         aid = request.args.get("atividade_id")
-        sql = "SELECT * FROM ciclos_migracao"
+        iid = request.args.get("item_migracao_id")
+        where = []
         if aid:
-            sql += f" WHERE atividade_id = {db.q(aid)}"
+            where.append(f"atividade_id = {db.q(aid)}")
+        if iid:
+            where.append(f"item_migracao_id = {db.q(iid)}")
+        sql = "SELECT * FROM ciclos_migracao"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
         sql += " ORDER BY numero_ciclo"
         return jsonify(db.fetch_all(sql))
 
     @app.post("/api/ciclos-migracao")
     def create_ciclo():
         return jsonify(insert_row("ciclos_migracao", request.get_json(force=True), CICLO_FIELDS)), 201
+
+    @app.delete("/api/ciclos-migracao/<id>")
+    def delete_ciclo(id):
+        return delete_row("ciclos_migracao", id)
+
+    # ------------------------------------------------------- itens de migração
+    # 48ª rodada: "Qtd de dados a migrar de cada tabela e qtd de dados
+    # carregados" — cada linha é uma tabela/entidade do sistema legado a
+    # migrar, com uma meta opcional (qtd_registros_estimada) e progresso
+    # calculado a partir do último ciclo_migracao vinculado a ela.
+    @app.get("/api/itens-migracao")
+    def list_itens_migracao():
+        pid = request.args.get("projeto_id")
+        if not pid:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        sql = f"""
+            SELECT im.*, res.nome AS responsavel_nome,
+                   a.codigo_wbs AS atividade_codigo, a.nome AS atividade_nome,
+                   COALESCE((SELECT c.qtd_registros_carregados FROM ciclos_migracao c
+                             WHERE c.item_migracao_id = im.id
+                             ORDER BY c.numero_ciclo DESC LIMIT 1), 0) AS qtd_registros_carregados,
+                   (SELECT count(*) FROM ciclos_migracao c WHERE c.item_migracao_id = im.id) AS qtd_ciclos,
+                   (SELECT max(c.data_execucao) FROM ciclos_migracao c WHERE c.item_migracao_id = im.id) AS ultima_execucao
+            FROM itens_migracao im
+            LEFT JOIN recursos res ON res.id = im.responsavel_id
+            LEFT JOIN atividades a ON a.id = im.atividade_id
+            WHERE im.projeto_id = {db.q(pid)}
+            ORDER BY im.nome_tabela_legado
+        """
+        return jsonify(db.fetch_all(sql))
+
+    @app.get("/api/itens-migracao/resumo")
+    def resumo_itens_migracao():
+        """Totais agregados pro card de resumo da tela e pro futuro relatório
+        detalhado (48ª rodada) — tudo calculado aqui no banco, determinístico,
+        sem IA: quantos itens por status, soma da meta x soma do carregado."""
+        pid = request.args.get("projeto_id")
+        if not pid:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        row = db.fetch_one(f"""
+            SELECT
+              count(*) AS total_itens,
+              count(*) FILTER (WHERE im.status = 'Concluído') AS itens_concluidos,
+              count(*) FILTER (WHERE im.status = 'Em andamento') AS itens_em_andamento,
+              count(*) FILTER (WHERE im.status = 'Bloqueado') AS itens_bloqueados,
+              count(*) FILTER (WHERE im.status = 'Não iniciado') AS itens_nao_iniciados,
+              COALESCE(sum(im.qtd_registros_estimada), 0) AS total_estimado,
+              COALESCE(sum((SELECT c.qtd_registros_carregados FROM ciclos_migracao c
+                            WHERE c.item_migracao_id = im.id
+                            ORDER BY c.numero_ciclo DESC LIMIT 1)), 0) AS total_carregado
+            FROM itens_migracao im
+            WHERE im.projeto_id = {db.q(pid)}
+        """)
+        return jsonify(row or {
+            "total_itens": 0, "itens_concluidos": 0, "itens_em_andamento": 0,
+            "itens_bloqueados": 0, "itens_nao_iniciados": 0, "total_estimado": 0, "total_carregado": 0,
+        })
+
+    @app.post("/api/itens-migracao")
+    def create_item_migracao():
+        return jsonify(insert_row("itens_migracao", request.get_json(force=True), ITEM_MIGRACAO_FIELDS)), 201
+
+    @app.put("/api/itens-migracao/<id>")
+    def update_item_migracao(id):
+        row = patch_row("itens_migracao", id, request.get_json(force=True), ITEM_MIGRACAO_FIELDS)
+        if not row:
+            abort(404)
+        return jsonify(row)
+
+    @app.delete("/api/itens-migracao/<id>")
+    def delete_item_migracao(id):
+        return delete_row("itens_migracao", id)
 
     # ------------------------------------------------------------------ marcos
     @app.get("/api/marcos")

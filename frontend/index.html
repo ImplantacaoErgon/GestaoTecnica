@@ -498,6 +498,7 @@
       <button data-view="minhas-atividades">Minhas atividades</button>
       <button data-view="pendencias">🚩 Pendências</button>
       <button data-view="faturas">💵 Faturas</button>
+      <button data-view="migracao">📦 Migração de Dados</button>
       <div class="tab-group" data-group>
         <button type="button" class="tab-group-trigger" data-views="requisitos,manuais,analisar-requisitos">Requisitos TR <span class="caret">▾</span></button>
         <div class="tab-group-menu">
@@ -818,6 +819,24 @@
       <table>
         <thead><tr><th>Código</th><th>Título/Frente</th><th>Responsáveis</th><th>Status</th><th>Prioridade</th><th>Data limite</th></tr></thead>
         <tbody id="pendencias-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ MIGRAÇÃO DE DADOS (48ª rodada) ============ -->
+  <section class="view" id="view-migracao">
+    <h2 class="view-title">📦 Migração de Dados</h2>
+    <div class="view-sub">Cada linha é uma tabela/entidade do sistema legado a migrar pro Ergon — quantidade de registros a migrar (meta) x quantidade já carregada, apurada a partir dos ciclos de execução registrados.</div>
+    <div class="kpis" id="mig-kpis"></div>
+    <div class="filters">
+      <input type="text" id="mf-search" placeholder="Buscar por tabela, sistema de origem…">
+      <select id="mf-status"><option value="">Status (todos)</option><option>Não iniciado</option><option>Em andamento</option><option>Concluído</option><option>Bloqueado</option></select>
+      <button class="btn small" id="btn-new-item-migracao" style="margin-left:auto;">+ Novo item de migração</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Tabela do legado</th><th>Destino/Sistema</th><th>Meta</th><th>Carregado</th><th>%</th><th>Ciclos</th><th>Status</th><th>Responsável</th></tr></thead>
+        <tbody id="migracao-tbody"></tbody>
       </table>
     </div>
   </section>
@@ -1385,6 +1404,46 @@
     <div class="modal-foot">
       <span></span>
       <div style="display:flex;gap:8px;"><button class="btn secondary" id="marco-cancel">Cancelar</button><button class="btn" id="marco-save">Salvar</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= MODAL: ITEM DE MIGRAÇÃO (48ª rodada) ================= -->
+<div class="overlay" id="overlay-item-migracao" hidden>
+  <div class="modal" style="max-width:820px;">
+    <div class="modal-head"><h2 id="mig-modal-title">Novo item de migração</h2><button class="btn ghost" id="mig-close">✕</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Tabela do sistema legado *</label><input id="mig-tabela-legado" type="text" placeholder="Ex: RH_FUNCIONARIOS"></div>
+      <div class="field"><label>Tabela/entidade destino no Ergon</label><input id="mig-tabela-destino" type="text"></div>
+      <div class="field"><label>Sistema de origem</label><input id="mig-sistema-origem" type="text" placeholder="Ex: Folha Anterior XYZ"></div>
+      <div class="field"><label>Qtd. de registros a migrar (meta)</label><input id="mig-qtd-estimada" type="number" min="0" step="1"></div>
+      <div class="field"><label>Status</label><select id="mig-status"><option>Não iniciado</option><option>Em andamento</option><option>Concluído</option><option>Bloqueado</option></select></div>
+      <div class="field"><label>Responsável</label><select id="mig-responsavel"></select></div>
+      <div class="field full"><label>Atividade do cronograma (opcional)</label><select id="mig-atividade"></select></div>
+      <div class="field full"><label>Observações</label><textarea id="mig-observacoes"></textarea></div>
+
+      <div class="field full" id="mig-ciclos-wrap" hidden>
+        <label>Ciclos de execução (extração/carga)</label>
+        <div class="table-wrap" style="max-height:220px;">
+          <table>
+            <thead><tr><th>Ciclo</th><th>Data</th><th>Extraídos</th><th>Carregados</th><th>Rejeições</th><th>% rejeição</th><th></th></tr></thead>
+            <tbody id="mig-ciclos-tbody"></tbody>
+          </table>
+        </div>
+        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-top:8px;">
+          <div class="field" style="margin:0;"><label>Ciclo nº</label><input id="mig-ciclo-numero" type="number" min="1" step="1" style="width:80px;"></div>
+          <div class="field" style="margin:0;"><label>Data</label><input id="mig-ciclo-data" type="date"></div>
+          <div class="field" style="margin:0;"><label>Extraídos</label><input id="mig-ciclo-extraidos" type="number" min="0" step="1" style="width:100px;"></div>
+          <div class="field" style="margin:0;"><label>Carregados</label><input id="mig-ciclo-carregados" type="number" min="0" step="1" style="width:100px;"></div>
+          <div class="field" style="margin:0;"><label>Rejeições</label><input id="mig-ciclo-rejeicoes" type="number" min="0" step="1" style="width:100px;"></div>
+          <button class="btn secondary small" id="mig-ciclo-add">+ Registrar ciclo</button>
+        </div>
+      </div>
+      <div class="muted" id="mig-ciclos-aviso" style="grid-column:1/-1;">Salve o item primeiro pra poder registrar ciclos de execução.</div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn danger ghost" id="mig-delete" hidden>Excluir item</button>
+      <div style="display:flex;gap:8px;"><button class="btn secondary" id="mig-cancel">Cancelar</button><button class="btn" id="mig-save">Salvar</button></div>
     </div>
   </div>
 </div>
@@ -2021,7 +2080,7 @@ async function chamarAuthApi(path, body){
 // ---------------- estado global ----------------
 let USUARIO_LOGADO = null;
 let PARAMETROS = null; // logo + nome da empresa (Configurações > Parâmetros) — ver carregarParametros()
-let PROJETO=null, PROJETOS=[], ETAPAS=[], FRENTES=[], TIPOS=[], RECURSOS=[], USUARIOS=[], ATIVIDADES=[], REQUISITOS=[], RISCOS=[], MARCOS=[], CALENDARIO=[], MANUAIS=[], FATURAS=[], PENDENCIAS=[];
+let PROJETO=null, PROJETOS=[], ETAPAS=[], FRENTES=[], TIPOS=[], RECURSOS=[], USUARIOS=[], ATIVIDADES=[], REQUISITOS=[], RISCOS=[], MARCOS=[], CALENDARIO=[], MANUAIS=[], FATURAS=[], PENDENCIAS=[], ITENS_MIGRACAO=[];
 const PENDENCIA_STATUS_COR = {"Aberta":"warn", "Em andamento":"accent", "Resolvida":"ok", "Cancelada":"faint"};
 let editingAtividadeId=null, editingRequisitoId=null, editingRiscoId=null, editingMarcoId=null, editingPendenciaId=null;
 let MA_DATA_REF=new Date(), MA_GRADE=null; // "Minhas atividades" — data de referência da semana mostrada e último retorno do servidor
@@ -2084,15 +2143,15 @@ async function trocarProjeto(id){
 // primeiro). Fecha modais de atividade/requisito abertos antes de trocar,
 // pra evitar salvar algo editado no projeto anterior como se fosse do novo.
 async function recarregarDadosDoProjeto(){
-  closeAtividadeModal(); closeRequisitoModal(); closeFaturaModal();
+  closeAtividadeModal(); closeRequisitoModal(); closeFaturaModal(); closeItemMigracaoModal();
   [ETAPAS, FRENTES, CALENDARIO] = await Promise.all([
     api(`/etapas?projeto_id=${PROJETO.id}`), api(`/frentes?projeto_id=${PROJETO.id}`),
     api(`/calendario?projeto_id=${PROJETO.id}`)
   ]);
   fillStaticSelects();
-  await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias()]);
+  await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias(), loadItensMigracao()]);
   fillStaticSelects();
-  renderDashboard(); renderCronograma(); renderRequisitos(); renderRiscosMarcos(); renderConfigTable(); renderAnalisarRequisitos(); renderFaturas(); renderPendencias();
+  renderDashboard(); renderCronograma(); renderRequisitos(); renderRiscosMarcos(); renderConfigTable(); renderAnalisarRequisitos(); renderFaturas(); renderPendencias(); renderItensMigracao();
   // "Minhas atividades" NÃO depende do projeto ativo desde a 16ª rodada
   // (mostra todos os projetos em que o usuário está delegado) — por isso,
   // ao contrário das demais views desta função, não precisa recarregar
@@ -2282,14 +2341,14 @@ async function afterProjetoReady(){
   aplicarMarcaNoTopo();
   fillStaticSelects();
   wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireGanttToolbar(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireExportarCronograma(); wireRemoverCronograma(); wireRemoverRequisitos(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma();
-  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal();
+  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros();
   setupCsvTemplateLink();
-  await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias()]);
+  await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias(), loadItensMigracao()]);
   // Reaplica agora que REQUISITOS/ATIVIDADES já estão carregados — os selects
   // "Item do TR" (atividade) e "Atividade (entregável)" (fatura) dependem
   // deles e a primeira chamada acima rodou antes desse load.
   fillStaticSelects();
-  renderDashboard(); renderCronograma(); renderRequisitos(); renderRiscosMarcos(); renderConfigTable(); renderAnalisarRequisitos(); renderFaturas(); renderPendencias();
+  renderDashboard(); renderCronograma(); renderRequisitos(); renderRiscosMarcos(); renderConfigTable(); renderAnalisarRequisitos(); renderFaturas(); renderPendencias(); renderItensMigracao();
   $("tabs").style.display = "flex";
 }
 
@@ -2344,6 +2403,11 @@ function fillStaticSelects(){
     .map(a=>`<option value="${a.id}" data-frente="${a.frente_trabalho_id||""}">${a.codigo_wbs?esc(a.codigo_wbs)+" — ":""}${esc(a.nome)}</option>`).join("");
   $("pend-risco").innerHTML = `<option value="">— Nenhum —</option>` + RISCOS
     .map(r=>`<option value="${r.id}">${esc(r.descricao)}</option>`).join("");
+
+  // Migração de Dados (48ª rodada)
+  $("mig-responsavel").innerHTML = `<option value="">—</option>` + recursoOpts;
+  $("mig-atividade").innerHTML = `<option value="">— Nenhuma —</option>` + ATIVIDADES
+    .map(a=>`<option value="${a.id}">${a.codigo_wbs?esc(a.codigo_wbs)+" — ":""}${esc(a.nome)}</option>`).join("");
 
   // Fatura (27ª rodada): responsável pela entrega precisa ser da Consultoria (regra
   // validada de novo no backend, em preparar_fatura); responsável pelo
@@ -3557,6 +3621,179 @@ async function savePendencia(){
     await loadPendencias(); renderPendencias();
     if(editingAtividadeId) refreshPendenciasAtividade();
     closePendenciaModal(); toast("Pendência salva.");
+  }catch(e){}
+}
+
+// ================= MIGRAÇÃO DE DADOS (48ª rodada) =================
+// Cada item = uma tabela/entidade do legado a migrar; o progresso (carregado,
+// qtd_ciclos, última execução) já vem calculado do backend (GET /itens-migracao),
+// a partir do último ciclo_migracao vinculado a cada item — ver resumo_itens_migracao
+// em main.py pros totais agregados dos KPIs.
+let editingItemMigracaoId = null;
+const STATUS_MIGRACAO_COLOR = {"Não iniciado":"faint","Em andamento":"accent","Concluído":"ok","Bloqueado":"danger"};
+
+async function loadItensMigracao(){ ITENS_MIGRACAO = await api(`/itens-migracao?projeto_id=${PROJETO.id}`); }
+
+function migFilters(){
+  return { search: ($("mf-search").value||"").trim().toLowerCase(), status: $("mf-status").value };
+}
+
+function renderItensMigracao(){
+  const f = migFilters();
+  const list = ITENS_MIGRACAO.filter(m=>{
+    if(f.status && m.status!==f.status) return false;
+    if(f.search && !([m.nome_tabela_legado,m.nome_tabela_destino,m.sistema_origem].join(" ").toLowerCase().includes(f.search))) return false;
+    return true;
+  });
+
+  const totalItens = ITENS_MIGRACAO.length;
+  const concluidos = ITENS_MIGRACAO.filter(m=>m.status==="Concluído").length;
+  const totalEstimado = ITENS_MIGRACAO.reduce((s,m)=>s+(Number(m.qtd_registros_estimada)||0), 0);
+  const totalCarregado = ITENS_MIGRACAO.reduce((s,m)=>s+(Number(m.qtd_registros_carregados)||0), 0);
+  const pctGlobal = totalEstimado>0 ? Math.round(100*totalCarregado/totalEstimado) : null;
+  $("mig-kpis").innerHTML = [
+    {l:"Itens cadastrados", v:totalItens},
+    {l:"Concluídos", v:concluidos},
+    {l:"Bloqueados", v:ITENS_MIGRACAO.filter(m=>m.status==="Bloqueado").length},
+    {l:"Registros a migrar (meta)", v:totalEstimado.toLocaleString('pt-BR')},
+    {l:"Registros carregados", v:totalCarregado.toLocaleString('pt-BR')},
+    {l:"% carregado (global)", v: pctGlobal===null ? "—" : pctGlobal+"%"},
+  ].map(k=>`<div class="kpi"><div class="label">${k.l}</div><div class="value">${k.v}</div></div>`).join("");
+
+  $("migracao-tbody").innerHTML = list.length ? list.map(m=>{
+    const pct = m.qtd_registros_estimada ? Math.round(100*(m.qtd_registros_carregados||0)/m.qtd_registros_estimada) : null;
+    return `<tr class="clickable" data-id="${m.id}">
+      <td>${esc(m.nome_tabela_legado)}${m.sistema_origem?`<div class="muted">${esc(m.sistema_origem)}</div>`:""}</td>
+      <td>${esc(m.nome_tabela_destino||"—")}${m.atividade_nome?`<div class="muted">${m.atividade_codigo?esc(m.atividade_codigo)+" — ":""}${esc(m.atividade_nome)}</div>`:""}</td>
+      <td class="mono">${m.qtd_registros_estimada!=null ? Number(m.qtd_registros_estimada).toLocaleString('pt-BR') : "—"}</td>
+      <td class="mono">${Number(m.qtd_registros_carregados||0).toLocaleString('pt-BR')}</td>
+      <td>${pct===null ? "—" : pct+"%"}</td>
+      <td class="mono">${m.qtd_ciclos||0}</td>
+      <td>${pill(m.status, STATUS_MIGRACAO_COLOR[m.status]||"faint")}</td>
+      <td>${esc(m.responsavel_nome||"—")}</td>
+    </tr>`;
+  }).join("") : `<tr class="empty-row"><td colspan="8">Nenhum item de migração cadastrado.</td></tr>`;
+  $("migracao-tbody").querySelectorAll("tr[data-id]").forEach(tr=>{
+    tr.addEventListener("click", ()=>openItemMigracaoModal(byId(ITENS_MIGRACAO, tr.dataset.id)));
+  });
+}
+
+function wireMigracaoFiltros(){
+  ["mf-search","mf-status"].forEach(id=>{
+    $(id).addEventListener("input", renderItensMigracao);
+    $(id).addEventListener("change", renderItensMigracao);
+  });
+}
+
+function wireItemMigracaoModal(){
+  $("btn-new-item-migracao").addEventListener("click", ()=>openItemMigracaoModal(null));
+  $("mig-close").addEventListener("click", closeItemMigracaoModal);
+  $("mig-cancel").addEventListener("click", closeItemMigracaoModal);
+  $("overlay-item-migracao").addEventListener("click", e=>{ if(e.target.id==="overlay-item-migracao") closeItemMigracaoModal(); });
+  $("mig-save").addEventListener("click", saveItemMigracao);
+  $("mig-delete").addEventListener("click", deleteItemMigracao);
+  $("mig-ciclo-add").addEventListener("click", addCicloMigracao);
+}
+
+function openItemMigracaoModal(m){
+  editingItemMigracaoId = m ? m.id : null;
+  $("mig-modal-title").textContent = m ? "Editar item de migração" : "Novo item de migração";
+  $("mig-tabela-legado").value = m?.nome_tabela_legado || "";
+  $("mig-tabela-destino").value = m?.nome_tabela_destino || "";
+  $("mig-sistema-origem").value = m?.sistema_origem || "";
+  $("mig-qtd-estimada").value = m?.qtd_registros_estimada ?? "";
+  $("mig-status").value = m?.status || "Não iniciado";
+  $("mig-responsavel").value = m?.responsavel_id || "";
+  $("mig-atividade").value = m?.atividade_id || "";
+  $("mig-observacoes").value = m?.observacoes || "";
+  $("mig-delete").hidden = !m;
+  // Ciclos de execução só fazem sentido com o item já salvo (precisa do id) —
+  // ao criar um item novo, mostra o aviso em vez da subtabela (mesmo espírito
+  // do padrão já usado em Atividade: vínculos N:N só depois de ter um id).
+  $("mig-ciclos-wrap").hidden = !m;
+  $("mig-ciclos-aviso").hidden = !!m;
+  if(m){ renderCiclosMigracaoModal(m.id); }
+  $("overlay-item-migracao").hidden = false;
+}
+function closeItemMigracaoModal(){ $("overlay-item-migracao").hidden = true; editingItemMigracaoId = null; }
+
+async function saveItemMigracao(){
+  const data = {
+    nome_tabela_legado: $("mig-tabela-legado").value.trim(),
+    nome_tabela_destino: $("mig-tabela-destino").value.trim() || null,
+    sistema_origem: $("mig-sistema-origem").value.trim() || null,
+    qtd_registros_estimada: $("mig-qtd-estimada").value === "" ? null : Number($("mig-qtd-estimada").value),
+    status: $("mig-status").value,
+    responsavel_id: $("mig-responsavel").value || null,
+    atividade_id: $("mig-atividade").value || null,
+    observacoes: $("mig-observacoes").value.trim() || null,
+  };
+  if(!data.nome_tabela_legado){ toast("Informe a tabela do sistema legado.", true); return; }
+  if(!editingItemMigracaoId) data.projeto_id = PROJETO.id;
+  try{
+    let row;
+    if(editingItemMigracaoId) row = await api(`/itens-migracao/${editingItemMigracaoId}`, {method:"PUT", body: JSON.stringify(data)});
+    else row = await api("/itens-migracao", {method:"POST", body: JSON.stringify(data)});
+    await loadItensMigracao(); renderItensMigracao();
+    toast("Item de migração salvo.");
+    // mantém o modal aberto num item recém-criado, pra já poder registrar ciclos
+    // (mesmo comportamento de reabrir com os dados atualizados)
+    openItemMigracaoModal(byId(ITENS_MIGRACAO, row.id));
+  }catch(e){}
+}
+
+async function deleteItemMigracao(){
+  if(!editingItemMigracaoId) return;
+  if(!confirm("Excluir este item de migração e todos os ciclos de execução registrados nele?")) return;
+  try{
+    await api(`/itens-migracao/${editingItemMigracaoId}`, {method:"DELETE"});
+    await loadItensMigracao(); renderItensMigracao(); closeItemMigracaoModal(); toast("Item de migração excluído.");
+  }catch(e){}
+}
+
+async function renderCiclosMigracaoModal(itemId){
+  const ciclos = await api(`/ciclos-migracao?item_migracao_id=${itemId}`);
+  $("mig-ciclos-tbody").innerHTML = ciclos.length ? ciclos.map(c=>`
+    <tr data-id="${c.id}">
+      <td class="mono">${c.numero_ciclo}</td>
+      <td>${fmtDate(c.data_execucao)}</td>
+      <td class="mono">${Number(c.qtd_registros_extraidos||0).toLocaleString('pt-BR')}</td>
+      <td class="mono">${Number(c.qtd_registros_carregados||0).toLocaleString('pt-BR')}</td>
+      <td class="mono">${Number(c.qtd_rejeicoes||0).toLocaleString('pt-BR')}</td>
+      <td>${c.percentual_rejeicao!=null ? c.percentual_rejeicao+"%" : "—"}</td>
+      <td><button class="btn ghost small" data-del-ciclo="${c.id}" title="Excluir ciclo">✕</button></td>
+    </tr>`).join("") : `<tr class="empty-row"><td colspan="7">Nenhum ciclo registrado ainda.</td></tr>`;
+  $("mig-ciclos-tbody").querySelectorAll("[data-del-ciclo]").forEach(btn=>{
+    btn.addEventListener("click", async (e)=>{
+      e.stopPropagation();
+      if(!confirm("Excluir este ciclo de execução?")) return;
+      await api(`/ciclos-migracao/${btn.dataset.delCiclo}`, {method:"DELETE"});
+      await renderCiclosMigracaoModal(itemId);
+      await loadItensMigracao(); renderItensMigracao();
+    });
+  });
+  const proximoNumero = ciclos.length ? Math.max(...ciclos.map(c=>c.numero_ciclo))+1 : 1;
+  $("mig-ciclo-numero").value = proximoNumero;
+  $("mig-ciclo-data").value = toISO(new Date());
+  $("mig-ciclo-extraidos").value = ""; $("mig-ciclo-carregados").value = ""; $("mig-ciclo-rejeicoes").value = "";
+}
+
+async function addCicloMigracao(){
+  if(!editingItemMigracaoId){ toast("Salve o item primeiro.", true); return; }
+  const data = {
+    item_migracao_id: editingItemMigracaoId,
+    numero_ciclo: Number($("mig-ciclo-numero").value || 0),
+    data_execucao: $("mig-ciclo-data").value || null,
+    qtd_registros_extraidos: $("mig-ciclo-extraidos").value === "" ? null : Number($("mig-ciclo-extraidos").value),
+    qtd_registros_carregados: $("mig-ciclo-carregados").value === "" ? null : Number($("mig-ciclo-carregados").value),
+    qtd_rejeicoes: $("mig-ciclo-rejeicoes").value === "" ? null : Number($("mig-ciclo-rejeicoes").value),
+  };
+  if(!data.numero_ciclo || !data.data_execucao){ toast("Informe o número do ciclo e a data de execução.", true); return; }
+  try{
+    await api("/ciclos-migracao", {method:"POST", body: JSON.stringify(data)});
+    await renderCiclosMigracaoModal(editingItemMigracaoId);
+    await loadItensMigracao(); renderItensMigracao();
+    toast("Ciclo registrado.");
   }catch(e){}
 }
 
@@ -6004,6 +6241,7 @@ const AUD_ENTIDADE_ROTULOS = {
   atividades:"Atividade", atividade_relato:"Relato de atividade",
   atividade_dependencia:"Dependência entre atividades", requisitos_tr:"Requisito do TR",
   manuais:"Manual do sistema", faturas:"Fatura", ciclos_migracao:"Ciclo de migração",
+  itens_migracao:"Item de migração",
   marcos:"Marco", riscos:"Risco", calendario_util:"Calendário de feriados", cronograma:"Cronograma",
 };
 const AUD_EVENTO_ROTULOS = {
