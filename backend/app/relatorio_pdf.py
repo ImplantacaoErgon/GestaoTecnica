@@ -1,8 +1,10 @@
 """
 Gera o PDF do Relatório Executivo a partir do markdown devolvido pela IA
 (ver app/relatorio_executivo.py). Só entende o subconjunto de markdown que o
-prompt pede à IA para usar — "## título", parágrafos e listas com "-" (mais
-"**negrito**" e "*itálico*" dentro do texto) — não é um parser de markdown
+prompt pede à IA para usar — "## título", parágrafos, listas com "-" (mais
+"**negrito**" e "*itálico*" dentro do texto) e, a partir da 50ª rodada, uma
+tabela markdown simples (estilo GFM: linha de cabeçalho, linha separadora
+"---", linhas de dados, tudo separado por "|") — não é um parser de markdown
 genérico.
 
 Usa reportlab (não weasyprint/wkhtmltopdf) de propósito: é puro Python, não
@@ -18,10 +20,21 @@ from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, ListFlowable, ListItem, HRFlowable
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer, ListFlowable, ListItem, HRFlowable, Table, TableStyle,
+)
 
 _INLINE_BOLD = re.compile(r"\*\*(.+?)\*\*")
 _INLINE_ITALIC = re.compile(r"(?<!\*)\*([^*]+?)\*(?!\*)")
+# Linha de tabela markdown: começa e termina com "|" (com espaços em volta permitidos).
+_TABLE_ROW_RE = re.compile(r"^\|(.+)\|\s*$")
+# Linha separadora do cabeçalho (a 2ª linha de toda tabela GFM): só "-", ":", "|" e espaços.
+_TABLE_SEP_RE = re.compile(r"^\|?[\s:|-]+\|?\s*$")
+# Célula de evolução/involução no formato "+12,3%" / "-8,5%" — pinta de verde/vermelho.
+_EVOLUCAO_RE = re.compile(r"^([+-])\s*[\d.,]+\s*%")
+
+# Largura útil da página A4 com as margens usadas em gerar_pdf_bytes (2.2cm cada lado).
+_LARGURA_UTIL = A4[0] - 2 * 2.2 * cm
 
 
 def _inline_to_reportlab(text):
@@ -46,14 +59,77 @@ def _estilos():
         "item": ParagraphStyle("item", parent=base["Normal"], fontSize=10, leading=14),
         "rodape": ParagraphStyle("rodape", parent=base["Normal"], fontSize=7.5,
                                   textColor=colors.HexColor("#888888")),
+        "tabela_cab": ParagraphStyle("tabela_cab", parent=base["Normal"], fontSize=9, leading=11.5,
+                                      textColor=colors.white, fontName="Helvetica-Bold"),
+        "tabela_cel": ParagraphStyle("tabela_cel", parent=base["Normal"], fontSize=9, leading=11.5),
     }
     return estilos
+
+
+def _split_table_row(linha):
+    """'| a | b | c |' -> ['a', 'b', 'c'] (aceita também sem os '|' nas pontas)."""
+    s = linha.strip()
+    if s.startswith("|"):
+        s = s[1:]
+    if s.endswith("|"):
+        s = s[:-1]
+    return [c.strip() for c in s.split("|")]
+
+
+def _celula_tabela(texto, estilo_base, estilos):
+    """Parágrafo de uma célula de dados — pinta de verde/vermelho quando o texto é uma
+    evolução/involução percentual no formato '+12,3%'/'-8,5%' (ver PROMPT_TEMPLATE)."""
+    m = _EVOLUCAO_RE.match(texto.strip())
+    cor = "#b91c1c" if m and m.group(1) == "-" else ("#15803d" if m else None)
+    corpo = _inline_to_reportlab(texto)
+    if cor:
+        corpo = f'<font color="{cor}"><b>{corpo}</b></font>'
+    return Paragraph(corpo, estilo_base)
+
+
+def _tabela_flowable(linhas_tabela, estilos):
+    """linhas_tabela: lista de linhas cruas de uma tabela markdown (cabeçalho + separador +
+    dados, já sem a linha em branco que a encerra). Monta um reportlab Table com a 1ª
+    coluna mais larga (costuma ser um rótulo/nome) e as demais em largura igual."""
+    cabecalho = _split_table_row(linhas_tabela[0])
+    linhas_dados = [_split_table_row(l) for l in linhas_tabela[2:] if l.strip()]
+    n_col = len(cabecalho)
+
+    if n_col > 1:
+        peso_primeira = 2.0
+        largura_primeira = _LARGURA_UTIL * peso_primeira / (peso_primeira + (n_col - 1))
+        largura_demais = (_LARGURA_UTIL - largura_primeira) / (n_col - 1)
+        col_widths = [largura_primeira] + [largura_demais] * (n_col - 1)
+    else:
+        col_widths = [_LARGURA_UTIL]
+
+    dados = [[Paragraph(_inline_to_reportlab(c), estilos["tabela_cab"]) for c in cabecalho]]
+    for linha in linhas_dados:
+        # tolera linha de dados com menos/mais células que o cabeçalho (a IA pode errar a
+        # contagem) — completa com célula vazia ou trunca, em vez de estourar o Table
+        linha = (linha + [""] * n_col)[:n_col]
+        dados.append([_celula_tabela(c, estilos["tabela_cel"], estilos) for c in linha])
+
+    tabela = Table(dados, colWidths=col_widths, repeatRows=1)
+    tabela.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1a3d5c")),
+        ("BACKGROUND", (0, 1), (-1, -1), colors.white),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f4f6f8")]),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#d0d5db")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    return tabela
 
 
 def _markdown_para_flowables(conteudo_md, estilos):
     flowables = []
     linhas = conteudo_md.replace("\r\n", "\n").split("\n")
     buffer_lista = []
+    buffer_tabela = []
 
     def fecha_lista():
         if buffer_lista:
@@ -63,11 +139,37 @@ def _markdown_para_flowables(conteudo_md, estilos):
             ))
             buffer_lista.clear()
 
+    def fecha_tabela():
+        if buffer_tabela:
+            if len(buffer_tabela) >= 2:  # cabeçalho + separador, no mínimo
+                flowables.append(_tabela_flowable(buffer_tabela, estilos))
+                flowables.append(Spacer(1, 10))
+            buffer_tabela.clear()
+
     for linha in linhas:
         linha_strip = linha.strip()
         if not linha_strip:
             fecha_lista()
+            fecha_tabela()
             continue
+        # 2ª linha de uma tabela = separadora ("|---|---|...") — só é reconhecida assim
+        # se a linha anterior já foi capturada como possível cabeçalho de tabela.
+        if buffer_tabela and len(buffer_tabela) == 1 and _TABLE_SEP_RE.match(linha_strip):
+            buffer_tabela.append(linha_strip)
+            continue
+        if _TABLE_ROW_RE.match(linha_strip):
+            if not buffer_tabela:
+                fecha_lista()
+            buffer_tabela.append(linha_strip)
+            continue
+        # linha não é de tabela: se tinha só uma linha bufferizada como possível cabeçalho
+        # (sem separador confirmado logo depois), não era uma tabela de verdade — essa
+        # linha era só texto normal que por acaso começava/terminava com "|", então
+        # desenha ela como parágrafo em vez de simplesmente perder o conteúdo.
+        if buffer_tabela and len(buffer_tabela) < 2:
+            pendente = buffer_tabela.pop()
+            flowables.append(Paragraph(_inline_to_reportlab(pendente), estilos["corpo"]))
+        fecha_tabela()
         if linha_strip.startswith("## "):
             fecha_lista()
             flowables.append(Paragraph(_inline_to_reportlab(linha_strip[3:].strip()), estilos["h2"]))
@@ -80,6 +182,9 @@ def _markdown_para_flowables(conteudo_md, estilos):
             fecha_lista()
             flowables.append(Paragraph(_inline_to_reportlab(linha_strip), estilos["corpo"]))
     fecha_lista()
+    if len(buffer_tabela) == 1:  # mesmo caso do meio do loop, mas no fim do documento
+        flowables.append(Paragraph(_inline_to_reportlab(buffer_tabela.pop()), estilos["corpo"]))
+    fecha_tabela()
     return flowables
 
 

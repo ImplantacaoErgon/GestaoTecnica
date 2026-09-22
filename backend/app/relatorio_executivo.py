@@ -201,6 +201,95 @@ def _bloqueios_no_caminho(atividade_id, deps_por_sucessora, by_id, visitados=Non
     return achados
 
 
+def _migracao_de_dados(projeto_id):
+    """Quadro comparativo de Migração de Dados: para cada item (tabela do
+    legado), compara o ÚLTIMO ciclo de execução registrado com o
+    imediatamente anterior, e calcula o % de evolução (positivo) ou
+    involução (negativo) — tudo em Python, determinístico, igual ao resto
+    deste módulo (a IA só formata a tabela, não recalcula nada — ver
+    instrução no PROMPT_TEMPLATE). Um item com um único ciclo (ainda comum
+    nesta fase do projeto) aparece com "ciclo_anterior": None e
+    "evolucao_percentual": None — não dá pra comparar o que não existe."""
+    linhas = db.fetch_all(f"""
+        SELECT im.id AS item_id, im.nome_tabela_legado, im.nome_tabela_destino,
+               im.qtd_registros_estimada, im.status,
+               c.numero_ciclo, c.data_execucao, c.qtd_registros_carregados
+        FROM itens_migracao im
+        JOIN ciclos_migracao c ON c.item_migracao_id = im.id
+        WHERE im.projeto_id = {db.q(projeto_id)}
+        ORDER BY im.nome_tabela_legado, c.numero_ciclo DESC
+    """)
+
+    por_item = {}
+    ordem_itens = []
+    for l in linhas:
+        item_id = l["item_id"]
+        if item_id not in por_item:
+            por_item[item_id] = {
+                "tabela_legado": l["nome_tabela_legado"], "tabela_destino": l["nome_tabela_destino"],
+                "meta": l.get("qtd_registros_estimada"), "status": l["status"], "ciclos": [],
+            }
+            ordem_itens.append(item_id)
+        # já vem ORDER BY numero_ciclo DESC — os 2 primeiros de cada item são o
+        # último ciclo e o imediatamente anterior
+        if len(por_item[item_id]["ciclos"]) < 2:
+            por_item[item_id]["ciclos"].append({
+                "numero": l["numero_ciclo"], "data": l["data_execucao"],
+                "carregado": l["qtd_registros_carregados"] or 0,
+            })
+
+    itens = []
+    total_ultimo_geral = 0
+    total_ultimo_comparavel, total_anterior_comparavel, itens_com_2_ciclos = 0, 0, 0
+    for item_id in ordem_itens:
+        it = por_item[item_id]
+        ciclos = it["ciclos"]
+        ultimo = ciclos[0] if ciclos else None
+        anterior = ciclos[1] if len(ciclos) > 1 else None
+
+        evolucao_percentual = None
+        evolucao_observacao = None
+        if ultimo:
+            total_ultimo_geral += ultimo["carregado"]
+        if ultimo and anterior:
+            carregado_ultimo, carregado_anterior = ultimo["carregado"], anterior["carregado"]
+            if carregado_anterior > 0:
+                evolucao_percentual = round(100 * (carregado_ultimo - carregado_anterior) / carregado_anterior, 2)
+            elif carregado_ultimo > 0:
+                evolucao_observacao = "carga iniciada neste ciclo (0 no ciclo anterior)"
+            else:
+                evolucao_percentual = 0.0
+            total_ultimo_comparavel += carregado_ultimo
+            total_anterior_comparavel += carregado_anterior
+            itens_com_2_ciclos += 1
+        elif ultimo:
+            evolucao_observacao = "sem ciclo anterior para comparação (só 1 ciclo registrado)"
+
+        itens.append({
+            "tabela_legado": it["tabela_legado"], "tabela_destino": it["tabela_destino"],
+            "meta": it["meta"], "status": it["status"],
+            "ultimo_ciclo": ultimo, "ciclo_anterior": anterior,
+            "evolucao_percentual": evolucao_percentual, "evolucao_observacao": evolucao_observacao,
+        })
+
+    evolucao_percentual_global = None
+    if itens_com_2_ciclos and total_anterior_comparavel > 0:
+        evolucao_percentual_global = round(
+            100 * (total_ultimo_comparavel - total_anterior_comparavel) / total_anterior_comparavel, 2
+        )
+
+    return {
+        "itens": itens,
+        "resumo": {
+            "total_itens": len(itens),
+            "itens_com_ciclo_anterior_para_comparar": itens_com_2_ciclos,
+            "total_carregado_ultimo_ciclo": total_ultimo_geral,
+            "total_carregado_ciclo_anterior_itens_comparaveis": total_anterior_comparavel if itens_com_2_ciclos else None,
+            "evolucao_percentual_global": evolucao_percentual_global,
+        },
+    }
+
+
 def coletar_dados_projeto(projeto_id):
     """Monta o retrato completo de dados que embasa o relatório — tudo calculado em
     Python a partir do banco, nada inventado. É esse dicionário (serializado como
@@ -372,6 +461,17 @@ def coletar_dados_projeto(projeto_id):
         "marcos_proximos": [{"nome": m["nome"], "data_prevista": m["data_prevista"]} for m in marcos_proximos],
         "riscos_abertos": riscos,
         "atividades_master": atividades_master,
+        # 50ª rodada — dois temas novos, sempre ao final do relatório (ver PROMPT_TEMPLATE):
+        "migracao_de_dados": _migracao_de_dados(projeto_id),
+        # Folha de Pagamento: tema ainda em levantamento, sem dado estruturado próprio pra
+        # coletar aqui ainda — propositalmente sem nenhum número, pra não dar à IA nenhuma
+        # brecha de inventar algo. Quando o levantamento andar, isso ganha sua própria coleta
+        # de dados (nos moldes de _migracao_de_dados), e a seção do prompt deixa de ser um
+        # texto fixo de "ainda não há dados".
+        "folha_de_pagamento": {
+            "detalhamento_disponivel": False,
+            "observacao": "Tema ainda em levantamento/parametrização — sem dados estruturados para este relatório.",
+        },
     }
 
 
@@ -429,9 +529,36 @@ Resuma os riscos abertos, priorizando por probabilidade/impacto.
 3 a 5 recomendações objetivas e acionáveis para as próximas 1-2 semanas, priorizadas
 pelo que mais reduz o risco ao prazo da(s) atividade(s) master.
 
-Não adicione seções além dessas. Não use tabelas em markdown (o texto vai também para
-PDF e tabelas markdown não renderizam bem lá) — use listas com "-" quando precisar
-enumerar itens.
+## Migração de Dados
+Apresente um quadro comparativo, tabela a tabela, com todos os itens de
+"migracao_de_dados.itens": uma linha por item, comparando o carregado no ciclo anterior
+com o carregado no último ciclo e o % de evolução (ou involução, se negativo). Monte essa
+tabela em sintaxe de tabela markdown (GFM: uma linha de cabeçalho, uma linha separadora
+"---" logo abaixo, células separadas por "|") com as colunas, nesta ordem: Tabela do
+legado | Destino | Carregado (ciclo anterior) | Carregado (último ciclo) | Evolução. Use
+EXATAMENTE os valores já calculados em "ultimo_ciclo.carregado", "ciclo_anterior.carregado"
+e "evolucao_percentual" — não recalcule nada. Quando "ciclo_anterior" for null, escreva "—"
+nas colunas de carregado do ciclo anterior/evolução e, na coluna Evolução, o texto de
+"evolucao_observacao" (ex: "sem ciclo anterior para comparação"). Na coluna Evolução, quando
+houver percentual, escreva no formato "+12,3%" (evolução) ou "-8,5%" (involução) — troque o
+ponto decimal do JSON por vírgula, e sempre com o sinal. Depois da tabela, escreva um
+parágrafo curto com o total geral (resumo.total_carregado_ultimo_ciclo,
+resumo.evolucao_percentual_global) e destacando por nome qualquer tabela com involução
+(percentual negativo), se houver — involução merece atenção da diretoria porque normalmente
+indica retrabalho ou erro de carga que precisou ser desfeito.
+
+## Folha de Pagamento
+Este tema ainda está em levantamento/parametrização (ver
+"folha_de_pagamento.detalhamento_disponivel"). Escreva 1-2 frases registrando isso
+claramente — que o detalhamento deste tema entrará em uma versão futura do relatório assim
+que houver dados estruturados — sem inventar nenhum número, status ou prazo sobre a Folha de
+Pagamento.
+
+Não adicione seções além dessas. Não use tabelas em markdown em NENHUMA seção, EXCETO na
+tabela comparativa pedida em "Migração de Dados" — nas demais seções use listas com "-"
+quando precisar enumerar itens (o texto também vai para PDF, que só sabe renderizar "##",
+parágrafo, lista com "-", e agora essa tabela markdown; qualquer outra coisa não renderiza
+bem lá).
 """
 
 
