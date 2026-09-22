@@ -8,7 +8,7 @@ from datetime import datetime, date, timedelta
 
 from flask import Flask, request, jsonify, send_from_directory, send_file, abort, session
 
-from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_export, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria
+from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_export, cronograma_comparacao, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 FRONTEND_DIR = os.environ.get(
@@ -2007,6 +2007,54 @@ def create_app():
         if not versao:
             abort(404)
         return jsonify(versao)
+
+    @app.get("/api/cronograma/versoes/<id>/comparar")
+    def cronograma_comparar_versao(id):
+        """Planilha comparando esta versão salva contra o cronograma AO VIVO
+        — botão "📊 Comparar" na lista de Versões. Ver app/cronograma_comparacao.py
+        pra regra completa (casamento por id, azul = atividade nova, amarelo
+        = campo que mudou)."""
+        versao = cronograma_versoes.obter_versao(id)
+        if not versao:
+            abort(404)
+        projeto_id = versao["projeto_id"]
+        projeto = db.fetch_one(f"SELECT nome, sigla FROM projetos WHERE id = {db.q(projeto_id)}")
+        atividades_atuais = db.fetch_all(
+            ATIVIDADE_SELECT + f" WHERE a.projeto_id = {db.q(projeto_id)} ORDER BY a.codigo_wbs NULLS LAST, a.nome"
+        )
+        # Dependências atuais, no mesmo formato usado por /cronograma/exportar.
+        deps_atuais_rows = db.fetch_all(
+            "SELECT ad.atividade_id, p.codigo_wbs AS predecessora_codigo_wbs, ad.tipo, ad.lag_horas "
+            "FROM atividade_dependencia ad "
+            "JOIN atividades p ON p.id = ad.predecessora_id "
+            "JOIN atividades s ON s.id = ad.atividade_id "
+            f"WHERE s.projeto_id = {db.q(projeto_id)} AND p.projeto_id = {db.q(projeto_id)}"
+        )
+        deps_atuais_por_atividade = {}
+        for r in deps_atuais_rows:
+            deps_atuais_por_atividade.setdefault(r["atividade_id"], []).append(r)
+        # Dependências da versão já vêm resolvidas dentro do próprio snapshot
+        # (dados.dependencias — ver cronograma_versoes.montar_snapshot).
+        deps_versao_por_atividade = {}
+        for r in (versao.get("dados") or {}).get("dependencias") or []:
+            deps_versao_por_atividade.setdefault(r["atividade_id"], []).append(r)
+        try:
+            xlsx_bytes = cronograma_comparacao.gerar_planilha_bytes(
+                versao, atividades_atuais, deps_versao_por_atividade, deps_atuais_por_atividade
+            )
+        except Exception as e:
+            print(f"[cronograma_comparacao] erro ao gerar planilha: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            return jsonify({"erro": f"Falha ao gerar a planilha de comparação: {e}"}), 500
+        base = (projeto.get("sigla") or projeto.get("nome") or "projeto").strip() if projeto else "projeto"
+        base = "".join(c if c.isalnum() or c in "-_" else "-" for c in base).strip("-") or "projeto"
+        nome_arquivo = f"comparacao-v{versao['numero_versao']}-{base}-{date.today().isoformat()}.xlsx"
+        return send_file(
+            io.BytesIO(xlsx_bytes),
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True, download_name=nome_arquivo,
+        )
 
     @app.delete("/api/cronograma/versoes/<id>")
     def cronograma_excluir_versao(id):

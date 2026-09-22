@@ -1520,7 +1520,8 @@
         instante em que você gerá-la. Editar datas, criar ou excluir atividades no dia a dia <strong>nunca</strong>
         gera versão sozinho — isso só acontece quando você clica em "Gerar versão agora". Logo depois de gerar, a
         versão nova e os dados ao vivo são idênticos; com o tempo, conforme o cronograma real muda, eles podem
-        divergir — e a versão fica preservada como estava.</p>
+        divergir — e a versão fica preservada como estava. Use "📊 Comparar" numa versão pra baixar uma planilha
+        confrontando ela com o cronograma atual — atividades novas em azul claro, campos que mudaram em amarelo.</p>
       <div class="field full" style="display:flex;gap:8px;align-items:flex-end;margin-bottom:18px;">
         <div style="flex:1;">
           <label>Rótulo (opcional)</label>
@@ -4547,11 +4548,21 @@ async function carregarListaVersoes(){
       <td class="mono">${v.total_marcos}</td>
       <td style="white-space:nowrap;">
         <button class="btn secondary small" data-ver="${v.id}">Ver</button>
+        <button class="btn secondary small" style="margin-left:6px;" data-comparar-versao="${v.id}" title="Gera uma planilha comparando esta versão com o cronograma atual">📊 Comparar</button>
         <button class="btn danger small" style="margin-left:6px;" data-excluir-versao="${v.id}" title="Excluir esta versão">🗑</button>
       </td>
     </tr>`).join("");
   $("vc-lista-tbody").querySelectorAll("button[data-ver]").forEach(btn=>{
     btn.addEventListener("click", ()=>abrirVersaoDetalhe(btn.dataset.ver));
+  });
+  // Comparação com o cronograma atual (46ª rodada) — mesmo padrão de
+  // download do botão "Exportar Cronograma" (window.open, sem fetch/blob):
+  // o backend já devolve o .xlsx pronto via Content-Disposition.
+  $("vc-lista-tbody").querySelectorAll("button[data-comparar-versao]").forEach(btn=>{
+    btn.addEventListener("click", (e)=>{
+      e.stopPropagation();
+      window.open(`${API}/cronograma/versoes/${btn.dataset.compararVersao}/comparar`, "_blank");
+    });
   });
   $("vc-lista-tbody").querySelectorAll("button[data-excluir-versao]").forEach(btn=>{
     btn.addEventListener("click", (e)=>{
