@@ -1799,7 +1799,15 @@ def create_app():
 
     @app.post("/api/ciclos-migracao")
     def create_ciclo():
-        return jsonify(insert_row("ciclos_migracao", request.get_json(force=True), CICLO_FIELDS)), 201
+        payload = request.get_json(force=True)
+        # Rejeitados = Extraídos - Carregados, calculado automaticamente (nunca
+        # digitado): recalcula aqui em vez de confiar no que a tela mandou, pra
+        # garantir a mesma regra mesmo numa chamada direta à API.
+        extraidos = payload.get("qtd_registros_extraidos")
+        carregados = payload.get("qtd_registros_carregados")
+        if extraidos is not None and carregados is not None:
+            payload["qtd_rejeicoes"] = max(0, int(extraidos) - int(carregados))
+        return jsonify(insert_row("ciclos_migracao", payload, CICLO_FIELDS)), 201
 
     @app.delete("/api/ciclos-migracao/<id>")
     def delete_ciclo(id):

@@ -1435,7 +1435,7 @@
           <div class="field" style="margin:0;"><label>Data</label><input id="mig-ciclo-data" type="date"></div>
           <div class="field" style="margin:0;"><label>Extraídos</label><input id="mig-ciclo-extraidos" type="number" min="0" step="1" style="width:100px;"></div>
           <div class="field" style="margin:0;"><label>Carregados</label><input id="mig-ciclo-carregados" type="number" min="0" step="1" style="width:100px;"></div>
-          <div class="field" style="margin:0;"><label>Rejeições</label><input id="mig-ciclo-rejeicoes" type="number" min="0" step="1" style="width:100px;"></div>
+          <div class="field" style="margin:0;"><label>Rejeições (calculado)</label><input id="mig-ciclo-rejeicoes" type="number" min="0" step="1" style="width:100px;" readonly tabindex="-1"></div>
           <button class="btn secondary small" id="mig-ciclo-add">+ Registrar ciclo</button>
         </div>
       </div>
@@ -3670,24 +3670,24 @@ function renderItensMigracao(){
   const concluidos = ITENS_MIGRACAO.filter(m=>m.status==="Concluído").length;
   const totalEstimado = ITENS_MIGRACAO.reduce((s,m)=>s+(Number(m.qtd_registros_estimada)||0), 0);
   const totalCarregado = ITENS_MIGRACAO.reduce((s,m)=>s+(Number(m.qtd_registros_carregados)||0), 0);
-  const pctGlobal = totalEstimado>0 ? Math.round(100*totalCarregado/totalEstimado) : null;
+  const pctGlobal = totalEstimado>0 ? Math.round(100*totalCarregado/totalEstimado*100)/100 : null;
   $("mig-kpis").innerHTML = [
     {l:"Itens cadastrados", v:totalItens},
     {l:"Concluídos", v:concluidos},
     {l:"Bloqueados", v:ITENS_MIGRACAO.filter(m=>m.status==="Bloqueado").length},
     {l:"Registros a migrar (meta)", v:totalEstimado.toLocaleString('pt-BR')},
     {l:"Registros carregados", v:totalCarregado.toLocaleString('pt-BR')},
-    {l:"% carregado (global)", v: pctGlobal===null ? "—" : pctGlobal+"%"},
+    {l:"% carregado (global)", v: pctGlobal===null ? "—" : pctGlobal.toFixed(2)+"%"},
   ].map(k=>`<div class="kpi"><div class="label">${k.l}</div><div class="value">${k.v}</div></div>`).join("");
 
   $("migracao-tbody").innerHTML = list.length ? list.map(m=>{
-    const pct = m.qtd_registros_estimada ? Math.round(100*(m.qtd_registros_carregados||0)/m.qtd_registros_estimada) : null;
+    const pct = m.qtd_registros_estimada ? Math.round(100*(m.qtd_registros_carregados||0)/m.qtd_registros_estimada*100)/100 : null;
     return `<tr class="clickable" data-id="${m.id}">
       <td>${esc(m.nome_tabela_legado)}${m.sistema_origem?`<div class="muted">${esc(m.sistema_origem)}</div>`:""}</td>
       <td>${esc(m.nome_tabela_destino||"—")}${m.atividade_nome?`<div class="muted">${m.atividade_codigo?esc(m.atividade_codigo)+" — ":""}${esc(m.atividade_nome)}</div>`:""}</td>
       <td class="mono">${m.qtd_registros_estimada!=null ? Number(m.qtd_registros_estimada).toLocaleString('pt-BR') : "—"}</td>
       <td class="mono">${Number(m.qtd_registros_carregados||0).toLocaleString('pt-BR')}</td>
-      <td>${pct===null ? "—" : pct+"%"}</td>
+      <td>${pct===null ? "—" : pct.toFixed(2)+"%"}</td>
       <td class="mono">${m.qtd_ciclos||0}</td>
       <td>${pill(m.status, STATUS_MIGRACAO_COLOR[m.status]||"faint")}</td>
       <td>${esc(m.responsavel_nome||"—")}</td>
@@ -3713,6 +3713,18 @@ function wireItemMigracaoModal(){
   $("mig-save").addEventListener("click", saveItemMigracao);
   $("mig-delete").addEventListener("click", deleteItemMigracao);
   $("mig-ciclo-add").addEventListener("click", addCicloMigracao);
+  // Rejeições = Extraídos - Carregados, recalculado a cada digitação (campo
+  // somente-leitura — nunca digitado diretamente, pra não ficar inconsistente
+  // com os outros dois números).
+  ["mig-ciclo-extraidos","mig-ciclo-carregados"].forEach(id=>{
+    $(id).addEventListener("input", atualizarRejeicoesCiclo);
+  });
+}
+
+function atualizarRejeicoesCiclo(){
+  const extraidos = $("mig-ciclo-extraidos").value === "" ? null : Number($("mig-ciclo-extraidos").value);
+  const carregados = $("mig-ciclo-carregados").value === "" ? null : Number($("mig-ciclo-carregados").value);
+  $("mig-ciclo-rejeicoes").value = (extraidos===null || carregados===null) ? "" : Math.max(0, extraidos - carregados);
 }
 
 function openItemMigracaoModal(m){
@@ -3800,13 +3812,18 @@ async function renderCiclosMigracaoModal(itemId){
 
 async function addCicloMigracao(){
   if(!editingItemMigracaoId){ toast("Salve o item primeiro.", true); return; }
+  const extraidos = $("mig-ciclo-extraidos").value === "" ? null : Number($("mig-ciclo-extraidos").value);
+  const carregados = $("mig-ciclo-carregados").value === "" ? null : Number($("mig-ciclo-carregados").value);
   const data = {
     item_migracao_id: editingItemMigracaoId,
     numero_ciclo: Number($("mig-ciclo-numero").value || 0),
     data_execucao: $("mig-ciclo-data").value || null,
-    qtd_registros_extraidos: $("mig-ciclo-extraidos").value === "" ? null : Number($("mig-ciclo-extraidos").value),
-    qtd_registros_carregados: $("mig-ciclo-carregados").value === "" ? null : Number($("mig-ciclo-carregados").value),
-    qtd_rejeicoes: $("mig-ciclo-rejeicoes").value === "" ? null : Number($("mig-ciclo-rejeicoes").value),
+    qtd_registros_extraidos: extraidos,
+    qtd_registros_carregados: carregados,
+    // Rejeições nunca vem do input (é readonly) — sempre recalculado aqui a
+    // partir de Extraídos/Carregados; o backend também recalcula, então isto
+    // é só pra não mandar null quando dá pra calcular.
+    qtd_rejeicoes: (extraidos===null || carregados===null) ? null : Math.max(0, extraidos - carregados),
   };
   if(!data.numero_ciclo || !data.data_execucao){ toast("Informe o número do ciclo e a data de execução.", true); return; }
   try{
