@@ -1363,10 +1363,7 @@
     </div>
 
     <div class="modal-foot">
-      <div style="display:flex;gap:8px;">
-        <button class="btn danger" id="at-delete" style="visibility:hidden;">Excluir atividade</button>
-        <button class="btn secondary" id="at-duplicar" style="visibility:hidden;" title="Cria uma cópia completa desta atividade: dados, recursos alocados e as mesmas predecessoras.">⧉ Duplicar atividade</button>
-      </div>
+      <button class="btn danger" id="at-delete" style="visibility:hidden;">Excluir atividade</button>
       <div style="display:flex;gap:8px;"><button class="btn secondary" id="at-cancel">Cancelar</button><button class="btn" id="at-save">Salvar</button></div>
     </div>
   </div>
@@ -3307,7 +3304,11 @@ const CONFIANCA_PREVISAO_TITULO = {
 // de verdade (conclusões, % executado, bloqueios propagados pelas dependências).
 function renderAtividadesMaster(){
   api(`/relatorios/atividades-master?projeto_id=${PROJETO.id}`).then(res=>{
-    const lista = res.atividades_master || [];
+    // Ordenado por Fim Previsto (Plano) crescente, pra exibir as atividades
+    // master em ordem cronológica (pedido do usuário). Quem não tem
+    // fim_previsto_no_plano cadastrado vai pro final da lista.
+    const lista = (res.atividades_master || []).slice()
+      .sort((a,b)=>(a.fim_previsto_no_plano||"9999-12-31").localeCompare(b.fim_previsto_no_plano||"9999-12-31"));
     $("dash-master-vazio").textContent = DASH_MASTER_VAZIO_PADRAO;
     $("dash-master-vazio").hidden = lista.length > 0;
     $("dash-master-tabela-wrap").hidden = lista.length === 0;
@@ -4482,19 +4483,6 @@ function wireAtividadeModal(){
       toast("Atividade excluída.");
     });
   });
-  // Duplicar: cria uma cópia completa (dados, recursos alocados e as mesmas
-  // predecessoras — ver docstring de duplicar_atividade em main.py) e já abre
-  // a cópia pra edição, pra o usuário fazer os ajustes na sequência (código
-  // WBS, datas, nome sem o "(cópia)", etc.) sem precisar caçá-la na lista.
-  $("at-duplicar").addEventListener("click", async ()=>{
-    const idOriginal = editingAtividadeId;
-    try{
-      const nova = await api(`/atividades/${idOriginal}/duplicar`, {method:"POST"});
-      await loadAtividades(); renderCronograma(); renderDashboard();
-      openAtividadeModal(byId(ATIVIDADES, nova.id) || nova);
-      toast("Atividade duplicada — ajuste o que for preciso na cópia.");
-    }catch(e){}
-  });
   $("at-resp-add").addEventListener("click", async ()=>{
     const recurso_id = $("at-resp-add-select").value; if(!recurso_id) return;
     const horas_alocadas = $("at-resp-add-horas").value ? Number($("at-resp-add-horas").value) : null;
@@ -4555,7 +4543,6 @@ function openAtividadeModal(atividade){
   editingAtividadeId = atividade ? atividade.id : null;
   $("at-modal-title").textContent = atividade ? "Editar atividade" : "Nova atividade";
   $("at-delete").style.visibility = atividade ? "visible" : "hidden";
-  $("at-duplicar").style.visibility = atividade ? "visible" : "hidden";
   $("at-codigo").value = atividade?.codigo_wbs || "";
   $("at-nome").value = atividade?.nome || "";
   $("at-descricao").value = atividade?.descricao || "";
