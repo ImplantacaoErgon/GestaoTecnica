@@ -879,13 +879,45 @@
     </div>
   </section>
 
-  <!-- ============ COMPARAÇÃO FOLHA (54ª rodada — em construção) ============ -->
+  <!-- ============ COMPARAÇÃO FOLHA (55ª rodada) ============
+       Resultado (já calculado na planilha do cliente) da comparação entre o
+       valor de cada rubrica no Ergon e na ficha financeira do sistema legado
+       — ~300 mil linhas por competência, então, diferente de Rubricas, é só
+       consulta (sem CRUD manual por linha) com paginação/filtro no servidor,
+       igual em espírito à aba Log de Auditoria (ver CF_* / cf* abaixo e
+       AUD_*/aud* como referência). Ver app/comparacao_folha.py (leitura) e
+       app/comparacao_folha_import.py (a carga em si, via Google Drive). -->
   <section class="view" id="view-comparacao-folha">
     <h2 class="view-title">⚖️ Comparação Folha</h2>
-    <div class="view-sub">Comparação entre o cálculo da folha no Ergon e a ficha financeira do sistema legado, por rubrica.</div>
-    <div class="card" style="max-width:640px;">
-      <p>Esta aba ainda está em construção — falta receber um modelo da planilha de comparação (cálculo da folha × ficha financeira do legado) para desenhar a tabela e os filtros certos.</p>
-      <p class="muted" style="font-size:12.5px;">Assim que o modelo chegar, esta tela passa a mostrar a comparação de verdade — valor calculado no Ergon x valor da ficha financeira do legado, por servidor e por rubrica, destacando as diferenças.</p>
+    <div class="view-sub">Comparação (já calculada) entre o valor de cada rubrica no Ergon e na ficha financeira do sistema legado, por servidor/vínculo/rubrica/competência.</div>
+    <div class="card" style="margin-bottom:14px;">
+      <div class="kpis" id="cf-kpis"></div>
+    </div>
+    <div class="filters">
+      <select id="cf-f-mesano"><option value="">Competência (todas)</option></select>
+      <select id="cf-f-situacao"><option value="">Situação (todas)</option></select>
+      <select id="cf-f-tiporubr"><option value="">Tipo de rubrica (todos)</option></select>
+      <input type="text" id="cf-f-busca" placeholder="Buscar por matrícula, nome, CPF, rubrica…">
+      <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;white-space:nowrap;">
+        <input type="checkbox" id="cf-f-divergentes"> Só divergentes
+      </label>
+      <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn secondary small" id="cf-exportar">⭳ Exportar CSV</button>
+        <button class="btn secondary small" id="btn-atualizar-comparacao" title="Busca automaticamente, no Google Drive, o arquivo mais recente de Comparação Folha">🔄 Atualizar Comparação</button>
+      </div>
+    </div>
+    <div class="muted" id="cf-status" style="font-size:12px;margin-bottom:8px;"></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Situação</th><th>Matrícula</th><th>Nome</th><th>Competência</th>
+          <th>Rubrica Ergon</th><th>Verba legado</th><th>Valor Ergon</th><th>Valor legado</th><th>Diferença</th>
+        </tr></thead>
+        <tbody id="cf-tbody"></tbody>
+      </table>
+    </div>
+    <div style="display:flex;justify-content:center;margin-top:14px;">
+      <button class="btn small ghost" id="cf-carregar-mais" hidden>Carregar mais</button>
     </div>
   </section>
 
@@ -1601,6 +1633,18 @@
         <button class="btn" id="rubimp-confirmar" hidden>Confirmar importação</button>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- ================= MODAL: DETALHE COMPARAÇÃO FOLHA (55ª rodada) =================
+     Só leitura (confirmado com o usuário) — a linha da planilha tem ~65
+     colunas, a tabela da tela só mostra as ~9 mais úteis (ver cfLinhaHtml);
+     este modal mostra o resto ao clicar numa linha, sem chamada nova ao
+     servidor (usa o registro já carregado, guardado em CF_ITENS_MAP). -->
+<div class="overlay" id="overlay-cf-detalhe" hidden>
+  <div class="modal wide">
+    <div class="modal-head"><h2>Detalhe da comparação</h2><button class="btn ghost" id="cf-detalhe-close">✕</button></div>
+    <div class="modal-body single-col" id="cf-detalhe-corpo"></div>
   </div>
 </div>
 
@@ -2497,7 +2541,7 @@ async function afterProjetoReady(){
   aplicarMarcaNoTopo();
   fillStaticSelects();
   wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireGanttToolbar(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireExportarCronograma(); wireRemoverCronograma(); wireRemoverRequisitos(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma();
-  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros(); wireRubricaModal(); wireRubricasFiltros(); wireImportRubricas();
+  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros(); wireRubricaModal(); wireRubricasFiltros(); wireImportRubricas(); wireComparacaoFolhaPane();
   setupCsvTemplateLink();
   await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias(), loadItensMigracao(), loadRubricas()]);
   // Reaplica agora que REQUISITOS/ATIVIDADES já estão carregados — os selects
@@ -2845,6 +2889,7 @@ function goToView(view){
   if(view==="critico") loadCaminhoCritico();
   if(view==="minhas-atividades") carregarMinhasAtividades();
   if(view==="analisar-requisitos") renderAnalisarRequisitos();
+  if(view==="comparacao-folha") renderComparacaoFolhaPane();
   if(view==="calendario" || view==="manuais"){
     // Nenhum botão/gatilho de #cfg-tabs corresponde a "calendario"/"manuais"
     // (foram retirados de lá nesta rodada) — destacarCfgTabs() (chamada por
@@ -6937,6 +6982,216 @@ async function audRenderHistoricoRegistro(containerId, entidade, entidadeId){
         <td>${esc(l.descricao)}</td>
       </tr>`).join("")
   }</tbody></table></div>`;
+}
+
+// ================= COMPARAÇÃO FOLHA (55ª rodada) =================
+// Padrão copiado de AUD_*/aud* (log de auditoria) acima — mesma razão: o
+// volume (~300 mil linhas por competência) não cabe carregar tudo de uma vez
+// no JS e filtrar no cliente, como as demais telas fazem. Paginação por
+// "Carregar mais" (acumula, não substitui) em vez de páginas numeradas —
+// mesma UX de auditoria.
+let CF_PAGINA = 1;
+let CF_TOTAL = 0;
+const CF_TAMANHO_PAGINA = 50;
+// Guarda os itens já carregados na tela (id -> linha completa, ~65 campos)
+// pra abrir o modal de detalhe sem precisar de outra chamada ao servidor —
+// a listagem já trouxe o registro inteiro, só a tabela não mostra tudo.
+let CF_ITENS_MAP = {};
+
+function cfFiltrosAtuais(){
+  return {
+    mesano: $("cf-f-mesano").value || null,
+    situacao: $("cf-f-situacao").value || null,
+    tiporubr: $("cf-f-tiporubr").value || null,
+    busca: $("cf-f-busca").value.trim() || null,
+    so_divergentes: $("cf-f-divergentes").checked,
+  };
+}
+
+function cfQueryString(extra={}){
+  const f = {projeto_id: PROJETO.id, ...cfFiltrosAtuais(), ...extra};
+  const p = new URLSearchParams();
+  Object.entries(f).forEach(([k,v])=>{ if(v!==null && v!=="" && v!==false) p.set(k, v===true?"1":v); });
+  return p.toString();
+}
+
+async function renderComparacaoFolhaPane(){
+  CF_PAGINA = 1;
+  await Promise.all([cfCarregarResumo(), cfCarregarLista(false)]);
+}
+
+async function cfCarregarResumo(){
+  let r;
+  try{ r = await api(`/comparacao-folha/resumo?${cfQueryString()}`); }
+  catch(e){ return; }
+  const itens = [
+    ["Linhas (filtro atual)", r.total],
+    ["Divergentes", r.total_divergentes],
+    ["Não divergentes", r.total - r.total_divergentes],
+    ["Diferença (Consist − Ergon)", fmtMoeda(r.soma_diferenca)],
+  ];
+  $("cf-kpis").innerHTML = itens.map(([rotulo,valor])=>`
+    <div><div style="font-size:20px;font-weight:600;">${valor}</div><div class="muted" style="font-size:11.5px;">${esc(rotulo)}</div></div>
+  `).join("");
+  // Popula os selects de competência/tipo de rubrica com o que existe de
+  // verdade nos dados do projeto (não uma lista fixa) — refeito a cada
+  // resumo pra acompanhar novas competências importadas, preservando a
+  // seleção atual do usuário.
+  const selMes = $("cf-f-mesano"), selTipo = $("cf-f-tiporubr");
+  const mesAtual = selMes.value, tipoAtual = selTipo.value;
+  selMes.innerHTML = `<option value="">Competência (todas)</option>` +
+    (r.meses_disponiveis||[]).map(m=>`<option value="${m}">${m}</option>`).join("");
+  selMes.value = mesAtual;
+  selTipo.innerHTML = `<option value="">Tipo de rubrica (todos)</option>` +
+    (r.tipos_rubrica_disponiveis||[]).map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join("");
+  selTipo.value = tipoAtual;
+  if(!$("cf-f-situacao").dataset.montado || $("cf-f-situacao").dataset.montado !== JSON.stringify((r.por_situacao||[]).map(s=>s.situacao))){
+    const situacaoAtual = $("cf-f-situacao").value;
+    const situacoes = (r.por_situacao||[]).map(s=>s.situacao).filter(Boolean);
+    $("cf-f-situacao").innerHTML = `<option value="">Situação (todas)</option>` +
+      situacoes.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join("");
+    $("cf-f-situacao").value = situacaoAtual;
+    $("cf-f-situacao").dataset.montado = JSON.stringify(situacoes);
+  }
+}
+
+async function cfCarregarLista(acumular){
+  let r;
+  $("cf-status").textContent = "Carregando…";
+  try{ r = await api(`/comparacao-folha?${cfQueryString({pagina:CF_PAGINA, tamanho_pagina:CF_TAMANHO_PAGINA})}`); }
+  catch(e){ $("cf-status").textContent = ""; return; }
+  CF_TOTAL = r.total;
+  if(!acumular) CF_ITENS_MAP = {};
+  r.itens.forEach(it=>{ CF_ITENS_MAP[it.id] = it; });
+  const linhasHtml = r.itens.map(cfLinhaHtml).join("");
+  $("cf-tbody").innerHTML = (acumular ? $("cf-tbody").innerHTML : "") + (linhasHtml || (acumular ? "" : `<tr class="empty-row"><td colspan="9">Nenhuma linha encontrada com estes filtros.</td></tr>`));
+  const carregados = $("cf-tbody").querySelectorAll("tr[data-id]").length;
+  $("cf-carregar-mais").hidden = carregados >= CF_TOTAL;
+  $("cf-status").textContent = CF_TOTAL
+    ? `${carregados} de ${CF_TOTAL.toLocaleString('pt-BR')} linha(s) carregada(s).`
+    : "";
+}
+
+function cfLinhaHtml(l){
+  const divergente = l.situacao && l.situacao.toUpperCase() !== "NÃO DIVERGENTE";
+  return `
+    <tr data-id="${l.id}" style="cursor:pointer;" onclick="abrirDetalheComparacaoFolha('${l.id}')">
+      <td>${divergente ? pill(l.situacao||"—","warn") : pill(l.situacao||"—","ok")}</td>
+      <td>${esc(l.matricula||"—")}</td>
+      <td>${esc(l.nome||"—")}</td>
+      <td>${l.mesano ? fmtDate(l.mesano) : "—"}</td>
+      <td>${esc(l.rubrica_ergon||"—")} ${l.rubrica_nome_ergon?`<span class="muted">— ${esc(l.rubrica_nome_ergon)}</span>`:""}</td>
+      <td>${esc(l.verba_consist||"—")}</td>
+      <td>${fmtMoeda(l.valor_ergon)}</td>
+      <td>${fmtMoeda(l.valor_consist)}</td>
+      <td>${fmtMoeda(l.dif_consist_ergon)}</td>
+    </tr>`;
+}
+
+// Rótulo amigável pros campos do modal de detalhe — só os que não são
+// autoexplicativos (os demais caem no fallback: o próprio nome da coluna,
+// ver cfCampoRotulo). Não precisa cobrir os campos já mostrados na tabela
+// (nome, matrícula, competência, rubrica, valores) — cobre o resto das ~65.
+const CF_CAMPO_ROTULOS = {
+  tipo_comparacao: "Tipo de comparação", prontuario: "Prontuário", empresa_consist: "Empresa (Consist)",
+  categoria_consist: "Categoria (Consist)", emp_codigo: "Código da empresa", cpf: "CPF",
+  numfunc: "Nº funcional", numvinc: "Nº vínculo", numpens: "Nº pensão", dtexerc: "Data de exercício",
+  dtaposent: "Data de aposentadoria", tipoapos: "Tipo de aposentadoria", dtvac: "Data de vacância",
+  modalidade: "Modalidade", tipopens: "Tipo de pensão", percentual: "Percentual", tipovinc: "Tipo de vínculo",
+  regimejur: "Regime jurídico", categoria: "Categoria", numvincant: "Nº vínculo anterior",
+  numvincpos: "Nº vínculo posterior", orgao: "Órgão", setorfunc: "Setor funcional", cargo: "Cargo",
+  nome_cargo: "Nome do cargo", referencia: "Referência", tabvenccargo: "Tabela vencimento (cargo)",
+  funcao: "Função", nome_funcao: "Nome da função", referencia_desig: "Referência (designação)",
+  tabvencfuncao: "Tabela vencimento (função)", grupo: "Grupo", folha: "Folha", convenio: "Convênio",
+  nomeabrev_consist: "Nome abreviado (Consist)", conta_consist: "Conta (Consist)", nome_abrev: "Nome abreviado (Ergon)",
+  conta_ergon: "Conta (Ergon)", vantagem: "Vantagem/Desconto", obs_evento: "Obs. evento",
+  obs_atributo: "Obs. atributo", tiporubr: "Tipo de rubrica", class_rubrica: "Classificação da rubrica",
+  data_convergencia: "Data de convergência", fato_origem: "Fato de origem", complemento: "Complemento",
+  cod_calc: "Código de cálculo", cod_lotacao_1: "Código de lotação", tipoarq: "Tipo de arquivo",
+  jornada: "Jornada", afastamento: "Afastamento", dtini_afast: "Início do afastamento",
+  dtfim_afast: "Fim do afastamento", obs: "Observações", data_hora_convergencia: "Data/hora de convergência",
+};
+const CF_CAMPOS_DATA = new Set(["dtexerc","dtaposent","dtvac","data_convergencia","dtini_afast","dtfim_afast"]);
+// Campos já visíveis na linha da tabela — não repetidos no corpo do modal.
+const CF_CAMPOS_JA_VISIVEIS = new Set(["id","projeto_id","criado_em","situacao","matricula","nome","mesano","rubrica_ergon","rubrica_nome_ergon","verba_consist","valor_ergon","valor_consist","dif_consist_ergon"]);
+
+function abrirDetalheComparacaoFolha(id){
+  const l = CF_ITENS_MAP[id];
+  if(!l) return;
+  const linhas = Object.keys(CF_CAMPO_ROTULOS)
+    .concat(Object.keys(l).filter(k=>!CF_CAMPOS_JA_VISIVEIS.has(k) && !CF_CAMPO_ROTULOS[k]))
+    .filter(k=>!CF_CAMPOS_JA_VISIVEIS.has(k))
+    .map(campo=>{
+      let valor = l[campo];
+      if(valor==null || valor==="") valor = "—";
+      else if(campo === "data_hora_convergencia") valor = fmtDateTime(valor);
+      else if(CF_CAMPOS_DATA.has(campo)) valor = fmtDate(valor);
+      else if(campo === "percentual") valor = valor;
+      const rotulo = CF_CAMPO_ROTULOS[campo] || campo;
+      return `<div><div class="muted" style="font-size:11px;">${esc(rotulo)}</div><div>${esc(valor)}</div></div>`;
+    }).join("");
+  $("cf-detalhe-corpo").innerHTML = `
+    <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
+      ${pill(l.situacao||"—", l.situacao && l.situacao.toUpperCase()!=="NÃO DIVERGENTE" ? "warn" : "ok")}
+      <span class="muted" style="font-size:12.5px;">${esc(l.matricula||"—")} — ${esc(l.nome||"—")} — competência ${l.mesano?fmtDate(l.mesano):"—"}</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;font-size:13px;">
+      ${linhas}
+    </div>`;
+  $("overlay-cf-detalhe").hidden = false;
+}
+
+function wireComparacaoFolhaPane(){
+  ["cf-f-mesano","cf-f-situacao","cf-f-tiporubr","cf-f-divergentes"].forEach(id=>{
+    $(id).addEventListener("change", ()=>{ CF_PAGINA = 1; cfCarregarResumo(); cfCarregarLista(false); });
+  });
+  let cfBuscaTimer = null;
+  $("cf-f-busca").addEventListener("input", ()=>{
+    clearTimeout(cfBuscaTimer);
+    cfBuscaTimer = setTimeout(()=>{ CF_PAGINA = 1; cfCarregarLista(false); }, 350);
+  });
+  $("cf-carregar-mais").addEventListener("click", ()=>{ CF_PAGINA += 1; cfCarregarLista(true); });
+  $("cf-exportar").addEventListener("click", ()=>{
+    window.open(`${API}/comparacao-folha/export?${cfQueryString()}`, "_blank");
+  });
+  $("cf-detalhe-close").addEventListener("click", ()=>{ $("overlay-cf-detalhe").hidden = true; });
+  $("overlay-cf-detalhe").addEventListener("click", e=>{ if(e.target.id==="overlay-cf-detalhe") $("overlay-cf-detalhe").hidden = true; });
+  $("btn-atualizar-comparacao").addEventListener("click", atualizarComparacaoFolhaDrive);
+}
+
+// Botão "🔄 Atualizar Comparação": busca o arquivo mais recente na pasta do
+// Google Drive configurada (ver app/drive_comparacao_folha.py) e já grava —
+// diferente de "Atualizar Rubricas", não existe uma tela de prévia aqui (o
+// arquivo é grande demais — até ~300 mil linhas — pra renderizar uma prévia
+// linha a linha no navegador; confirmado com o usuário). Por isso, e porque
+// a ação SUBSTITUI as linhas da competência detectada, pede confirmação
+// explícita antes, no mesmo padrão de outras ações destrutivas do sistema
+// (ex: excluir rubrica/item de migração).
+async function atualizarComparacaoFolhaDrive(){
+  if(!confirm(
+    "Buscar o arquivo mais recente de Comparação Folha no Google Drive e importar?\n\n" +
+    "Isso SUBSTITUI as linhas já importadas da competência detectada no arquivo " +
+    "(as demais competências não são afetadas). Pode demorar alguns minutos " +
+    "(arquivo grande, até ~300 mil linhas)."
+  )) return;
+  const btn = $("btn-atualizar-comparacao");
+  btn.disabled = true; const textoOriginal = btn.textContent; btn.textContent = "Importando… (pode demorar)";
+  try{
+    const r = await api("/comparacao-folha/importar/drive", {
+      method: "POST",
+      body: JSON.stringify({ projeto_id: PROJETO.id }),
+    });
+    const avisos = (r.avisos||[]).length ? " " + r.avisos.join(" ") : "";
+    toast(`Comparação Folha atualizada: competência ${fmtDate(r.mesano)}, ${r.total_linhas.toLocaleString('pt-BR')} linha(s).${avisos}`);
+    // Volta a competência recém-importada pro topo do filtro de mês, sem
+    // forçar o filtro (o usuário pode querer continuar vendo "todas").
+    await renderComparacaoFolhaPane();
+  }catch(e){
+    // api() já mostra um toast com o erro específico (ex: pasta do Drive não
+    // configurada, ou arquivo sem coluna MESANO reconhecível).
+  }finally{
+    btn.disabled = false; btn.textContent = textoOriginal;
+  }
 }
 
 // ================= Documentação (Documento Executivo / Documento Técnico) =================

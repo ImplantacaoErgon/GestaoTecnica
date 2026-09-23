@@ -15,6 +15,7 @@ main.py precisaria mudar, só esta função `_run` e as duas de wrap/parse.
 import json
 import os
 import subprocess
+import threading
 
 PGHOST = os.environ.get("PGHOST", "localhost")
 PGPORT = os.environ.get("PGPORT", "5432")
@@ -101,3 +102,75 @@ def execute_returning_one(sql_body: str, prelude: str = ""):
 
 def execute(sql_body: str, timeout: int = 60) -> None:
     _run(sql_body + ";", timeout=timeout)
+
+
+def execute_stream(sql_prefix: str, linhas, sql_suffix: str, timeout: int = 600) -> None:
+    """Como execute(), mas pra scripts GRANDES (55ª rodada — carga da
+    Comparação Folha, ~300 mil linhas por importação): em vez de montar o
+    script inteiro como uma string só na memória e mandar tudo de uma vez
+    (o que pra 300 mil linhas x 65 colunas passa de 100MB), escreve
+    `sql_prefix`, depois cada item de `linhas` (um iterável/gerador — cada
+    item já deve terminar com "\\n", tipicamente uma linha de dados de um
+    `COPY ... FROM STDIN`), depois `sql_suffix`, incrementalmente no stdin
+    do psql. `linhas` nunca precisa virar uma lista/string única na memória
+    do processo Python — só o valor de cada linha por vez.
+
+    stdout/stderr são drenados numa thread separada ENQUANTO ainda se
+    escreve no stdin — necessário pra scripts grandes: se o psql produzir
+    saída (ex: avisos, ou o "COPY N" de cada comando) enquanto o buffer do
+    pipe de stdin ainda não foi todo consumido, escrever tudo de uma vez
+    sem drenar a saída em paralelo pode travar os dois lados esperando um
+    pelo outro (deadlock clássico de pipe cheio)."""
+    env = dict(os.environ)
+    env["PGPASSWORD"] = PGPASSWORD
+    try:
+        proc = subprocess.Popen(
+            ["psql", "-h", PGHOST, "-p", str(PGPORT), "-U", PGUSER, "-d", PGDATABASE,
+             "-tAX", "--no-psqlrc", "-v", "ON_ERROR_STOP=1"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, env=env,
+        )
+    except FileNotFoundError as e:
+        raise DbError(f"psql não encontrado: {e}")
+
+    saida = {}
+
+    def _drenar(nome, fh):
+        saida[nome] = fh.read()
+
+    t_out = threading.Thread(target=_drenar, args=("stdout", proc.stdout))
+    t_err = threading.Thread(target=_drenar, args=("stderr", proc.stderr))
+    t_out.start()
+    t_err.start()
+
+    erro_escrita = None
+    try:
+        proc.stdin.write(sql_prefix)
+        for linha in linhas:
+            proc.stdin.write(linha)
+        proc.stdin.write(sql_suffix)
+    except (BrokenPipeError, OSError) as e:
+        # psql pode ter morrido no meio (ex: erro de SQL com ON_ERROR_STOP=1)
+        # antes de terminarmos de escrever — guarda o erro real de stderr,
+        # não a quebra do pipe em si, que por si só não explica nada ao usuário.
+        erro_escrita = e
+    finally:
+        try:
+            proc.stdin.close()
+        except (BrokenPipeError, OSError):
+            pass
+
+    try:
+        returncode = proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        raise DbError(f"Tempo esgotado ({timeout}s) executando o script no banco.")
+    t_out.join(timeout=5)
+    t_err.join(timeout=5)
+
+    if returncode != 0:
+        detalhe = (saida.get("stderr") or "").strip()
+        if not detalhe and erro_escrita:
+            detalhe = str(erro_escrita)
+        raise DbError(detalhe or "erro desconhecido ao executar script em streaming")

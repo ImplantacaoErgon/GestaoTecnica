@@ -30,10 +30,21 @@ ENV FRONTEND_DIR=/frontend
 RUN mkdir -p /app/uploads
 
 EXPOSE 8000
-# --timeout 240: margem extra para a importação de cronograma em lotes
-# (app/cronograma_import.py) — cada lote já é rápido (uma única conexão por
-# lote, não uma por linha), mas contra um Postgres remoto lento/congestionado
-# é melhor sobrar tempo do que o worker matar a requisição no meio da carga.
+# --timeout 900: bumped na 55ª rodada por causa da importação de Comparação
+# Folha (app/comparacao_folha_import.py) — ~300 mil linhas por arquivo,
+# ~130MB, importadas via COPY em streaming. Medido em teste de escala local
+# (100 mil linhas reais, duplicadas com sufixo único): ~50s e ~76MB de pico
+# de memória Python, o que extrapola (linear) pra ~150-160s pra 300 mil
+# linhas — mas isso foi medido num Postgres local, sem a etapa de download
+# do arquivo do Google Drive nem a latência de um Postgres remoto (Render).
+# 900s dá margem generosa pra tudo isso (download + import) mesmo num
+# cenário bem mais lento que o medido, sem deixar o worker do gunicorn matar
+# a requisição no meio da carga — mesma razão que já justificava o valor
+# anterior (240s) pra importação de cronograma em lotes
+# (app/cronograma_import.py), só que agora pra uma carga bem mais pesada.
+# O timeout interno da própria carga (db.execute_stream /
+# importar_comparacao_folha) já usa os mesmos 900s como padrão — os dois
+# devem ficar alinhados.
 #
 # 0.0.0.0:${PORT:-8000} (em vez de 8000 fixo): plataformas como o Render
 # escolhem a porta e a informam pela variável de ambiente PORT (normalmente
@@ -41,4 +52,4 @@ EXPOSE 8000
 # não é definida, então cai no padrão 8000, que é o que o compose já expõe.
 # Forma "shell" do CMD (sem colchetes) porque só ela expande variáveis de
 # ambiente; com a forma "exec" ("${PORT}" ficaria literal).
-CMD gunicorn -w 4 -b 0.0.0.0:${PORT:-8000} --timeout 240 run:app
+CMD gunicorn -w 4 -b 0.0.0.0:${PORT:-8000} --timeout 900 run:app

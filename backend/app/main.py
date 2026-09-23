@@ -8,7 +8,7 @@ from datetime import datetime, date, timedelta
 
 from flask import Flask, request, jsonify, send_from_directory, send_file, abort, session
 
-from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_export, cronograma_comparacao, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, drive_rubricas
+from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_export, cronograma_comparacao, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, drive_rubricas, comparacao_folha, comparacao_folha_import, drive_comparacao_folha
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 FRONTEND_DIR = os.environ.get(
@@ -2116,6 +2116,98 @@ def create_app():
             return jsonify({"erro": "Nenhum item válido para importar."}), 400
         inseridos, atualizados = upsert_rubricas(projeto_id, linhas)
         return jsonify({"inseridos": inseridos, "atualizados": atualizados})
+
+    # ------------------------------------------------------------- comparação folha
+    # 55ª rodada: aba "Comparação Folha" (dentro de Folha de Pagamento, junto
+    # de Rubricas) — resultado já calculado (pelo cliente) da comparação
+    # entre o valor de cada rubrica no Ergon e na ficha financeira do sistema
+    # legado. Diferente de Rubricas: só consulta (sem CRUD manual por linha,
+    # sem prévia com checkbox) — confirmado com o usuário, dado o volume
+    # (~300 mil linhas por arquivo). Ver app/comparacao_folha_import.py (a
+    # carga em si, via streaming/COPY) e app/comparacao_folha.py (leitura
+    # paginada/filtrada usada pelas rotas abaixo).
+    def _filtros_comparacao_folha():
+        return {
+            "mesano": request.args.get("mesano") or None,
+            "situacao": request.args.get("situacao") or None,
+            "tipo_comparacao": request.args.get("tipo_comparacao") or None,
+            "tiporubr": request.args.get("tiporubr") or None,
+            "busca": request.args.get("busca") or None,
+            "so_divergentes": request.args.get("so_divergentes") == "1",
+        }
+
+    @app.get("/api/comparacao-folha")
+    def listar_comparacao_folha():
+        pid = request.args.get("projeto_id")
+        if not pid:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        filtros = _filtros_comparacao_folha()
+        filtros["projeto_id"] = pid
+        pagina = int(request.args.get("pagina") or 1)
+        tamanho_pagina = min(int(request.args.get("tamanho_pagina") or 50), 200)
+        return jsonify({
+            "itens": comparacao_folha.listar(pagina=pagina, tamanho_pagina=tamanho_pagina, **filtros),
+            "total": comparacao_folha.contar(**filtros),
+            "pagina": pagina,
+            "tamanho_pagina": tamanho_pagina,
+        })
+
+    @app.get("/api/comparacao-folha/resumo")
+    def resumo_comparacao_folha():
+        pid = request.args.get("projeto_id")
+        if not pid:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        mesano = request.args.get("mesano") or None
+        return jsonify(comparacao_folha.resumo(projeto_id=pid, mesano=mesano))
+
+    @app.get("/api/comparacao-folha/export")
+    def exportar_comparacao_folha():
+        pid = request.args.get("projeto_id")
+        if not pid:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        filtros = _filtros_comparacao_folha()
+        filtros["projeto_id"] = pid
+        cabecalho, linhas, truncado = comparacao_folha.exportar_csv(**filtros)
+        buf = io.StringIO()
+        writer = csv.writer(buf, delimiter=";")
+        writer.writerow(cabecalho)
+        writer.writerows(linhas)
+        resp = app.response_class(buf.getvalue(), mimetype="text/csv")
+        resp.headers["Content-Disposition"] = "attachment; filename=comparacao_folha.csv"
+        if truncado:
+            resp.headers["X-Export-Truncado"] = "1"
+        return resp
+
+    @app.post("/api/comparacao-folha/importar/drive")
+    def importar_comparacao_folha_drive():
+        """Único passo (sem prévia — ver comentário no topo de
+        comparacao_folha_import.py): busca o arquivo mais recente da pasta do
+        Google Drive configurada (GOOGLE_DRIVE_COMPARACAO_FOLDER_ID) e já
+        grava, substituindo as linhas da competência detectada. Pesado (até
+        ~300 mil linhas) — pode demorar; ver timeout do gunicorn no
+        Dockerfile e o parâmetro `timeout` de importar_comparacao_folha."""
+        data = request.get_json(silent=True) or {}
+        projeto_id = data.get("projeto_id") or request.args.get("projeto_id")
+        if not projeto_id:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        try:
+            conteudo, nome_arquivo, modificado_em = drive_comparacao_folha.baixar_planilha_mais_recente()
+        except drive_comparacao_folha.DriveComparacaoFolhaError as e:
+            return jsonify({"erro": str(e)}), 502
+        try:
+            resultado = comparacao_folha_import.importar_comparacao_folha(projeto_id, conteudo)
+        except comparacao_folha_import.ComparacaoFolhaImportError as e:
+            return jsonify({"erro": str(e)}), 400
+        except Exception as e:
+            return jsonify({"erro": f"Falha ao importar a planilha: {e}"}), 400
+        resultado["arquivo_origem"] = {"nome": nome_arquivo, "modificado_em": modificado_em}
+        auditoria.registrar_evento_manual(
+            "edicao", f"Atualizou Comparação Folha — competência {resultado['mesano'][:7]} "
+            f"({resultado['total_linhas']} linhas, arquivo \"{nome_arquivo}\")",
+            entidade="comparacao_folha", entidade_rotulo=resultado["mesano"][:7],
+            projeto_id=projeto_id, sensivel=False,
+        )
+        return jsonify(resultado)
 
     # ------------------------------------------------------------------ marcos
     @app.get("/api/marcos")
