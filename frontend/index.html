@@ -499,7 +499,13 @@
       <button data-view="pendencias">🚩 Pendências</button>
       <button data-view="faturas">💵 Faturas</button>
       <button data-view="migracao">📦 Migração de Dados</button>
-      <button data-view="rubricas">🧾 Rubricas</button>
+      <div class="tab-group" data-group>
+        <button type="button" class="tab-group-trigger" data-views="rubricas,comparacao-folha">💰 Folha de Pagamento <span class="caret">▾</span></button>
+        <div class="tab-group-menu">
+          <button data-view="rubricas">🧾 Rubricas</button>
+          <button data-view="comparacao-folha">⚖️ Comparação Folha</button>
+        </div>
+      </div>
       <div class="tab-group" data-group>
         <button type="button" class="tab-group-trigger" data-views="requisitos,manuais,analisar-requisitos">Requisitos TR <span class="caret">▾</span></button>
         <div class="tab-group-menu">
@@ -870,6 +876,16 @@
         <thead><tr><th>Código ERGON</th><th>Verba legado</th><th>Nome</th><th>Grupo de cálculo</th><th>Tipo</th><th>Empresas</th><th>Status</th><th>Analista</th></tr></thead>
         <tbody id="rubricas-tbody"></tbody>
       </table>
+    </div>
+  </section>
+
+  <!-- ============ COMPARAÇÃO FOLHA (54ª rodada — em construção) ============ -->
+  <section class="view" id="view-comparacao-folha">
+    <h2 class="view-title">⚖️ Comparação Folha</h2>
+    <div class="view-sub">Comparação entre o cálculo da folha no Ergon e a ficha financeira do sistema legado, por rubrica.</div>
+    <div class="card" style="max-width:640px;">
+      <p>Esta aba ainda está em construção — falta receber um modelo da planilha de comparação (cálculo da folha × ficha financeira do legado) para desenhar a tabela e os filtros certos.</p>
+      <p class="muted" style="font-size:12.5px;">Assim que o modelo chegar, esta tela passa a mostrar a comparação de verdade — valor calculado no Ergon x valor da ficha financeira do legado, por servidor e por rubrica, destacando as diferenças.</p>
     </div>
   </section>
 
