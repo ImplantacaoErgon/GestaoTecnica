@@ -8,7 +8,7 @@ from datetime import datetime, date, timedelta
 
 from flask import Flask, request, jsonify, send_from_directory, send_file, abort, session
 
-from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_export, cronograma_comparacao, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import
+from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_export, cronograma_comparacao, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, drive_rubricas
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 FRONTEND_DIR = os.environ.get(
@@ -344,6 +344,26 @@ def upsert_rubricas(projeto_id, linhas):
     )
     db.execute(sql, timeout=120)
     return inseridos, atualizados
+
+
+def _rubricas_preview_resultado(projeto_id, conteudo_bytes, nome_arquivo):
+    """Lógica de prévia compartilhada pelos dois jeitos de importar
+    rubricas (upload manual e busca automática no Google Drive — 54ª
+    rodada): faz o parse da planilha e marca quais linhas já existem no
+    projeto, sem gravar nada no banco. Levanta rubricas_import.RubricasImportError
+    (ou outra exceção de leitura) se a planilha não for válida — quem chama
+    decide o código HTTP."""
+    resultado = rubricas_import.parse_rubricas_document(conteudo_bytes, nome_arquivo or "")
+    existentes = {
+        r["linha_planilha"] for r in db.fetch_all(
+            f"SELECT linha_planilha FROM rubricas WHERE projeto_id = {db.q(projeto_id)} "
+            "AND linha_planilha IS NOT NULL"
+        )
+    }
+    for it in resultado["itens"]:
+        it["ja_existe"] = it["linha_planilha"] in existentes
+    resultado["resumo"]["ja_existentes"] = sum(1 for it in resultado["itens"] if it["ja_existe"])
+    return resultado
 
 
 def preparar_fatura(data, projeto_id):
@@ -2041,28 +2061,44 @@ def create_app():
 
     @app.post("/api/rubricas/importar/preview")
     def importar_rubricas_preview():
-        """Recebe a planilha "Levantamento Rubricas" e devolve uma PRÉVIA —
-        não grava nada no banco. Ver app/rubricas_import.py."""
+        """Recebe a planilha "Levantamento Rubricas" (upload manual) e
+        devolve uma PRÉVIA — não grava nada no banco. Ver app/rubricas_import.py."""
         projeto_id = request.form.get("projeto_id")
         file = request.files.get("file")
         if not (projeto_id and file):
             return jsonify({"erro": "projeto_id e file são obrigatórios"}), 400
         try:
-            resultado = rubricas_import.parse_rubricas_document(file.read(), file.filename or "")
+            resultado = _rubricas_preview_resultado(projeto_id, file.read(), file.filename)
         except rubricas_import.RubricasImportError as e:
             return jsonify({"erro": str(e)}), 400
         except Exception as e:
             return jsonify({"erro": f"Falha ao ler a planilha: {e}"}), 400
+        return jsonify(resultado)
 
-        existentes = {
-            r["linha_planilha"] for r in db.fetch_all(
-                f"SELECT linha_planilha FROM rubricas WHERE projeto_id = {db.q(projeto_id)} "
-                "AND linha_planilha IS NOT NULL"
-            )
-        }
-        for it in resultado["itens"]:
-            it["ja_existe"] = it["linha_planilha"] in existentes
-        resultado["resumo"]["ja_existentes"] = sum(1 for it in resultado["itens"] if it["ja_existe"])
+    @app.post("/api/rubricas/importar/drive/preview")
+    def importar_rubricas_drive_preview():
+        """Mesma prévia de .../importar/preview, mas busca a planilha
+        automaticamente — lê o arquivo mais recente da pasta do Google Drive
+        configurada (GOOGLE_DRIVE_RUBRICAS_FOLDER_ID) em vez de receber
+        upload manual (54ª rodada — botão "Atualizar Rubricas" da tela). Ver
+        app/drive_rubricas.py. Não grava nada no banco — a confirmação usa
+        o mesmo endpoint de sempre, /api/rubricas/importar/confirmar, com os
+        itens desta prévia (possivelmente já revisados na tela)."""
+        data = request.get_json(silent=True) or {}
+        projeto_id = data.get("projeto_id") or request.args.get("projeto_id")
+        if not projeto_id:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        try:
+            conteudo, nome_arquivo, modificado_em = drive_rubricas.baixar_planilha_mais_recente()
+        except drive_rubricas.DriveRubricasError as e:
+            return jsonify({"erro": str(e)}), 502
+        try:
+            resultado = _rubricas_preview_resultado(projeto_id, conteudo, nome_arquivo)
+        except rubricas_import.RubricasImportError as e:
+            return jsonify({"erro": str(e)}), 400
+        except Exception as e:
+            return jsonify({"erro": f"Falha ao ler a planilha: {e}"}), 400
+        resultado["arquivo_origem"] = {"nome": nome_arquivo, "modificado_em": modificado_em}
         return jsonify(resultado)
 
     @app.post("/api/rubricas/importar/confirmar")

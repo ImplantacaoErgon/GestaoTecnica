@@ -29,3 +29,15 @@ reportlab>=4.0
 # reportlab: monta o PDF do Relatório Executivo (app/relatorio_pdf.py) e do
 # Relatório de Minhas Atividades (app/relatorio_atividades.py) — puro
 # Python, sem dependência de bibliotecas de sistema extras.
+google-api-python-client>=2.100
+google-auth>=2.23
+# google-api-python-client / google-auth: usados só pelo botão "Atualizar
+# Rubricas" (app/drive_rubricas.py, 54ª rodada) — busca automática da
+# planilha mais recente numa pasta do Google Drive, autenticando com uma
+# CONTA DE SERVIÇO (não é usuário/senha; veja .env.example). Exigem as
+# variáveis de ambiente GOOGLE_SERVICE_ACCOUNT_JSON e
+# GOOGLE_DRIVE_RUBRICAS_FOLDER_ID e acesso de saída à internet
+# (www.googleapis.com) a partir do container do backend. Sem essas
+# variáveis, o botão continua existindo mas devolve um erro explicando o
+# que falta configurar — o resto do sistema (inclusive o upload manual da
+# mesma planilha) funciona normalmente.

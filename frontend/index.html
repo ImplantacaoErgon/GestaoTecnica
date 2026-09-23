@@ -860,6 +860,7 @@
       </select>
       <select id="rub-grupo"><option value="">Grupo de cálculo (todos)</option></select>
       <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn secondary small" id="btn-atualizar-rubricas-drive" title="Busca automaticamente, no Google Drive, a versão mais recente da planilha de Levantamento de Rubricas">🔄 Atualizar Rubricas</button>
         <button class="btn secondary small" id="btn-import-rubricas">⬆ Importar planilha</button>
         <button class="btn small" id="btn-new-rubrica">+ Nova rubrica</button>
       </div>
@@ -1558,6 +1559,7 @@
       </div>
     </div>
     <div class="modal-body single-col" id="rubimp-step-preview" hidden>
+      <div class="muted" id="rubimp-arquivo-origem" style="font-size:12.5px;margin-bottom:8px;" hidden></div>
       <div id="rubimp-avisos"></div>
       <div class="kpis" id="rubimp-resumo" style="margin-bottom:12px;"></div>
       <div style="display:flex;align-items:center;gap:14px;margin-bottom:8px;flex-wrap:wrap;">
@@ -4201,6 +4203,7 @@ let rubImpItens = [], rubImpConfirmando = false;
 
 function wireImportRubricas(){
   $("btn-import-rubricas").addEventListener("click", openImportarRubricasModal);
+  $("btn-atualizar-rubricas-drive").addEventListener("click", abrirAtualizarRubricasDrive);
   $("rubimp-close").addEventListener("click", closeImportarRubricasModal);
   $("rubimp-cancel").addEventListener("click", closeImportarRubricasModal);
   $("overlay-importar-rubricas").addEventListener("click", e=>{ if(e.target.id==="overlay-importar-rubricas") closeImportarRubricasModal(); });
@@ -4225,6 +4228,7 @@ function openImportarRubricasModal(){
   $("rubimp-analisar").hidden = false;
   $("rubimp-confirmar").hidden = true;
   $("rubimp-foot-hint").textContent = "";
+  $("rubimp-arquivo-origem").hidden = true;
   $("overlay-importar-rubricas").hidden = false;
 }
 function closeImportarRubricasModal(){ $("overlay-importar-rubricas").hidden = true; }
@@ -4236,29 +4240,65 @@ async function analisarRubricas(){
   $("rubimp-analisar").disabled = true; $("rubimp-analisar").textContent = "Analisando…";
   try{
     const r = await api("/rubricas/importar/preview", {method:"POST", body: fd});
-    rubImpItens = (r.itens||[]).map(it=>({...it, _selecionado: true}));
-    const resumo = r.resumo || {};
-    let avisosHtml = "";
-    if(r.avisos && r.avisos.length){
-      avisosHtml += `<ul class="muted" style="margin:0 0 10px 18px;font-size:12px;">${r.avisos.map(a=>`<li>${esc(a)}</li>`).join("")}</ul>`;
-    }
-    $("rubimp-avisos").innerHTML = avisosHtml;
-    $("rubimp-resumo").innerHTML = [
-      {l:"Total na planilha", v: resumo.total ?? rubImpItens.length},
-      {l:"Já cadastradas (serão atualizadas)", v: resumo.ja_existentes ?? 0},
-      {l:"Homologadas", v: (resumo.por_status||{})["Homologada"] ?? 0},
-      {l:"Em levantamento", v: (resumo.por_status||{})["Em levantamento"] ?? 0},
-    ].map(k=>`<div class="kpi"><div class="label">${k.l}</div><div class="value">${k.v}</div></div>`).join("");
-    $("rubimp-check-all").checked = true;
-    $("rubimp-preview-search").value = ""; $("rubimp-preview-status").value = "";
-    renderRubImpPreviewTable();
-    $("rubimp-step-upload").hidden = true;
-    $("rubimp-step-preview").hidden = false;
-    $("rubimp-analisar").hidden = true;
-    $("rubimp-confirmar").hidden = false;
-    $("rubimp-foot-hint").textContent = `${rubImpItens.length} linha(s) encontrada(s) — desmarque o que não deve ser importado.`;
+    _exibirPreviewRubricas(r);
   }catch(e){}
   $("rubimp-analisar").disabled = false; $("rubimp-analisar").textContent = "Analisar planilha";
+}
+
+// Botão "🔄 Atualizar Rubricas" (54ª rodada): em vez de pedir upload, busca
+// direto a planilha mais recente na pasta do Google Drive configurada no
+// backend (ver app/drive_rubricas.py) e cai direto na mesma tela de prévia
+// — a confirmação usa o mesmo endpoint/fluxo de sempre.
+async function abrirAtualizarRubricasDrive(){
+  rubImpItens = [];
+  $("rubimp-step-upload").hidden = true;
+  $("rubimp-step-preview").hidden = true;
+  $("rubimp-analisar").hidden = true;
+  $("rubimp-confirmar").hidden = true;
+  $("rubimp-arquivo-origem").hidden = true;
+  $("rubimp-foot-hint").textContent = "Buscando a planilha mais recente no Google Drive…";
+  $("overlay-importar-rubricas").hidden = false;
+  try{
+    const r = await api("/rubricas/importar/drive/preview", {
+      method: "POST",
+      body: JSON.stringify({ projeto_id: PROJETO.id }),
+    });
+    _exibirPreviewRubricas(r);
+  }catch(e){
+    closeImportarRubricasModal();
+  }
+}
+
+function _exibirPreviewRubricas(r){
+  rubImpItens = (r.itens||[]).map(it=>({...it, _selecionado: true}));
+  const resumo = r.resumo || {};
+  if(r.arquivo_origem){
+    const mod = r.arquivo_origem.modificado_em ? fmtDateTime(r.arquivo_origem.modificado_em) : null;
+    $("rubimp-arquivo-origem").hidden = false;
+    $("rubimp-arquivo-origem").innerHTML = `Planilha usada: <b>${esc(r.arquivo_origem.nome||"—")}</b>`
+      + (mod ? ` (modificada em ${esc(mod)})` : "");
+  }else{
+    $("rubimp-arquivo-origem").hidden = true;
+  }
+  let avisosHtml = "";
+  if(r.avisos && r.avisos.length){
+    avisosHtml += `<ul class="muted" style="margin:0 0 10px 18px;font-size:12px;">${r.avisos.map(a=>`<li>${esc(a)}</li>`).join("")}</ul>`;
+  }
+  $("rubimp-avisos").innerHTML = avisosHtml;
+  $("rubimp-resumo").innerHTML = [
+    {l:"Total na planilha", v: resumo.total ?? rubImpItens.length},
+    {l:"Já cadastradas (serão atualizadas)", v: resumo.ja_existentes ?? 0},
+    {l:"Homologadas", v: (resumo.por_status||{})["Homologada"] ?? 0},
+    {l:"Em levantamento", v: (resumo.por_status||{})["Em levantamento"] ?? 0},
+  ].map(k=>`<div class="kpi"><div class="label">${k.l}</div><div class="value">${k.v}</div></div>`).join("");
+  $("rubimp-check-all").checked = true;
+  $("rubimp-preview-search").value = ""; $("rubimp-preview-status").value = "";
+  renderRubImpPreviewTable();
+  $("rubimp-step-upload").hidden = true;
+  $("rubimp-step-preview").hidden = false;
+  $("rubimp-analisar").hidden = true;
+  $("rubimp-confirmar").hidden = false;
+  $("rubimp-foot-hint").textContent = `${rubImpItens.length} linha(s) encontrada(s) — desmarque o que não deve ser importado.`;
 }
 
 function renderRubImpPreviewTable(){
