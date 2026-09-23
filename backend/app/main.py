@@ -1170,6 +1170,66 @@ def create_app():
     def delete_atividade(id):
         return delete_row("atividades", id)
 
+    @app.post("/api/atividades/<id>/duplicar")
+    def duplicar_atividade(id):
+        """Cria uma cópia completa da atividade `id`: todos os campos de
+        ATIVIDADE_FIELDS (nome, código WBS, datas, status, percentual,
+        horas, etc. — tudo, sem "limpar" nada, pra depois o usuário fazer os
+        ajustes que quiser na cópia), os recursos alocados (atividade_recurso)
+        e as PREDECESSORAS da atividade original (atividade_dependencia onde
+        esta atividade é a sucessora) — a cópia passa a depender das mesmas
+        atividades que a original dependia.
+
+        Dois pontos que NÃO são copiados de propósito:
+        - `origem_importacao_id`: é o id da linha na planilha de origem do
+          MS Project, usado por cronograma_import.py pra casar uma
+          reimportação com a atividade já existente (ver comentário em
+          atividades.origem_importacao_id no schema). Copiar esse valor
+          deixaria duas atividades com o mesmo id de origem, e a próxima
+          reimportação não saberia qual delas atualizar.
+        - As SUCESSORAS da original (outras atividades que dependem dela)
+          não passam a depender também da cópia — só o sentido "esta
+          atividade depende de quem" é duplicado, não o grafo inteiro ao
+          redor dela. Se quiser que a cópia também preceda as mesmas
+          atividades que a original precede, isso é adicionado manualmente
+          na aba Dependências de cada sucessora.
+
+        Vínculos com requisitos do TR (atividade_requisito, N:N — distinto
+        do campo único requisito_tr_id, que já é copiado por fazer parte de
+        ATIVIDADE_FIELDS) também não são duplicados — não foram pedidos
+        explicitamente e são normalmente mais fáceis de revisar/re-vincular
+        manualmente na cópia do que herdar automaticamente.
+
+        Passa direto por insert_row (grava por SQL, como cronograma_import.py
+        já faz) em vez do fluxo de POST /api/atividades — não faz sentido
+        reaplicar aqui a validação de "status exige relato" (a cópia começa
+        sem nenhum relato próprio) nem a classificação automática de
+        conclusão: o objetivo é reproduzir a atividade original tal como
+        está, não validar um cadastro novo do zero."""
+        original = db.fetch_one(f"SELECT * FROM atividades WHERE id = {db.q(id)}")
+        if not original:
+            abort(404)
+        dados = {campo: original.get(campo) for campo in ATIVIDADE_FIELDS}
+        dados["origem_importacao_id"] = None
+        if dados.get("nome"):
+            dados["nome"] = f"{dados['nome']} (cópia)"
+        nova = insert_row("atividades", dados, ATIVIDADE_FIELDS)
+        novo_id = nova["id"]
+
+        db.execute(
+            "INSERT INTO atividade_recurso (atividade_id, recurso_id, papel_na_atividade, horas_alocadas) "
+            f"SELECT {db.q(novo_id)}, recurso_id, papel_na_atividade, horas_alocadas "
+            f"FROM atividade_recurso WHERE atividade_id = {db.q(id)}"
+        )
+        db.execute(
+            "INSERT INTO atividade_dependencia (atividade_id, predecessora_id, tipo, lag_horas) "
+            f"SELECT {db.q(novo_id)}, predecessora_id, tipo, lag_horas "
+            f"FROM atividade_dependencia WHERE atividade_id = {db.q(id)}"
+        )
+
+        row = db.fetch_one(ATIVIDADE_SELECT + f" WHERE a.id = {db.q(novo_id)}")
+        return jsonify(row), 201
+
     @app.get("/api/atividades/<id>/historico")
     def atividade_historico(id):
         return jsonify(db.fetch_all(
