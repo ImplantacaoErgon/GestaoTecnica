@@ -1324,7 +1324,8 @@
     <div class="modal-pane" data-pane="dependencias">
       <div class="modal-body single-col">
         <ul class="list-simple" id="at-deps-list"></ul>
-        <div class="inline-add">
+        <div class="inline-add" style="flex-wrap:wrap;">
+          <input type="text" id="at-dep-busca" placeholder="Buscar predecessora por código ou nome…" autocomplete="off" style="flex:1 1 100%;">
           <select id="at-dep-predecessora"></select>
           <select id="at-dep-tipo"><option>FS</option><option>SS</option><option>FF</option><option>SF</option></select>
           <input id="at-dep-lag" type="number" placeholder="lag (h)" style="max-width:100px;">
@@ -2283,6 +2284,7 @@ let PARAMETROS = null; // logo + nome da empresa (Configurações > Parâmetros)
 let PROJETO=null, PROJETOS=[], ETAPAS=[], FRENTES=[], TIPOS=[], RECURSOS=[], USUARIOS=[], ATIVIDADES=[], REQUISITOS=[], RISCOS=[], MARCOS=[], CALENDARIO=[], MANUAIS=[], FATURAS=[], PENDENCIAS=[], ITENS_MIGRACAO=[], RUBRICAS=[];
 const PENDENCIA_STATUS_COR = {"Aberta":"warn", "Em andamento":"accent", "Resolvida":"ok", "Cancelada":"faint"};
 let editingAtividadeId=null, editingRequisitoId=null, editingRiscoId=null, editingMarcoId=null, editingPendenciaId=null;
+let atDepCandidatas = []; // candidatas a predecessora no modal de atividade (57ª rodada — busca + ordenação por Código WBS)
 let MA_DATA_REF=new Date(), MA_GRADE=null; // "Minhas atividades" — data de referência da semana mostrada e último retorno do servidor
 const STATUS_EXIGE_RELATO = new Set(["Em andamento","Bloqueada","Cancelada"]);
 
@@ -4497,6 +4499,7 @@ function wireAtividadeModal(){
       predecessora_id, tipo: $("at-dep-tipo").value, lag_horas: Number($("at-dep-lag").value||0)})});
     await refreshDeps();
   });
+  $("at-dep-busca").addEventListener("input", e=>{ renderAtDepPredecessoraOptions(e.target.value); });
   $("at-req-add").addEventListener("click", async ()=>{
     const requisito_id = $("at-req-add-select").value; if(!requisito_id) return;
     await api(`/atividades/${editingAtividadeId}/requisitos`, {method:"POST", body: JSON.stringify({requisito_id})});
@@ -4646,7 +4649,23 @@ async function refreshDeps(){
   $("at-deps-list").querySelectorAll("button[data-dep]").forEach(b=>b.addEventListener("click", async ()=>{
     await api(`/dependencias/${b.dataset.dep}`, {method:"DELETE"}); refreshDeps();
   }));
-  $("at-dep-predecessora").innerHTML = ATIVIDADES.filter(a=>a.id!==editingAtividadeId).map(a=>`<option value="${a.id}">${esc(a.codigo_wbs||"")} ${esc(a.nome)}</option>`).join("");
+  // Candidatas a predecessora, ordenadas por Código WBS crescente (ordem natural,
+  // ex. "2.10" depois de "2.9") — mesmo critério já usado no popup de dependências
+  // da edição em lote. Campo de busca (at-dep-busca) filtra por código ou nome
+  // (57ª rodada — antes só existia o dropdown, sem busca nem ordenação).
+  atDepCandidatas = ATIVIDADES.filter(a=>a.id!==editingAtividadeId)
+    .slice().sort((a,b)=>(a.codigo_wbs||"zzzz").localeCompare(b.codigo_wbs||"zzzz", undefined, {numeric:true}));
+  $("at-dep-busca").value = "";
+  renderAtDepPredecessoraOptions("");
+}
+function renderAtDepPredecessoraOptions(filtro){
+  const termo = (filtro||"").trim().toLowerCase();
+  const visiveis = termo
+    ? atDepCandidatas.filter(a=>`${a.codigo_wbs||""} ${a.nome||""}`.toLowerCase().includes(termo))
+    : atDepCandidatas;
+  $("at-dep-predecessora").innerHTML = visiveis.length
+    ? visiveis.map(a=>`<option value="${a.id}">${esc(a.codigo_wbs||"")} ${esc(a.nome)}</option>`).join("")
+    : `<option value="" disabled selected>Nenhuma atividade encontrada</option>`;
 }
 async function refreshReqs(){
   const reqs = await api(`/atividades/${editingAtividadeId}/requisitos`);
