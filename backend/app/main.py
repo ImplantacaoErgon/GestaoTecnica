@@ -8,7 +8,7 @@ from datetime import datetime, date, timedelta
 
 from flask import Flask, request, jsonify, send_from_directory, send_file, abort, session
 
-from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_export, cronograma_comparacao, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria
+from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_export, cronograma_comparacao, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 FRONTEND_DIR = os.environ.get(
@@ -140,6 +140,28 @@ REQUISITO_UPSERT_COLUMNS = [
     "classificacao", "atendimento", "status", "prioridade", "cobranca",
     "data_levantamento", "observacoes",
 ]
+# 53ª rodada — mesma lógica de REQUISITO_UPSERT_COLUMNS, agora para a importação da
+# planilha de rubricas (ver app/rubricas_import.py). linha_planilha não entra na lista
+# de SET do upsert (é a própria chave de conflito), mas entra no INSERT — por isso é
+# tratada à parte em upsert_rubricas(), não incluída aqui.
+RUBRICA_UPSERT_COLUMNS = [
+    "analista", "verba_legado", "descricao_legado", "codigo_ergon", "nome_abreviado",
+    "nome_extenso", "tipo", "grupo_calculo", "ordem_grupo_calculo", "legislacao",
+    "valor_formula", "quant_autorizado", "fato_origem",
+    "validacao_compatibilidade", "validacao_incompatibilidade",
+    "regime_vinculo_direito", "categoria_cargo_direito", "secretaria",
+    "outras_condicoes", "incompatibilidade", "periodicidade", "totalizacao", "regra_negocio",
+    "empresas", "incidencias",
+    "status", "situacao_planilha", "data_levantamento", "revisado_por",
+    "questionamentos_juridico", "data_envio_techne", "consultor_techne",
+    "data_liberacao_testes", "observacoes_liberacao", "condicoes_minimas_testes",
+    "questionamentos_consultor", "responsavel_homologacao", "data_inicio_homologacao",
+    "data_homologacao", "observacoes_homologacao", "observacoes_finais", "notas_importacao",
+]
+# Campos editáveis pela tela de detalhe (CRUD manual) — igual à lista de upsert, mais
+# atividade_id (vínculo com a Frente de Trabalho/atividade, que a importação não seta
+# sozinha) e sem linha_planilha (só a importação atribui isso).
+RUBRICA_FIELDS = ["projeto_id", "atividade_id"] + RUBRICA_UPSERT_COLUMNS
 RECURSO_FIELDS = ["nome", "tipo_vinculo", "empresa", "cargo", "email", "telefone", "controla_horas", "ativo"]
 ETAPA_FIELDS = ["projeto_id", "numero", "nome", "descricao", "data_inicio_prev", "data_fim_prev"]
 FRENTE_FIELDS = ["projeto_id", "nome", "descricao", "cor_hex", "ordem", "ativo"]
@@ -278,6 +300,47 @@ def upsert_requisitos(projeto_id, linhas):
         f"INSERT INTO requisitos_tr (projeto_id, {', '.join(REQUISITO_UPSERT_COLUMNS)}) VALUES "
         + values_sql
         + f" ON CONFLICT (projeto_id, codigo) DO UPDATE SET {set_clause}"
+    )
+    db.execute(sql, timeout=120)
+    return inseridos, atualizados
+
+
+def upsert_rubricas(projeto_id, linhas):
+    """linhas: lista de dicts com chaves de RUBRICA_UPSERT_COLUMNS + "linha_planilha"
+    (ausentes -> NULL). Faz upsert por (projeto_id, linha_planilha) — reimportar a
+    mesma planilha atualiza em vez de duplicar (ver comentário em
+    db/migration_029_rubricas.sql sobre por que NÃO é por código ERGON/verba: a mesma
+    regra pode aparecer em mais de uma linha, uma por empresa). Deduplica
+    linha_planilha repetida dentro do próprio lote pelo mesmo motivo que
+    upsert_requisitos deduplica código. Retorna (inseridos, atualizados)."""
+    por_linha = {}
+    for l in linhas:
+        if l.get("linha_planilha"):
+            por_linha[l["linha_planilha"]] = l
+    linhas = list(por_linha.values())
+    if not linhas:
+        return 0, 0
+
+    existentes = {
+        r["linha_planilha"] for r in db.fetch_all(
+            f"SELECT linha_planilha FROM rubricas WHERE projeto_id = {db.q(projeto_id)} "
+            "AND linha_planilha IS NOT NULL"
+        )
+    }
+    inseridos = sum(1 for l in linhas if l["linha_planilha"] not in existentes)
+    atualizados = len(linhas) - inseridos
+
+    colunas = ["linha_planilha"] + RUBRICA_UPSERT_COLUMNS
+    values_sql = ", ".join(
+        "(" + db.q(projeto_id) + ", " + ", ".join(_valor_sql(l.get(col)) for col in colunas) + ")"
+        for l in linhas
+    )
+    set_clause = ", ".join(f"{col} = EXCLUDED.{col}" for col in RUBRICA_UPSERT_COLUMNS)
+    sql = (
+        f"INSERT INTO rubricas (projeto_id, {', '.join(colunas)}) VALUES "
+        + values_sql
+        + f" ON CONFLICT (projeto_id, linha_planilha) WHERE linha_planilha IS NOT NULL "
+        + f"DO UPDATE SET {set_clause}"
     )
     db.execute(sql, timeout=120)
     return inseridos, atualizados
@@ -436,12 +499,21 @@ def preparar_projeto_interlocutores(data):
             data[campo_id] = None
 
 
+def _valor_sql(v):
+    """Igual a db.q(), mas serializa dict/list (colunas jsonb, ex: rubricas.empresas/
+    incidencias — 53ª rodada) como JSON + cast ::jsonb em vez de cair no str(dict) do
+    Python (que usa aspas simples e quebraria o parser de JSON do Postgres)."""
+    if isinstance(v, (dict, list)):
+        return db.q(json.dumps(v, ensure_ascii=False)) + "::jsonb"
+    return db.q(v)
+
+
 def insert_row(table, data, allowed):
     cols, vals = [], []
     for f in allowed:
         if f in data and data[f] not in (None, ""):
             cols.append(f)
-            vals.append(db.q(data[f]))
+            vals.append(_valor_sql(data[f]))
     if not cols:
         raise ValueError("Nenhum campo válido informado.")
     sql = f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join(vals)}) RETURNING *"
@@ -453,7 +525,7 @@ def insert_row(table, data, allowed):
 
 
 def patch_row(table, row_id, data, allowed, prelude=""):
-    sets = [f"{f} = {db.q(data[f])}" for f in allowed if f in data]
+    sets = [f"{f} = {_valor_sql(data[f])}" for f in allowed if f in data]
     if not sets:
         return db.fetch_one(f"SELECT * FROM {table} WHERE id = {db.q(row_id)}")
     # Estado ANTES, pra diff do log de auditoria (ver auditoria.py) — um SELECT
@@ -1886,6 +1958,128 @@ def create_app():
     @app.delete("/api/itens-migracao/<id>")
     def delete_item_migracao(id):
         return delete_row("itens_migracao", id)
+
+    # ---------------------------------------------------------------- rubricas
+    # 53ª rodada: levantamento e homologação das rubricas (regras de negócio)
+    # da folha de pagamento — importado da planilha "Levantamento Rubricas" do
+    # cliente (ver app/rubricas_import.py). Uma linha por rubrica levantada,
+    # podendo repetir código ERGON quando a mesma regra é tratada em mais de
+    # uma empresa (ver db/migration_029_rubricas.sql).
+    @app.get("/api/rubricas")
+    def list_rubricas():
+        pid = request.args.get("projeto_id")
+        if not pid:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        condicoes = [f"r.projeto_id = {db.q(pid)}"]
+        status = request.args.get("status")
+        if status:
+            condicoes.append(f"r.status = {db.q(status)}")
+        grupo = request.args.get("grupo_calculo")
+        if grupo:
+            condicoes.append(f"r.grupo_calculo = {db.q(grupo)}")
+        busca = request.args.get("busca")
+        if busca:
+            termo = busca.replace("'", "''")
+            condicoes.append(
+                "(r.nome_abreviado ILIKE '%" + termo + "%' OR r.nome_extenso ILIKE '%" + termo + "%' "
+                "OR r.codigo_ergon ILIKE '%" + termo + "%' OR r.verba_legado ILIKE '%" + termo + "%' "
+                "OR r.descricao_legado ILIKE '%" + termo + "%')"
+            )
+        sql = f"""
+            SELECT r.*, a.codigo_wbs AS atividade_codigo, a.nome AS atividade_nome
+            FROM rubricas r
+            LEFT JOIN atividades a ON a.id = r.atividade_id
+            WHERE {' AND '.join(condicoes)}
+            ORDER BY r.linha_planilha NULLS LAST, r.codigo_ergon, r.nome_abreviado
+        """
+        return jsonify(db.fetch_all(sql))
+
+    @app.get("/api/rubricas/resumo")
+    def resumo_rubricas():
+        """Funil de status pro card de resumo — igual em espírito ao
+        /api/itens-migracao/resumo."""
+        pid = request.args.get("projeto_id")
+        if not pid:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        row = db.fetch_one(f"""
+            SELECT
+              count(*) AS total,
+              count(*) FILTER (WHERE status = 'Em levantamento') AS em_levantamento,
+              count(*) FILTER (WHERE status = 'Enviada à Techne') AS enviadas_techne,
+              count(*) FILTER (WHERE status = 'Liberada para testes') AS liberadas_testes,
+              count(*) FILTER (WHERE status = 'Em homologação') AS em_homologacao,
+              count(*) FILTER (WHERE status = 'Homologada') AS homologadas,
+              count(*) FILTER (WHERE status = 'Excluída') AS excluidas
+            FROM rubricas WHERE projeto_id = {db.q(pid)}
+        """)
+        return jsonify(row or {
+            "total": 0, "em_levantamento": 0, "enviadas_techne": 0, "liberadas_testes": 0,
+            "em_homologacao": 0, "homologadas": 0, "excluidas": 0,
+        })
+
+    @app.get("/api/rubricas/<id>")
+    def get_rubrica(id):
+        row = db.fetch_one(f"SELECT * FROM rubricas WHERE id = {db.q(id)}")
+        if not row:
+            abort(404)
+        return jsonify(row)
+
+    @app.post("/api/rubricas")
+    def create_rubrica():
+        return jsonify(insert_row("rubricas", request.get_json(force=True), RUBRICA_FIELDS)), 201
+
+    @app.put("/api/rubricas/<id>")
+    def update_rubrica(id):
+        row = patch_row("rubricas", id, request.get_json(force=True), RUBRICA_FIELDS)
+        if not row:
+            abort(404)
+        return jsonify(row)
+
+    @app.delete("/api/rubricas/<id>")
+    def delete_rubrica(id):
+        return delete_row("rubricas", id)
+
+    @app.post("/api/rubricas/importar/preview")
+    def importar_rubricas_preview():
+        """Recebe a planilha "Levantamento Rubricas" e devolve uma PRÉVIA —
+        não grava nada no banco. Ver app/rubricas_import.py."""
+        projeto_id = request.form.get("projeto_id")
+        file = request.files.get("file")
+        if not (projeto_id and file):
+            return jsonify({"erro": "projeto_id e file são obrigatórios"}), 400
+        try:
+            resultado = rubricas_import.parse_rubricas_document(file.read(), file.filename or "")
+        except rubricas_import.RubricasImportError as e:
+            return jsonify({"erro": str(e)}), 400
+        except Exception as e:
+            return jsonify({"erro": f"Falha ao ler a planilha: {e}"}), 400
+
+        existentes = {
+            r["linha_planilha"] for r in db.fetch_all(
+                f"SELECT linha_planilha FROM rubricas WHERE projeto_id = {db.q(projeto_id)} "
+                "AND linha_planilha IS NOT NULL"
+            )
+        }
+        for it in resultado["itens"]:
+            it["ja_existe"] = it["linha_planilha"] in existentes
+        resultado["resumo"]["ja_existentes"] = sum(1 for it in resultado["itens"] if it["ja_existe"])
+        return jsonify(resultado)
+
+    @app.post("/api/rubricas/importar/confirmar")
+    def importar_rubricas_confirmar():
+        """Recebe a lista de itens revisados na prévia (mesmo formato de
+        .../preview) e grava via upsert por linha_planilha — reimportar
+        atualiza em vez de duplicar."""
+        data = request.get_json(force=True)
+        projeto_id = data.get("projeto_id")
+        itens = data.get("itens") or []
+        if not projeto_id or not itens:
+            return jsonify({"erro": "projeto_id e itens são obrigatórios"}), 400
+        linhas = [it for it in itens if it.get("linha_planilha")]
+        if not linhas:
+            return jsonify({"erro": "Nenhum item válido para importar."}), 400
+        inseridos, atualizados = upsert_rubricas(projeto_id, linhas)
+        return jsonify({"inseridos": inseridos, "atualizados": atualizados})
 
     # ------------------------------------------------------------------ marcos
     @app.get("/api/marcos")

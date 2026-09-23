@@ -499,6 +499,7 @@
       <button data-view="pendencias">🚩 Pendências</button>
       <button data-view="faturas">💵 Faturas</button>
       <button data-view="migracao">📦 Migração de Dados</button>
+      <button data-view="rubricas">🧾 Rubricas</button>
       <div class="tab-group" data-group>
         <button type="button" class="tab-group-trigger" data-views="requisitos,manuais,analisar-requisitos">Requisitos TR <span class="caret">▾</span></button>
         <div class="tab-group-menu">
@@ -837,6 +838,36 @@
       <table>
         <thead><tr><th>Tabela do legado</th><th>Destino/Sistema</th><th>Meta</th><th>Carregado</th><th>% Carregados</th><th>Rejeitado</th><th>% Rejeitados</th><th>Ciclos</th><th>Status</th><th>Responsável</th></tr></thead>
         <tbody id="migracao-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ RUBRICAS (53ª rodada) ============ -->
+  <section class="view" id="view-rubricas">
+    <h2 class="view-title">🧾 Rubricas</h2>
+    <div class="view-sub">Levantamento e homologação das rubricas (regras de negócio) da folha de pagamento — uma linha por rubrica levantada; a mesma regra pode se repetir quando é tratada separadamente em mais de uma empresa.</div>
+    <div class="kpis" id="rub-kpis"></div>
+    <div class="filters">
+      <input type="text" id="rub-search" placeholder="Buscar por código, verba, nome…">
+      <select id="rub-status">
+        <option value="">Status (todos)</option>
+        <option>Em levantamento</option>
+        <option>Enviada à Techne</option>
+        <option>Liberada para testes</option>
+        <option>Em homologação</option>
+        <option>Homologada</option>
+        <option>Excluída</option>
+      </select>
+      <select id="rub-grupo"><option value="">Grupo de cálculo (todos)</option></select>
+      <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn secondary small" id="btn-import-rubricas">⬆ Importar planilha</button>
+        <button class="btn small" id="btn-new-rubrica">+ Nova rubrica</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Código ERGON</th><th>Verba legado</th><th>Nome</th><th>Grupo de cálculo</th><th>Tipo</th><th>Empresas</th><th>Status</th><th>Analista</th></tr></thead>
+        <tbody id="rubricas-tbody"></tbody>
       </table>
     </div>
   </section>
@@ -1444,6 +1475,113 @@
     <div class="modal-foot">
       <button class="btn danger ghost" id="mig-delete" hidden>Excluir item</button>
       <div style="display:flex;gap:8px;"><button class="btn secondary" id="mig-cancel">Cancelar</button><button class="btn" id="mig-save">Salvar</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= MODAL: RUBRICA (53ª rodada) ================= -->
+<div class="overlay" id="overlay-rubrica" hidden>
+  <div class="modal wide">
+    <div class="modal-head"><h2 id="rub-modal-title">Nova rubrica</h2><button class="btn ghost" id="rub-close">✕</button></div>
+    <div class="modal-body">
+      <h3 class="full" style="margin:0 0 -4px;">Identificação</h3>
+      <div class="field"><label>Verba (legado)</label><input id="rub-verba-legado" type="text"></div>
+      <div class="field"><label>Código ERGON</label><input id="rub-codigo-ergon" type="text"></div>
+      <div class="field full"><label>Descrição no legado</label><input id="rub-descricao-legado" type="text"></div>
+      <div class="field"><label>Nome abreviado (Ergon, até 30 car.)</label><input id="rub-nome-abreviado" type="text" maxlength="30"></div>
+      <div class="field"><label>Nome por extenso (Ergon, até 60 car.)</label><input id="rub-nome-extenso" type="text" maxlength="60"></div>
+      <div class="field"><label>Tipo</label><select id="rub-tipo"><option value="">—</option><option value="P">P — Provento</option><option value="D">D — Desconto</option><option value="P-D">P-D — Provento/Desconto</option></select></div>
+      <div class="field"><label>Analista</label><input id="rub-analista" type="text"></div>
+
+      <h3 class="full" style="margin:14px 0 -4px;">Regra de cálculo</h3>
+      <div class="field"><label>Grupo de cálculo</label><input id="rub-grupo-calculo" type="text"></div>
+      <div class="field"><label>Ordem no grupo de cálculo</label><input id="rub-ordem-grupo" type="number" step="1"></div>
+      <div class="field"><label>Legislação</label><input id="rub-legislacao" type="text"></div>
+      <div class="field"><label>Quant. autorizado</label><input id="rub-quant-autorizado" type="text"></div>
+      <div class="field full"><label>Valor / % / fórmula</label><textarea id="rub-valor-formula"></textarea></div>
+      <div class="field full"><label>Fato origem</label><input id="rub-fato-origem" type="text"></div>
+      <div class="field full"><label>Regra de negócio</label><textarea id="rub-regra-negocio" style="min-height:80px;"></textarea></div>
+      <div class="field"><label>Validação — compatibilidade</label><textarea id="rub-validacao-compat"></textarea></div>
+      <div class="field"><label>Validação — incompatibilidade</label><textarea id="rub-validacao-incompat"></textarea></div>
+
+      <h3 class="full" style="margin:14px 0 -4px;">Quem tem direito</h3>
+      <div class="field"><label>Regime jurídico / tipo de vínculo</label><input id="rub-regime-vinculo" type="text"></div>
+      <div class="field"><label>Categoria/subcategoria ou cargo(s)</label><input id="rub-categoria-cargo" type="text"></div>
+      <div class="field"><label>Secretaria</label><input id="rub-secretaria" type="text"></div>
+      <div class="field"><label>Periodicidade</label><input id="rub-periodicidade" type="text"></div>
+      <div class="field"><label>Totalização</label><input id="rub-totalizacao" type="text"></div>
+      <div class="field full"><label>Outras condições</label><textarea id="rub-outras-condicoes"></textarea></div>
+      <div class="field full"><label>Incompatibilidade</label><textarea id="rub-incompatibilidade"></textarea></div>
+
+      <h3 class="full" style="margin:14px 0 -4px;">Empresas e incidências (importado da planilha)</h3>
+      <div class="field full" id="rub-empresas-view"><label>Empresas em que esta rubrica se aplica</label><div class="muted" style="font-size:12.5px;">—</div></div>
+      <div class="field full" id="rub-incidencias-view"><label>Incidências</label><div class="muted" style="font-size:12.5px;">—</div></div>
+
+      <h3 class="full" style="margin:14px 0 -4px;">Funil de levantamento e homologação</h3>
+      <div class="field"><label>Status</label><select id="rub-edit-status">
+        <option>Em levantamento</option><option>Enviada à Techne</option><option>Liberada para testes</option>
+        <option>Em homologação</option><option>Homologada</option><option>Excluída</option>
+      </select></div>
+      <div class="field full"><label>Atividade do cronograma (opcional)</label><select id="rub-atividade"></select></div>
+      <div class="field"><label>Data Levantamento</label><input id="rub-data-levantamento" type="date"></div>
+      <div class="field"><label>Revisado por</label><input id="rub-revisado-por" type="text"></div>
+      <div class="field"><label>Data de envio à Techne</label><input id="rub-data-envio-techne" type="date"></div>
+      <div class="field"><label>Consultor Techne responsável</label><input id="rub-consultor-techne" type="text"></div>
+      <div class="field"><label>Data de liberação para testes</label><input id="rub-data-liberacao-testes" type="date"></div>
+      <div class="field"><label>Condições mínimas para testes</label><textarea id="rub-condicoes-minimas"></textarea></div>
+      <div class="field"><label>Responsável pela homologação</label><input id="rub-responsavel-homologacao" type="text"></div>
+      <div class="field"><label>Data início dos testes de homologação</label><input id="rub-data-inicio-homologacao" type="date"></div>
+      <div class="field"><label>Data da homologação</label><input id="rub-data-homologacao" type="date"></div>
+      <div class="field full"><label>Questionamentos ao jurídico</label><textarea id="rub-questionamentos-juridico"></textarea></div>
+      <div class="field full"><label>Observações (liberação/homologação/finais)</label><textarea id="rub-observacoes"></textarea></div>
+      <div class="field full" id="rub-notas-importacao-wrap" hidden>
+        <label>⚠ Notas da importação (revisar)</label>
+        <div class="muted" id="rub-notas-importacao" style="font-size:12.5px;white-space:pre-wrap;"></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn danger ghost" id="rub-delete" hidden>Excluir rubrica</button>
+      <div style="display:flex;gap:8px;"><button class="btn secondary" id="rub-cancel">Cancelar</button><button class="btn" id="rub-save">Salvar</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= MODAL: IMPORTAR RUBRICAS (Excel) — 53ª rodada ================= -->
+<div class="overlay" id="overlay-importar-rubricas" hidden>
+  <div class="modal wide">
+    <div class="modal-head"><h2>Importar planilha de Rubricas</h2><button class="btn ghost" id="rubimp-close">✕</button></div>
+    <div class="modal-body single-col" id="rubimp-step-upload">
+      <div class="field full">
+        <label>Planilha "Levantamento Rubricas" (a mesma usada pela equipe para levantamento e homologação)</label>
+        <input id="rubimp-file" type="file" accept=".xlsx,.xlsm">
+        <p class="muted" style="margin-top:8px;">É lida a aba "Levantamento Rubricas" da planilha. Cada linha vira uma rubrica — mesmo que o código ERGON se repita entre linhas (a mesma regra pode ser levantada/homologada separadamente por empresa). Reimportar a mesma planilha atualiza as rubricas já importadas em vez de duplicar. Nenhum dado é gravado antes de você conferir e confirmar a lista abaixo.</p>
+      </div>
+    </div>
+    <div class="modal-body single-col" id="rubimp-step-preview" hidden>
+      <div id="rubimp-avisos"></div>
+      <div class="kpis" id="rubimp-resumo" style="margin-bottom:12px;"></div>
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:8px;flex-wrap:wrap;">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;"><input type="checkbox" id="rubimp-check-all" checked> Selecionar todos</label>
+        <input type="text" id="rubimp-preview-search" placeholder="Buscar por código, verba, nome…" style="flex:1;min-width:180px;">
+        <select id="rubimp-preview-status"><option value="">Status (todos)</option>
+          <option>Em levantamento</option><option>Enviada à Techne</option><option>Liberada para testes</option>
+          <option>Em homologação</option><option>Homologada</option>
+        </select>
+      </div>
+      <div class="table-wrap" style="max-height:42vh;">
+        <table>
+          <thead><tr><th style="width:28px;"></th><th>Linha</th><th>Verba</th><th>Código ERGON</th><th>Nome</th><th>Status</th></tr></thead>
+          <tbody id="rubimp-preview-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <span id="rubimp-foot-hint" class="muted"></span>
+      <div style="display:flex;gap:8px;">
+        <button class="btn secondary" id="rubimp-cancel">Cancelar</button>
+        <button class="btn" id="rubimp-analisar">Analisar planilha</button>
+        <button class="btn" id="rubimp-confirmar" hidden>Confirmar importação</button>
+      </div>
     </div>
   </div>
 </div>
@@ -2080,7 +2218,7 @@ async function chamarAuthApi(path, body){
 // ---------------- estado global ----------------
 let USUARIO_LOGADO = null;
 let PARAMETROS = null; // logo + nome da empresa (Configurações > Parâmetros) — ver carregarParametros()
-let PROJETO=null, PROJETOS=[], ETAPAS=[], FRENTES=[], TIPOS=[], RECURSOS=[], USUARIOS=[], ATIVIDADES=[], REQUISITOS=[], RISCOS=[], MARCOS=[], CALENDARIO=[], MANUAIS=[], FATURAS=[], PENDENCIAS=[], ITENS_MIGRACAO=[];
+let PROJETO=null, PROJETOS=[], ETAPAS=[], FRENTES=[], TIPOS=[], RECURSOS=[], USUARIOS=[], ATIVIDADES=[], REQUISITOS=[], RISCOS=[], MARCOS=[], CALENDARIO=[], MANUAIS=[], FATURAS=[], PENDENCIAS=[], ITENS_MIGRACAO=[], RUBRICAS=[];
 const PENDENCIA_STATUS_COR = {"Aberta":"warn", "Em andamento":"accent", "Resolvida":"ok", "Cancelada":"faint"};
 let editingAtividadeId=null, editingRequisitoId=null, editingRiscoId=null, editingMarcoId=null, editingPendenciaId=null;
 let MA_DATA_REF=new Date(), MA_GRADE=null; // "Minhas atividades" — data de referência da semana mostrada e último retorno do servidor
@@ -2149,9 +2287,9 @@ async function recarregarDadosDoProjeto(){
     api(`/calendario?projeto_id=${PROJETO.id}`)
   ]);
   fillStaticSelects();
-  await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias(), loadItensMigracao()]);
+  await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias(), loadItensMigracao(), loadRubricas()]);
   fillStaticSelects();
-  renderDashboard(); renderCronograma(); renderRequisitos(); renderRiscosMarcos(); renderConfigTable(); renderAnalisarRequisitos(); renderFaturas(); renderPendencias(); renderItensMigracao();
+  renderDashboard(); renderCronograma(); renderRequisitos(); renderRiscosMarcos(); renderConfigTable(); renderAnalisarRequisitos(); renderFaturas(); renderPendencias(); renderItensMigracao(); renderRubricas();
   // "Minhas atividades" NÃO depende do projeto ativo desde a 16ª rodada
   // (mostra todos os projetos em que o usuário está delegado) — por isso,
   // ao contrário das demais views desta função, não precisa recarregar
@@ -2341,14 +2479,14 @@ async function afterProjetoReady(){
   aplicarMarcaNoTopo();
   fillStaticSelects();
   wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireGanttToolbar(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireExportarCronograma(); wireRemoverCronograma(); wireRemoverRequisitos(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma();
-  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros();
+  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros(); wireRubricaModal(); wireRubricasFiltros(); wireImportRubricas();
   setupCsvTemplateLink();
-  await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias(), loadItensMigracao()]);
+  await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias(), loadItensMigracao(), loadRubricas()]);
   // Reaplica agora que REQUISITOS/ATIVIDADES já estão carregados — os selects
   // "Item do TR" (atividade) e "Atividade (entregável)" (fatura) dependem
   // deles e a primeira chamada acima rodou antes desse load.
   fillStaticSelects();
-  renderDashboard(); renderCronograma(); renderRequisitos(); renderRiscosMarcos(); renderConfigTable(); renderAnalisarRequisitos(); renderFaturas(); renderPendencias(); renderItensMigracao();
+  renderDashboard(); renderCronograma(); renderRequisitos(); renderRiscosMarcos(); renderConfigTable(); renderAnalisarRequisitos(); renderFaturas(); renderPendencias(); renderItensMigracao(); renderRubricas();
   $("tabs").style.display = "flex";
 }
 
@@ -2407,6 +2545,10 @@ function fillStaticSelects(){
   // Migração de Dados (48ª rodada)
   $("mig-responsavel").innerHTML = `<option value="">—</option>` + recursoOpts;
   $("mig-atividade").innerHTML = `<option value="">— Nenhuma —</option>` + ATIVIDADES
+    .map(a=>`<option value="${a.id}">${a.codigo_wbs?esc(a.codigo_wbs)+" — ":""}${esc(a.nome)}</option>`).join("");
+
+  // Rubricas (53ª rodada)
+  $("rub-atividade").innerHTML = `<option value="">— Nenhuma —</option>` + ATIVIDADES
     .map(a=>`<option value="${a.id}">${a.codigo_wbs?esc(a.codigo_wbs)+" — ":""}${esc(a.nome)}</option>`).join("");
 
   // Fatura (27ª rodada): responsável pela entrega precisa ser da Consultoria (regra
@@ -3834,6 +3976,334 @@ async function addCicloMigracao(){
     await loadItensMigracao(); renderItensMigracao();
     toast("Ciclo registrado.");
   }catch(e){}
+}
+
+// ================= RUBRICAS (53ª rodada) =================
+// Levantamento e homologação das rubricas (regras de negócio) da folha de
+// pagamento — importado da planilha "Levantamento Rubricas" do cliente (ver
+// app/rubricas_import.py). empresas/incidencias vêm como jsonb do backend;
+// nesta primeira versão são mostradas na tela (resumo legível), não editadas
+// campo a campo — o grosso do trabalho de edição é nos campos de regra de
+// negócio e no funil de status/datas, que são os que mudam depois da
+// importação inicial.
+let editingRubricaId = null;
+const STATUS_RUBRICA_COLOR = {
+  "Em levantamento":"faint", "Enviada à Techne":"accent", "Liberada para testes":"accent",
+  "Em homologação":"warn", "Homologada":"ok", "Excluída":"danger",
+};
+
+async function loadRubricas(){ RUBRICAS = await api(`/rubricas?projeto_id=${PROJETO.id}`); }
+
+function rubFilters(){
+  return {
+    search: ($("rub-search").value||"").trim().toLowerCase(),
+    status: $("rub-status").value,
+    grupo: $("rub-grupo").value,
+  };
+}
+
+function renderRubricas(){
+  // grupos de cálculo encontrados nos dados carregados viram as opções do filtro —
+  // não é uma lista fixa (a planilha tem dezenas, e pode crescer a cada reimportação)
+  const grupoAtual = $("rub-grupo").value;
+  const grupos = Array.from(new Set(RUBRICAS.map(r=>r.grupo_calculo).filter(Boolean))).sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  $("rub-grupo").innerHTML = `<option value="">Grupo de cálculo (todos)</option>` + grupos.map(g=>`<option ${g===grupoAtual?"selected":""}>${esc(g)}</option>`).join("");
+
+  const f = rubFilters();
+  const list = RUBRICAS.filter(r=>{
+    if(f.status && r.status!==f.status) return false;
+    if(f.grupo && r.grupo_calculo!==f.grupo) return false;
+    if(f.search && !([r.codigo_ergon,r.verba_legado,r.nome_abreviado,r.nome_extenso,r.descricao_legado].join(" ").toLowerCase().includes(f.search))) return false;
+    return true;
+  });
+
+  const porStatus = {};
+  RUBRICAS.forEach(r=>{ porStatus[r.status] = (porStatus[r.status]||0)+1; });
+  $("rub-kpis").innerHTML = [
+    {l:"Total levantadas", v:RUBRICAS.length},
+    {l:"Em levantamento", v:porStatus["Em levantamento"]||0},
+    {l:"Enviadas à Techne", v:porStatus["Enviada à Techne"]||0},
+    {l:"Liberadas p/ testes", v:porStatus["Liberada para testes"]||0},
+    {l:"Em homologação", v:porStatus["Em homologação"]||0},
+    {l:"Homologadas", v:porStatus["Homologada"]||0},
+  ].map(k=>`<div class="kpi"><div class="label">${k.l}</div><div class="value">${k.v}</div></div>`).join("");
+
+  $("rubricas-tbody").innerHTML = list.length ? list.map(r=>{
+    const nome = r.nome_abreviado || r.nome_extenso || r.descricao_legado || "—";
+    const empresasAplicaveis = Object.entries(r.empresas||{}).filter(([,v])=>v && v.aplica).map(([k])=>k);
+    return `<tr class="clickable" data-id="${r.id}">
+      <td class="mono">${esc(r.codigo_ergon||"—")}</td>
+      <td class="mono">${esc(r.verba_legado||"—")}</td>
+      <td>${esc(nome)}${r.descricao_legado && r.descricao_legado!==nome ? `<div class="muted" style="font-size:11.5px;">${esc(r.descricao_legado)}</div>` : ""}</td>
+      <td class="muted">${esc(r.grupo_calculo||"—")}</td>
+      <td class="mono">${esc(r.tipo||"—")}</td>
+      <td class="muted">${empresasAplicaveis.length ? empresasAplicaveis.join(", ") : "—"}</td>
+      <td>${pill(r.status, STATUS_RUBRICA_COLOR[r.status]||"faint")}</td>
+      <td class="muted">${esc(r.analista||"—")}</td>
+    </tr>`;
+  }).join("") : `<tr class="empty-row"><td colspan="8">Nenhuma rubrica encontrada — importe a planilha ou cadastre manualmente.</td></tr>`;
+  $("rubricas-tbody").querySelectorAll("tr[data-id]").forEach(tr=>{
+    tr.addEventListener("click", ()=>openRubricaModal(byId(RUBRICAS, tr.dataset.id)));
+  });
+}
+
+function wireRubricasFiltros(){
+  ["rub-search","rub-status","rub-grupo"].forEach(id=>{
+    $(id).addEventListener("input", renderRubricas);
+    $(id).addEventListener("change", renderRubricas);
+  });
+}
+
+function wireRubricaModal(){
+  $("btn-new-rubrica").addEventListener("click", ()=>openRubricaModal(null));
+  $("rub-close").addEventListener("click", closeRubricaModal);
+  $("rub-cancel").addEventListener("click", closeRubricaModal);
+  $("overlay-rubrica").addEventListener("click", e=>{ if(e.target.id==="overlay-rubrica") closeRubricaModal(); });
+  $("rub-save").addEventListener("click", saveRubrica);
+  $("rub-delete").addEventListener("click", deleteRubrica);
+}
+
+// Rótulos amigáveis pras chaves de incidências/empresas guardadas em jsonb —
+// só pra exibição (o backend guarda a chave crua, ex: "incide_excedente").
+const INCIDENCIA_LABEL = {
+  ir:"IR", rgps:"RGPS", rpps:"RPPS", fgts:"FGTS", decimo_terceiro:"13º",
+  compoe_remuneracao:"Compõe remuneração", incide_excedente:"Incide excedente",
+  incorpora_aposentadoria:"Incorpora aposentadoria", base_consignacoes:"Base consignações",
+  base_quinquenio:"Base quinquênio", base_quinquenio_proporcional:"Base quinquênio proporcional",
+  base_hora_extra:"Base hora extra", base_complemento_sm:"Base complemento SM",
+  base_faltas:"Base faltas", um_terco_ferias:"1/3 férias",
+  adiantamento_13:"Adiantamento 13º", ressarcimento_cessao:"Ressarcimento cessão",
+};
+
+function openRubricaModal(r){
+  editingRubricaId = r ? r.id : null;
+  $("rub-modal-title").textContent = r ? "Editar rubrica" : "Nova rubrica";
+  $("rub-verba-legado").value = r?.verba_legado || "";
+  $("rub-codigo-ergon").value = r?.codigo_ergon || "";
+  $("rub-descricao-legado").value = r?.descricao_legado || "";
+  $("rub-nome-abreviado").value = r?.nome_abreviado || "";
+  $("rub-nome-extenso").value = r?.nome_extenso || "";
+  $("rub-tipo").value = r?.tipo || "";
+  $("rub-analista").value = r?.analista || "";
+  $("rub-grupo-calculo").value = r?.grupo_calculo || "";
+  $("rub-ordem-grupo").value = r?.ordem_grupo_calculo ?? "";
+  $("rub-legislacao").value = r?.legislacao || "";
+  $("rub-quant-autorizado").value = r?.quant_autorizado || "";
+  $("rub-valor-formula").value = r?.valor_formula || "";
+  $("rub-fato-origem").value = r?.fato_origem || "";
+  $("rub-regra-negocio").value = r?.regra_negocio || "";
+  $("rub-validacao-compat").value = r?.validacao_compatibilidade || "";
+  $("rub-validacao-incompat").value = r?.validacao_incompatibilidade || "";
+  $("rub-regime-vinculo").value = r?.regime_vinculo_direito || "";
+  $("rub-categoria-cargo").value = r?.categoria_cargo_direito || "";
+  $("rub-secretaria").value = r?.secretaria || "";
+  $("rub-periodicidade").value = r?.periodicidade || "";
+  $("rub-totalizacao").value = r?.totalizacao || "";
+  $("rub-outras-condicoes").value = r?.outras_condicoes || "";
+  $("rub-incompatibilidade").value = r?.incompatibilidade || "";
+  $("rub-edit-status").value = r?.status || "Em levantamento";
+  $("rub-atividade").value = r?.atividade_id || "";
+  $("rub-data-levantamento").value = r?.data_levantamento || "";
+  $("rub-revisado-por").value = r?.revisado_por || "";
+  $("rub-data-envio-techne").value = r?.data_envio_techne || "";
+  $("rub-consultor-techne").value = r?.consultor_techne || "";
+  $("rub-data-liberacao-testes").value = r?.data_liberacao_testes || "";
+  $("rub-condicoes-minimas").value = r?.condicoes_minimas_testes || "";
+  $("rub-responsavel-homologacao").value = r?.responsavel_homologacao || "";
+  $("rub-data-inicio-homologacao").value = r?.data_inicio_homologacao || "";
+  $("rub-data-homologacao").value = r?.data_homologacao || "";
+  $("rub-questionamentos-juridico").value = r?.questionamentos_juridico || "";
+  $("rub-observacoes").value = [r?.observacoes_liberacao, r?.observacoes_homologacao, r?.observacoes_finais].filter(Boolean).join("\n\n") || "";
+
+  const empresas = Object.entries(r?.empresas||{}).filter(([,v])=>v && (v.aplica || v.codigo));
+  $("rub-empresas-view").querySelector("div").innerHTML = empresas.length
+    ? empresas.map(([sigla,v])=>`<div><b>${esc(sigla)}</b>${v.codigo ? ` — ${esc(v.codigo)}` : ""}</div>`).join("")
+    : "—";
+  const incidencias = Object.entries(r?.incidencias||{}).filter(([,v])=>v);
+  $("rub-incidencias-view").querySelector("div").innerHTML = incidencias.length
+    ? incidencias.map(([k,v])=>`<div><b>${esc(INCIDENCIA_LABEL[k]||k)}:</b> ${esc(v)}</div>`).join("")
+    : "—";
+
+  $("rub-notas-importacao-wrap").hidden = !r?.notas_importacao;
+  $("rub-notas-importacao").textContent = r?.notas_importacao || "";
+
+  $("rub-delete").hidden = !r;
+  $("overlay-rubrica").hidden = false;
+}
+function closeRubricaModal(){ $("overlay-rubrica").hidden = true; editingRubricaId = null; }
+
+async function saveRubrica(){
+  const observacoesTexto = $("rub-observacoes").value.trim() || null;
+  const data = {
+    verba_legado: $("rub-verba-legado").value.trim() || null,
+    codigo_ergon: $("rub-codigo-ergon").value.trim() || null,
+    descricao_legado: $("rub-descricao-legado").value.trim() || null,
+    nome_abreviado: $("rub-nome-abreviado").value.trim() || null,
+    nome_extenso: $("rub-nome-extenso").value.trim() || null,
+    tipo: $("rub-tipo").value || null,
+    analista: $("rub-analista").value.trim() || null,
+    grupo_calculo: $("rub-grupo-calculo").value.trim() || null,
+    ordem_grupo_calculo: $("rub-ordem-grupo").value === "" ? null : Number($("rub-ordem-grupo").value),
+    legislacao: $("rub-legislacao").value.trim() || null,
+    quant_autorizado: $("rub-quant-autorizado").value.trim() || null,
+    valor_formula: $("rub-valor-formula").value.trim() || null,
+    fato_origem: $("rub-fato-origem").value.trim() || null,
+    regra_negocio: $("rub-regra-negocio").value.trim() || null,
+    validacao_compatibilidade: $("rub-validacao-compat").value.trim() || null,
+    validacao_incompatibilidade: $("rub-validacao-incompat").value.trim() || null,
+    regime_vinculo_direito: $("rub-regime-vinculo").value.trim() || null,
+    categoria_cargo_direito: $("rub-categoria-cargo").value.trim() || null,
+    secretaria: $("rub-secretaria").value.trim() || null,
+    periodicidade: $("rub-periodicidade").value.trim() || null,
+    totalizacao: $("rub-totalizacao").value.trim() || null,
+    outras_condicoes: $("rub-outras-condicoes").value.trim() || null,
+    incompatibilidade: $("rub-incompatibilidade").value.trim() || null,
+    status: $("rub-edit-status").value,
+    atividade_id: $("rub-atividade").value || null,
+    data_levantamento: $("rub-data-levantamento").value || null,
+    revisado_por: $("rub-revisado-por").value.trim() || null,
+    data_envio_techne: $("rub-data-envio-techne").value || null,
+    consultor_techne: $("rub-consultor-techne").value.trim() || null,
+    data_liberacao_testes: $("rub-data-liberacao-testes").value || null,
+    condicoes_minimas_testes: $("rub-condicoes-minimas").value.trim() || null,
+    responsavel_homologacao: $("rub-responsavel-homologacao").value.trim() || null,
+    data_inicio_homologacao: $("rub-data-inicio-homologacao").value || null,
+    data_homologacao: $("rub-data-homologacao").value || null,
+    questionamentos_juridico: $("rub-questionamentos-juridico").value.trim() || null,
+    // Edição manual não distingue mais as 3 observações separadas da planilha
+    // (liberação/homologação/finais) — junta tudo em observacoes_finais; os
+    // campos originais continuam intactos se vieram da importação e não forem
+    // tocados aqui (só entra no payload o que muda via esta tela).
+    observacoes_finais: observacoesTexto,
+  };
+  if(!data.nome_abreviado && !data.descricao_legado){ toast("Informe ao menos o nome ou a descrição no legado.", true); return; }
+  if(!editingRubricaId) data.projeto_id = PROJETO.id;
+  try{
+    if(editingRubricaId) await api(`/rubricas/${editingRubricaId}`, {method:"PUT", body: JSON.stringify(data)});
+    else await api("/rubricas", {method:"POST", body: JSON.stringify(data)});
+    await loadRubricas(); renderRubricas();
+    toast("Rubrica salva.");
+    closeRubricaModal();
+  }catch(e){}
+}
+
+async function deleteRubrica(){
+  if(!editingRubricaId) return;
+  if(!confirm("Excluir esta rubrica?")) return;
+  try{
+    await api(`/rubricas/${editingRubricaId}`, {method:"DELETE"});
+    await loadRubricas(); renderRubricas(); closeRubricaModal(); toast("Rubrica excluída.");
+  }catch(e){}
+}
+
+// ---------------- Importação da planilha de Rubricas ----------------
+let rubImpItens = [], rubImpConfirmando = false;
+
+function wireImportRubricas(){
+  $("btn-import-rubricas").addEventListener("click", openImportarRubricasModal);
+  $("rubimp-close").addEventListener("click", closeImportarRubricasModal);
+  $("rubimp-cancel").addEventListener("click", closeImportarRubricasModal);
+  $("overlay-importar-rubricas").addEventListener("click", e=>{ if(e.target.id==="overlay-importar-rubricas") closeImportarRubricasModal(); });
+  $("rubimp-analisar").addEventListener("click", analisarRubricas);
+  $("rubimp-confirmar").addEventListener("click", confirmarImportacaoRubricas);
+  $("rubimp-check-all").addEventListener("change", ()=>{
+    const checked = $("rubimp-check-all").checked;
+    $("rubimp-preview-tbody").querySelectorAll("input[type=checkbox][data-idx]").forEach(cb=>{
+      cb.checked = checked;
+      rubImpItens[Number(cb.dataset.idx)]._selecionado = checked;
+    });
+  });
+  $("rubimp-preview-search").addEventListener("input", renderRubImpPreviewTable);
+  $("rubimp-preview-status").addEventListener("change", renderRubImpPreviewTable);
+}
+
+function openImportarRubricasModal(){
+  rubImpItens = [];
+  $("rubimp-file").value = "";
+  $("rubimp-step-upload").hidden = false;
+  $("rubimp-step-preview").hidden = true;
+  $("rubimp-analisar").hidden = false;
+  $("rubimp-confirmar").hidden = true;
+  $("rubimp-foot-hint").textContent = "";
+  $("overlay-importar-rubricas").hidden = false;
+}
+function closeImportarRubricasModal(){ $("overlay-importar-rubricas").hidden = true; }
+
+async function analisarRubricas(){
+  const file = $("rubimp-file").files[0];
+  if(!file){ toast("Selecione o arquivo da planilha.", true); return; }
+  const fd = new FormData(); fd.append("projeto_id", PROJETO.id); fd.append("file", file);
+  $("rubimp-analisar").disabled = true; $("rubimp-analisar").textContent = "Analisando…";
+  try{
+    const r = await api("/rubricas/importar/preview", {method:"POST", body: fd});
+    rubImpItens = (r.itens||[]).map(it=>({...it, _selecionado: true}));
+    const resumo = r.resumo || {};
+    let avisosHtml = "";
+    if(r.avisos && r.avisos.length){
+      avisosHtml += `<ul class="muted" style="margin:0 0 10px 18px;font-size:12px;">${r.avisos.map(a=>`<li>${esc(a)}</li>`).join("")}</ul>`;
+    }
+    $("rubimp-avisos").innerHTML = avisosHtml;
+    $("rubimp-resumo").innerHTML = [
+      {l:"Total na planilha", v: resumo.total ?? rubImpItens.length},
+      {l:"Já cadastradas (serão atualizadas)", v: resumo.ja_existentes ?? 0},
+      {l:"Homologadas", v: (resumo.por_status||{})["Homologada"] ?? 0},
+      {l:"Em levantamento", v: (resumo.por_status||{})["Em levantamento"] ?? 0},
+    ].map(k=>`<div class="kpi"><div class="label">${k.l}</div><div class="value">${k.v}</div></div>`).join("");
+    $("rubimp-check-all").checked = true;
+    $("rubimp-preview-search").value = ""; $("rubimp-preview-status").value = "";
+    renderRubImpPreviewTable();
+    $("rubimp-step-upload").hidden = true;
+    $("rubimp-step-preview").hidden = false;
+    $("rubimp-analisar").hidden = true;
+    $("rubimp-confirmar").hidden = false;
+    $("rubimp-foot-hint").textContent = `${rubImpItens.length} linha(s) encontrada(s) — desmarque o que não deve ser importado.`;
+  }catch(e){}
+  $("rubimp-analisar").disabled = false; $("rubimp-analisar").textContent = "Analisar planilha";
+}
+
+function renderRubImpPreviewTable(){
+  const busca = $("rubimp-preview-search").value.trim().toLowerCase();
+  const status = $("rubimp-preview-status").value;
+  const linhas = rubImpItens.map((it, idx)=>({it, idx})).filter(({it})=>{
+    if(status && it.status !== status) return false;
+    if(busca && !([it.verba_legado, it.codigo_ergon, it.nome_abreviado, it.descricao_legado].join(" ").toLowerCase().includes(busca))) return false;
+    return true;
+  });
+  $("rubimp-preview-tbody").innerHTML = linhas.length ? linhas.map(({it, idx})=>`
+    <tr>
+      <td><input type="checkbox" data-idx="${idx}" ${it._selecionado ? "checked" : ""}></td>
+      <td class="mono">${it.linha_planilha}</td>
+      <td class="mono">${esc(it.verba_legado||"—")}</td>
+      <td class="mono">${esc(it.codigo_ergon||"—")}${it.ja_existe ? ' <span class="muted" style="font-size:11px;">(já existe)</span>' : ""}</td>
+      <td>${esc(it.nome_abreviado || it.descricao_legado || "—")}</td>
+      <td>${pill(it.status, STATUS_RUBRICA_COLOR[it.status]||"faint")}</td>
+    </tr>`).join("") : `<tr class="empty-row"><td colspan="6">Nenhuma linha corresponde ao filtro.</td></tr>`;
+  $("rubimp-preview-tbody").querySelectorAll("input[type=checkbox][data-idx]").forEach(cb=>{
+    cb.addEventListener("change", ()=>{
+      rubImpItens[Number(cb.dataset.idx)]._selecionado = cb.checked;
+      const visiveis = $("rubimp-preview-tbody").querySelectorAll("input[type=checkbox][data-idx]");
+      $("rubimp-check-all").checked = Array.from(visiveis).every(c=>c.checked);
+    });
+  });
+}
+
+async function confirmarImportacaoRubricas(){
+  if(rubImpConfirmando) return;
+  const selecionados = rubImpItens.filter(it=>it._selecionado);
+  if(!selecionados.length){ toast("Selecione ao menos uma linha para importar.", true); return; }
+  rubImpConfirmando = true;
+  $("rubimp-confirmar").disabled = true; $("rubimp-confirmar").textContent = "Importando…";
+  try{
+    const r = await api("/rubricas/importar/confirmar", {
+      method: "POST",
+      body: JSON.stringify({ projeto_id: PROJETO.id, itens: selecionados }),
+    });
+    toast(`Importação concluída: ${r.inseridos} nova(s), ${r.atualizados} atualizada(s).`);
+    await loadRubricas(); renderRubricas();
+    closeImportarRubricasModal();
+  }catch(e){}
+  rubImpConfirmando = false;
+  $("rubimp-confirmar").disabled = false; $("rubimp-confirmar").textContent = "Confirmar importação";
 }
 
 // ================= MODAL ATIVIDADE =================
