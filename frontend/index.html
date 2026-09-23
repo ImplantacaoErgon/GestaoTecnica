@@ -1378,7 +1378,10 @@
     </div>
 
     <div class="modal-foot">
-      <button class="btn danger" id="at-delete" style="visibility:hidden;">Excluir atividade</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn danger" id="at-delete" style="visibility:hidden;">Excluir atividade</button>
+        <button class="btn secondary" id="at-duplicar" style="visibility:hidden;">⧉ Duplicar atividade</button>
+      </div>
       <div style="display:flex;gap:8px;"><button class="btn secondary" id="at-cancel">Cancelar</button><button class="btn" id="at-save">Salvar</button></div>
     </div>
   </div>
@@ -4527,6 +4530,17 @@ function wireAtividadeModal(){
       toast("Atividade excluída.");
     });
   });
+  // 56ª rodada — duplica dados, recursos e predecessoras da atividade (rota
+  // POST /atividades/<id>/duplicar) e já abre a cópia pra edição, pra o
+  // usuário emendar direto os ajustes (código WBS, datas etc.) sem precisar
+  // caçar a nova linha na tabela.
+  $("at-duplicar").addEventListener("click", async ()=>{
+    if(!editingAtividadeId) return;
+    const copia = await api(`/atividades/${editingAtividadeId}/duplicar`, {method:"POST"});
+    await loadAtividades(); renderCronograma(); renderDashboard();
+    toast("Atividade duplicada — ajuste o que precisar na cópia.");
+    openAtividadeModal(copia);
+  });
   $("at-resp-add").addEventListener("click", async ()=>{
     const recurso_id = $("at-resp-add-select").value; if(!recurso_id) return;
     const horas_alocadas = $("at-resp-add-horas").value ? Number($("at-resp-add-horas").value) : null;
@@ -4588,6 +4602,7 @@ function openAtividadeModal(atividade){
   editingAtividadeId = atividade ? atividade.id : null;
   $("at-modal-title").textContent = atividade ? "Editar atividade" : "Nova atividade";
   $("at-delete").style.visibility = atividade ? "visible" : "hidden";
+  $("at-duplicar").style.visibility = atividade ? "visible" : "hidden";
   $("at-codigo").value = atividade?.codigo_wbs || "";
   $("at-nome").value = atividade?.nome || "";
   $("at-descricao").value = atividade?.descricao || "";
