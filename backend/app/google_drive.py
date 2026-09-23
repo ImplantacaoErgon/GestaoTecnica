@@ -63,6 +63,38 @@ _MIME_XLSM = "application/vnd.ms-excel.sheet.macroEnabled.12"
 _MIME_GOOGLE_SHEETS = "application/vnd.google-apps.spreadsheet"
 _MIMES_RECONHECIDOS = {_MIME_XLSX, _MIME_XLSM, _MIME_GOOGLE_SHEETS}
 
+# CSV — NÃO faz parte de _MIMES_RECONHECIDOS por padrão (só faz sentido pra
+# Comparação Folha: visto em produção, na 55ª rodada, que o arquivo real da
+# pasta de Comparação Folha é um .csv exportado direto do sistema legado,
+# não um .xlsx — a planilha de Rubricas, em contraste, é editada à mão em
+# Excel e não teria por que virar CSV). Quem quiser aceitar CSV também passa
+# `mimes_extra=MIMES_CSV` pra baixar_arquivo_mais_recente (ver
+# drive_comparacao_folha.py). Inclui duas variantes de MIME além da
+# "correta" (text/csv) por tolerância — o Drive/navegador às vezes classifica
+# um .csv como texto simples dependendo de como foi subido.
+_MIME_CSV = "text/csv"
+MIMES_CSV = {_MIME_CSV, "text/plain", "application/csv"}
+
+_DESCRICAO_MIME = {
+    _MIME_XLSX: ".xlsx",
+    _MIME_XLSM: ".xlsm",
+    _MIME_GOOGLE_SHEETS: "Planilha Google",
+    _MIME_CSV: ".csv",
+}
+
+
+def _descricao_formatos(mimes_aceitos):
+    """Texto tipo ".xlsx, .xlsm, Planilha Google ou .csv" pras mensagens de
+    erro, montado a partir de quais MIMEs estão em `mimes_aceitos` — só
+    lista os "principais" de _DESCRICAO_MIME (ignora as variantes de
+    tolerância como text/plain, pra não poluir a mensagem)."""
+    nomes = [nome for mime, nome in _DESCRICAO_MIME.items() if mime in mimes_aceitos]
+    if not nomes:
+        return "planilha"
+    if len(nomes) == 1:
+        return nomes[0]
+    return ", ".join(nomes[:-1]) + " ou " + nomes[-1]
+
 
 class GoogleDriveError(Exception):
     """Erro de configuração ou de comunicação com o Google Drive — a
@@ -134,14 +166,14 @@ def _drive_service():
         raise GoogleDriveError(f"Falha ao autenticar com a conta de serviço do Google: {e}")
 
 
-def _candidatos_arquivos(service, folder_id_env, contexto):
-    """Lista os arquivos "que parecem planilha" (MIME reconhecido) da pasta,
-    do mais pro menos recentemente modificado. Retorna a LISTA inteira (não
-    só o primeiro) — ver baixar_arquivo_mais_recente, que agora pode
-    precisar tentar mais de um candidato (55ª rodada: a pasta compartilhada
-    tinha um documento não relacionado, mais recentemente modificado que a
-    planilha de verdade, sendo escolhido por engano pela regra antiga de
-    "sempre pega só o mais recente")."""
+def _candidatos_arquivos(service, folder_id_env, contexto, mimes_aceitos):
+    """Lista os arquivos "que parecem planilha" (MIME em `mimes_aceitos`) da
+    pasta, do mais pro menos recentemente modificado. Retorna a LISTA
+    inteira (não só o primeiro) — ver baixar_arquivo_mais_recente, que agora
+    pode precisar tentar mais de um candidato (55ª rodada: a pasta
+    compartilhada tinha um documento não relacionado, mais recentemente
+    modificado que a planilha de verdade, sendo escolhido por engano pela
+    regra antiga de "sempre pega só o mais recente")."""
     folder_id = _folder_id(folder_id_env)
     query = f"'{folder_id}' in parents and trashed = false"
     try:
@@ -161,7 +193,7 @@ def _candidatos_arquivos(service, folder_id_env, contexto):
             f"pasta foi compartilhada com o e-mail da conta de serviço. Detalhe: {e}"
         )
     todos = resp.get("files", [])
-    candidatos = [f for f in todos if f.get("mimeType") in _MIMES_RECONHECIDOS]
+    candidatos = [f for f in todos if f.get("mimeType") in mimes_aceitos]
     if not candidatos:
         # Diagnóstico direto na mensagem de erro (55ª rodada — visto em produção:
         # a pasta foi encontrada e compartilhada certinho, mas nada bateu com os
@@ -176,8 +208,8 @@ def _candidatos_arquivos(service, folder_id_env, contexto):
             )
         listagem = "; ".join(f'"{f.get("name")}" ({f.get("mimeType")})' for f in todos[:10])
         raise GoogleDriveError(
-            f"Nenhum arquivo reconhecido como planilha (.xlsx, .xlsm ou Planilha Google) foi "
-            f"encontrado na pasta do Drive de {contexto}. Arquivos encontrados na pasta: "
+            f"Nenhum arquivo reconhecido como planilha ({_descricao_formatos(mimes_aceitos)}) "
+            f"foi encontrado na pasta do Drive de {contexto}. Arquivos encontrados na pasta: "
             f"{listagem}{' (e outros)' if len(todos) > 10 else ''} — confira se o arquivo "
             "certo está nessa pasta e nesse formato."
         )
@@ -203,13 +235,19 @@ def _baixar_conteudo(service, arquivo):
     return buf.read()
 
 
-def baixar_arquivo_mais_recente(folder_id_env, contexto, validar=None, max_tentativas=5):
+def baixar_arquivo_mais_recente(folder_id_env, contexto, validar=None, max_tentativas=5, mimes_extra=None):
     """Retorna (conteudo_bytes, nome_arquivo, modificado_em_iso) de um
     arquivo da pasta apontada pela variável de ambiente `folder_id_env`.
     `contexto` é só pra mensagem de erro (ex: "Rubricas", "Comparação
     Folha"). Levanta GoogleDriveError, com uma mensagem pronta pra mostrar
     ao usuário, se falhar em qualquer etapa (configuração, autenticação,
     listagem ou download).
+
+    `mimes_extra`: conjunto de MIME types aceitos ALÉM dos de planilha
+    "de verdade" (.xlsx/.xlsm/Planilha Google, ver _MIMES_RECONHECIDOS) —
+    hoje usado só por Comparação Folha, que pode receber o arquivo como
+    .csv exportado direto do sistema legado (ver google_drive.MIMES_CSV e
+    drive_comparacao_folha.py).
 
     Sem `validar`: usa sempre o arquivo mais recentemente modificado da
     pasta, sem checar o conteúdo — comportamento original (54ª/55ª rodada).
@@ -231,7 +269,8 @@ def baixar_arquivo_mais_recente(folder_id_env, contexto, validar=None, max_tenta
     GoogleDriveError detalhando, arquivo por arquivo, por que cada um foi
     rejeitado."""
     service = _drive_service()
-    candidatos = _candidatos_arquivos(service, folder_id_env, contexto)
+    mimes_aceitos = set(_MIMES_RECONHECIDOS) | set(mimes_extra or ())
+    candidatos = _candidatos_arquivos(service, folder_id_env, contexto, mimes_aceitos)
 
     if validar is None:
         arquivo = candidatos[0]

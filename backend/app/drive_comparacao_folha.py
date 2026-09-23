@@ -22,6 +22,14 @@ validação usa comparacao_folha_import.validar_estrutura(), que só confere
 o cabeçalho (barata mesmo pra um arquivo de ~130MB — não lê as ~300 mil
 linhas de dados), pra não pagar o custo de rodar a importação inteira só
 pra descobrir que o arquivo é o errado.
+
+Desde a 55ª rodada (Adendo 4), também aceita `.csv` (google_drive.MIMES_CSV)
+além de .xlsx/.xlsm/Planilha Google — visto em produção: o arquivo de
+verdade que o sistema legado exporta pra essa pasta é um .csv
+("LISTA_COMPARA FOLHAS_....csv"), não uma planilha Excel. `validar_estrutura`
+e o resto do parser (`comparacao_folha_import.py`) já reconhecem CSV
+automaticamente (detectam pelo conteúdo, não pela extensão do nome), então
+nada muda aqui além de aceitar o MIME na busca.
 """
 from . import comparacao_folha_import, google_drive
 
@@ -34,11 +42,14 @@ def baixar_planilha_mais_recente():
     GOOGLE_DRIVE_COMPARACAO_FOLDER_ID — tentando, em ordem de modificação
     mais recente primeiro, até achar um arquivo cujo cabeçalho realmente
     valide como Comparação Folha (ver comparacao_folha_import.
-    validar_estrutura e o comentário no topo do arquivo). Levanta
-    DriveComparacaoFolhaError com uma mensagem pronta pra mostrar ao
-    usuário se falhar em qualquer etapa."""
+    validar_estrutura e o comentário no topo do arquivo). Aceita tanto
+    planilha (.xlsx/.xlsm/Planilha Google) quanto .csv — o formato real que
+    o sistema legado exporta pra essa pasta. Levanta DriveComparacaoFolhaError
+    com uma mensagem pronta pra mostrar ao usuário se falhar em qualquer
+    etapa."""
     return google_drive.baixar_arquivo_mais_recente(
         folder_id_env="GOOGLE_DRIVE_COMPARACAO_FOLDER_ID",
         contexto="Comparação Folha",
         validar=comparacao_folha_import.validar_estrutura,
+        mimes_extra=google_drive.MIMES_CSV,
     )

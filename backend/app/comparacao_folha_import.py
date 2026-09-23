@@ -25,6 +25,16 @@ string SQL gigante. Por isso:
     linha) e reimportar o mesmo mês SUBSTITUI as linhas antigas daquele mês
     (delete-then-copy, dentro de uma única transação) — ver
     substituir_comparacao_mes().
+
+Desde o Adendo 4 (55ª rodada): aceita tanto .xlsx/.xlsm quanto .csv — visto
+em produção que o arquivo de verdade que o sistema legado exporta pra essa
+integração é um .csv, não uma planilha Excel. O formato é detectado pelo
+CONTEÚDO do arquivo (assinatura binária de ZIP no início = .xlsx/.xlsm;
+senão, tratado como CSV — ver _parece_xlsx), não pela extensão do nome, que
+não é confiável (o nome real visto foi "LISTA_COMPARA FOLHAS_7475.csv").
+Todo o resto do parser (cabeçalho, detecção de MESANO, geração das linhas
+COPY) funciona igual pros dois formatos, através do adaptador _CsvComoAba,
+que expõe a mesma interface `iter_rows()` que uma aba do openpyxl.
 """
 import re
 from datetime import date, datetime
@@ -116,6 +126,11 @@ CAMPOS_TIMESTAMP = {"data_hora_convergencia"}
 COLUNAS_ESSENCIAIS = {"MATRICULA", "MESANO", "SITUACAO", "RUBRICA_ERGON", "VALOR_ERGON", "VALOR_CONSIST"}
 
 _DATA_TEXTO_RE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{2,4})$")
+# Formato ISO (AAAA-MM-DD) — não visto ainda na planilha .xlsx (que usa
+# célula de data nativa, sem passar por texto), mas comum em exports de
+# CSV direto de banco de dados; aceito como alternativa ao formato acima,
+# sem substituir nada (Adendo 4, 55ª rodada — suporte a .csv).
+_DATA_ISO_RE = re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})$")
 
 
 class ComparacaoFolhaImportError(Exception):
@@ -152,15 +167,23 @@ def _data(v):
         return v.date().isoformat()
     if isinstance(v, date):
         return v.isoformat()
-    m = _DATA_TEXTO_RE.match(str(v).strip())
-    if not m:
-        return None
-    dia, mes, ano = m.groups()
-    ano_i = int(ano) + 2000 if len(ano) == 2 else int(ano)
-    try:
-        return date(ano_i, int(mes), int(dia)).isoformat()
-    except ValueError:
-        return None
+    s = str(v).strip()
+    m = _DATA_TEXTO_RE.match(s)
+    if m:
+        dia, mes, ano = m.groups()
+        ano_i = int(ano) + 2000 if len(ano) == 2 else int(ano)
+        try:
+            return date(ano_i, int(mes), int(dia)).isoformat()
+        except ValueError:
+            return None
+    m = _DATA_ISO_RE.match(s)
+    if m:
+        ano, mes, dia = m.groups()
+        try:
+            return date(int(ano), int(mes), int(dia)).isoformat()
+        except ValueError:
+            return None
+    return None
 
 
 def _timestamp(v):
@@ -183,17 +206,88 @@ def _copy_escape(v):
     return s.replace("\\", "\\\\").replace("\t", "\\t").replace("\n", "\\n").replace("\r", "\\r")
 
 
-def _abrir_primeira_aba_com_dados(conteudo_bytes):
-    """Retorna a primeira aba que tem cabeçalho + ao menos 1 linha de dados.
+def _parece_xlsx(conteudo_bytes):
+    """Arquivos .xlsx/.xlsm são, por baixo dos panos, um ZIP — sempre
+    começam com a assinatura binária "PK\\x03\\x04". Detecta o formato pelo
+    CONTEÚDO (não pelo nome/extensão do arquivo, que pode mentir) — é assim
+    que decidimos entre abrir via openpyxl ou tratar como CSV (Adendo 4, 55ª
+    rodada: o arquivo real da pasta de Comparação Folha no Drive é um .csv
+    exportado direto do sistema legado, não uma planilha Excel)."""
+    return conteudo_bytes[:4] == b"PK\x03\x04"
 
-    Não usa `ws.max_row` pra decidir isso — esse atributo depende da tag XML
-    <dimension>, que nem toda planilha .xlsx preenche (confirmado: arquivos
-    salvos em modo write_only do openpyxl, usados aqui só pra gerar massa de
-    teste em escala, saem com max_row = None mesmo tendo dezenas de milhares
-    de linhas reais). Em vez disso, tenta ler de fato as duas primeiras
-    linhas (cabeçalho + 1ª linha de dados) via iter_rows — funciona igual
-    tanto pra planilhas com <dimension> preenchida (caso normal, ex: Excel/
-    LibreOffice) quanto sem."""
+
+def _decodificar_csv(conteudo_bytes):
+    """Tenta alguns encodings comuns em exports de sistema legado brasileiro
+    — utf-8 (com ou sem BOM) é o mais provável vindo de um export recente,
+    mas latin-1 (cp1252-like) ainda aparece em exports mais antigos/Windows.
+    latin-1 nunca levanta UnicodeDecodeError (mapeia todo byte pra um
+    caractere), então serve de último recurso garantido."""
+    for encoding in ("utf-8-sig", "utf-8"):
+        try:
+            return conteudo_bytes.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return conteudo_bytes.decode("latin-1")
+
+
+class _CsvComoAba:
+    """Adaptador mínimo que dá ao resto do parser (_mapear_cabecalho,
+    _detectar_mesano_alvo, _linhas_copy) a MESMA interface que eles já usam
+    numa aba do openpyxl — só o método `iter_rows(min_row=, max_row=,
+    values_only=True)` — pra o resto da lógica de leitura funcionar igual
+    tanto pra .xlsx/.xlsm quanto pra .csv, sem duplicar código.
+
+    `conteudo_bytes` já está inteiro na memória de qualquer jeito (baixado
+    do Drive por completo antes de chegar aqui — ver google_drive.py), então
+    reabrir um `csv.reader` do zero a cada chamada de `iter_rows` (em vez de
+    guardar um único iterador consumível uma vez só) não perde nada da
+    vantagem de streaming que o modo read_only do openpyxl tem sobre XML —
+    o ganho de streaming de verdade deste módulo está na ESCRITA pro
+    Postgres via COPY (ver _linhas_copy/db.execute_stream), não na leitura,
+    que sempre trabalha em cima do conteúdo já carregado."""
+
+    def __init__(self, conteudo_bytes):
+        texto = _decodificar_csv(conteudo_bytes)
+        primeira_linha = texto.split("\n", 1)[0] if texto else ""
+        # Exports de sistemas legados brasileiros frequentemente usam ";"
+        # como separador (evita conflito com a vírgula decimal) — detecta
+        # pelo que aparece mais na primeira linha.
+        self._delimitador = ";" if primeira_linha.count(";") > primeira_linha.count(",") else ","
+        self._texto = texto
+
+    def iter_rows(self, min_row=1, max_row=None, values_only=True):
+        import csv
+        import io
+        leitor = csv.reader(io.StringIO(self._texto), delimiter=self._delimitador)
+        for i, linha in enumerate(leitor, start=1):
+            if i < min_row:
+                continue
+            if max_row is not None and i > max_row:
+                return
+            yield tuple(v if v != "" else None for v in linha)
+
+
+def _abrir_primeira_aba_com_dados(conteudo_bytes):
+    """Retorna a primeira aba/fonte que tem cabeçalho + ao menos 1 linha de
+    dados — de um arquivo .xlsx/.xlsm (via openpyxl) ou .csv (via
+    _CsvComoAba), detectando qual é pelo conteúdo (ver _parece_xlsx).
+
+    No caso .xlsx, não usa `ws.max_row` pra decidir isso — esse atributo
+    depende da tag XML <dimension>, que nem toda planilha .xlsx preenche
+    (confirmado: arquivos salvos em modo write_only do openpyxl, usados
+    aqui só pra gerar massa de teste em escala, saem com max_row = None
+    mesmo tendo dezenas de milhares de linhas reais). Em vez disso, tenta
+    ler de fato as duas primeiras linhas (cabeçalho + 1ª linha de dados)
+    via iter_rows — funciona igual tanto pra planilhas com <dimension>
+    preenchida (caso normal, ex: Excel/LibreOffice) quanto sem."""
+    if not _parece_xlsx(conteudo_bytes):
+        aba = _CsvComoAba(conteudo_bytes)
+        linhas = aba.iter_rows(min_row=1, max_row=2, values_only=True)
+        tem_cabecalho = next(linhas, None) is not None
+        tem_dado = next(linhas, None) is not None
+        if tem_cabecalho and tem_dado:
+            return aba
+        raise ComparacaoFolhaImportError("O arquivo CSV não tem cabeçalho + ao menos 1 linha de dados.")
     import io
     import openpyxl
     wb = openpyxl.load_workbook(io.BytesIO(conteudo_bytes), data_only=True, read_only=True)
