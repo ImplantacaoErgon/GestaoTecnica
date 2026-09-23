@@ -185,12 +185,29 @@ def parse_rubricas_document(conteudo_bytes, nome_arquivo=""):
     except Exception as e:
         raise RubricasImportError(f"Não foi possível ler o arquivo como planilha Excel: {e}")
 
-    if ABA_ESPERADA not in wb.sheetnames:
+    aviso_aba = None
+    if ABA_ESPERADA in wb.sheetnames:
+        ws = wb[ABA_ESPERADA]
+    elif len(wb.sheetnames) == 1:
+        # Visto em produção (55ª rodada, botão "Atualizar Rubricas" via
+        # Drive): a planilha real às vezes é resalva/reexportada e perde o
+        # nome original da aba, virando o nome genérico que o Excel/Google
+        # Sheets dá por padrão (ex: "Planilha1"/"Sheet1"). Em vez de barrar
+        # de cara, aceita quando é a ÚNICA aba do arquivo — a validação do
+        # cabeçalho logo abaixo (coluna B = "Verba 07") ainda pega o caso de
+        # ser o arquivo errado. Fica um aviso explícito na prévia de
+        # qualquer forma, pro usuário confirmar antes de importar.
+        ws = wb[wb.sheetnames[0]]
+        aviso_aba = (
+            f'A aba se chama "{wb.sheetnames[0]}", não "{ABA_ESPERADA}" como esperado — usando '
+            "ela mesmo assim, por ser a única aba do arquivo. Confirme que é o arquivo certo "
+            "antes de importar."
+        )
+    else:
         raise RubricasImportError(
             f'A planilha não tem uma aba chamada "{ABA_ESPERADA}" (abas encontradas: '
             f'{", ".join(wb.sheetnames)}). Confirme se é o arquivo certo.'
         )
-    ws = wb[ABA_ESPERADA]
 
     cabecalho_verba = ws.cell(row=LINHA_CABECALHO, column=2).value
     if not (cabecalho_verba and "verba" in str(cabecalho_verba).lower()):
@@ -201,7 +218,7 @@ def parse_rubricas_document(conteudo_bytes, nome_arquivo=""):
         )
 
     itens = []
-    avisos = []
+    avisos = [aviso_aba] if aviso_aba else []
     for r in range(LINHA_PRIMEIRA_DADOS, ws.max_row + 1):
         verba = ws.cell(row=r, column=2).value
         descricao = ws.cell(row=r, column=3).value

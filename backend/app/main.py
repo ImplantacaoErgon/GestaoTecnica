@@ -2095,9 +2095,13 @@ def create_app():
         try:
             resultado = _rubricas_preview_resultado(projeto_id, conteudo, nome_arquivo)
         except rubricas_import.RubricasImportError as e:
-            return jsonify({"erro": str(e)}), 400
+            # Inclui qual arquivo foi baixado do Drive na mensagem — sem isso,
+            # um erro de parse (aba/cabeçalho errado) não dá pra saber se foi o
+            # arquivo errado que acabou sendo o "mais recentemente modificado"
+            # da pasta (visto em produção, 55ª rodada).
+            return jsonify({"erro": f'{e} (arquivo do Drive: "{nome_arquivo}", modificado em {modificado_em})'}), 400
         except Exception as e:
-            return jsonify({"erro": f"Falha ao ler a planilha: {e}"}), 400
+            return jsonify({"erro": f'Falha ao ler a planilha "{nome_arquivo}": {e}'}), 400
         resultado["arquivo_origem"] = {"nome": nome_arquivo, "modificado_em": modificado_em}
         return jsonify(resultado)
 
@@ -2197,9 +2201,12 @@ def create_app():
         try:
             resultado = comparacao_folha_import.importar_comparacao_folha(projeto_id, conteudo)
         except comparacao_folha_import.ComparacaoFolhaImportError as e:
-            return jsonify({"erro": str(e)}), 400
+            # Mesma razão do endpoint de Rubricas acima: sem o nome do arquivo
+            # aqui, um erro de parse não diz se foi o arquivo errado que caiu
+            # como "mais recentemente modificado" da pasta do Drive.
+            return jsonify({"erro": f'{e} (arquivo do Drive: "{nome_arquivo}", modificado em {modificado_em})'}), 400
         except Exception as e:
-            return jsonify({"erro": f"Falha ao importar a planilha: {e}"}), 400
+            return jsonify({"erro": f'Falha ao importar a planilha "{nome_arquivo}": {e}'}), 400
         resultado["arquivo_origem"] = {"nome": nome_arquivo, "modificado_em": modificado_em}
         auditoria.registrar_evento_manual(
             "edicao", f"Atualizou Comparação Folha — competência {resultado['mesano'][:7]} "

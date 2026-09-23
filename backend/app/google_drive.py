@@ -30,14 +30,32 @@ diferentes a cada vez (ex: "..._revisadas_5.xlsx", depois "_6", "_7"...).
 import io
 import json
 import os
+import re
 
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 
-# Tipos MIME que tratamos como "é uma planilha que dá pra importar": um
-# .xlsx de verdade, ou uma Planilha Google nativa (nesse caso baixamos via
-# export, convertendo pra xlsx na hora — os parsers só entendem .xlsx).
+# Erro real visto em produção (55ª rodada): a variável de ambiente da pasta
+# recebeu "folders/<id>" (ou o link inteiro da pasta) em vez de só o `<id>`
+# puro que o campo espera — o Google então devolve "File not found" pro
+# fileId (a própria string "folders/<id>" tratada como se fosse um id),
+# confundindo com "pasta não compartilhada". Casa tanto "folders/<id>" quanto
+# o link completo ("https://drive.google.com/drive/folders/<id>?usp=sharing")
+# — em ambos os casos [a-zA-Z0-9_-]+ para exatamente no "?" ou "/" seguinte,
+# isolando só o id.
+_FOLDER_URL_ID_RE = re.compile(r"folders/([a-zA-Z0-9_-]+)")
+
+# Tipos MIME que tratamos como "é uma planilha que dá pra importar": .xlsx
+# ou .xlsm de verdade (baixados direto, sem conversão — o formato de arquivo
+# é o mesmo, .xlsm só tem macro a mais, que os parsers ignoram), ou uma
+# Planilha Google nativa (baixada via export, convertendo pra .xlsx na hora
+# — os parsers só entendem .xlsx/.xlsm). NÃO inclui o formato antigo .xls
+# (BIFF) — openpyxl não lê esse formato, e ele tem limite de 65.536 linhas,
+# incompatível com os volumes deste sistema (Comparação Folha chega a ~300
+# mil linhas por arquivo).
 _MIME_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+_MIME_XLSM = "application/vnd.ms-excel.sheet.macroEnabled.12"
 _MIME_GOOGLE_SHEETS = "application/vnd.google-apps.spreadsheet"
+_MIMES_RECONHECIDOS = {_MIME_XLSX, _MIME_XLSM, _MIME_GOOGLE_SHEETS}
 
 
 class GoogleDriveError(Exception):
@@ -63,14 +81,20 @@ def _service_account_info():
 
 
 def _folder_id(folder_id_env):
-    folder_id = (os.environ.get(folder_id_env) or "").strip()
-    if not folder_id:
+    raw = (os.environ.get(folder_id_env) or "").strip()
+    if not raw:
         raise GoogleDriveError(
             f"Busca automática do Google Drive não configurada — falta a variável de "
             f"ambiente {folder_id_env} (o id da pasta do Drive onde fica o arquivo). "
             "Veja .env.example."
         )
-    return folder_id
+    # Aceita tanto o id puro (o esperado, ex: "1mdojIv1WRvpAr1AmdOoGsba3I1VK3Vam")
+    # quanto, por tolerância a erro de copiar e colar, "folders/<id>" ou o
+    # link inteiro da pasta — extrai só o id nesses dois últimos casos em vez
+    # de mandar a string toda pro Google (que devolve "File not found" nesse
+    # caso, uma mensagem que parece "pasta não compartilhada" mas não é).
+    m = _FOLDER_URL_ID_RE.search(raw)
+    return m.group(1) if m else raw.strip("/ ")
 
 
 def _google_libs():
@@ -119,18 +143,30 @@ def _arquivo_mais_recente(service, folder_id_env, contexto):
     except Exception as e:
         raise GoogleDriveError(
             f"Falha ao listar a pasta do Google Drive de {contexto} — confira se o id da "
-            f"pasta ({folder_id_env}) está certo e se a pasta foi compartilhada com o "
-            f"e-mail da conta de serviço. Detalhe: {e}"
+            f"pasta em {folder_id_env} é só o id (sem \"folders/\" nem o link inteiro — "
+            "o sistema já tenta extrair o id sozinho, mas confira mesmo assim) e se a "
+            f"pasta foi compartilhada com o e-mail da conta de serviço. Detalhe: {e}"
         )
-    candidatos = [
-        f for f in resp.get("files", [])
-        if f.get("mimeType") in (_MIME_XLSX, _MIME_GOOGLE_SHEETS)
-    ]
+    todos = resp.get("files", [])
+    candidatos = [f for f in todos if f.get("mimeType") in _MIMES_RECONHECIDOS]
     if not candidatos:
+        # Diagnóstico direto na mensagem de erro (55ª rodada — visto em produção:
+        # a pasta foi encontrada e compartilhada certinho, mas nada bateu com os
+        # tipos reconhecidos, e sem ver o que TEM na pasta não dá pra saber se
+        # ela está vazia, se o arquivo é de outro formato, ou se foi colocado
+        # noutro lugar) — lista os arquivos de verdade encontrados (nome + tipo).
+        if not todos:
+            raise GoogleDriveError(
+                f"A pasta do Drive de {contexto} está vazia (nenhum arquivo visível pra conta "
+                "de serviço) — confira se o arquivo foi mesmo colocado nessa pasta (não numa "
+                "subpasta) e se a pasta em si foi compartilhada com o e-mail da conta de serviço."
+            )
+        listagem = "; ".join(f'"{f.get("name")}" ({f.get("mimeType")})' for f in todos[:10])
         raise GoogleDriveError(
-            f"Nenhuma planilha (.xlsx ou Planilhas Google) foi encontrada na pasta do "
-            f"Drive de {contexto} — confira se o arquivo está lá e se a pasta foi "
-            "compartilhada com o e-mail da conta de serviço."
+            f"Nenhum arquivo reconhecido como planilha (.xlsx, .xlsm ou Planilha Google) foi "
+            f"encontrado na pasta do Drive de {contexto}. Arquivos encontrados na pasta: "
+            f"{listagem}{' (e outros)' if len(todos) > 10 else ''} — confira se o arquivo "
+            "certo está nessa pasta e nesse formato."
         )
     return candidatos[0]
 
