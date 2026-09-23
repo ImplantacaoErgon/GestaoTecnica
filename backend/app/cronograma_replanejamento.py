@@ -76,7 +76,7 @@ def calcular(projeto_id, data_ancora, status_familia_concluida):
 
     atividades = db.fetch_all(
         "SELECT id, codigo_wbs, nome, status, percentual_concluido, prazo_horas, "
-        "dtini_prev, dtfim_prev, dtini_real, dtfim_real "
+        "dtini_prev, dtfim_prev, dtini_real, dtfim_real, data_execucao_fixada "
         f"FROM atividades WHERE projeto_id = {db.q(projeto_id)}"
     )
     non_working = _non_working(projeto_id)
@@ -140,6 +140,20 @@ def calcular(projeto_id, data_ancora, status_familia_concluida):
             ini, fim = _ref_dates(a)
             ES[n] = offset(ini) if ini else 0
             EF[n] = (offset(fim) + 1) if fim else ES[n]
+            continue
+
+        # Atividade com Data de Execução fixada (57ª/58ª rodada — migração 031): as
+        # datas PREVISTAS dela nunca são recalculadas por aqui, só por edição manual
+        # direta (ver ATIVIDADE_FIELDS/update_atividade em main.py) — mesmo tratamento
+        # de "referência fixa" das concluídas/canceladas acima, mas usando a própria
+        # data fixada (não a real). Ela ainda entra normalmente no grafo como
+        # predecessora das sucessoras dela. Se alguma predecessora dela "puxaria" a
+        # fixada pra uma data diferente, isso não é reportado aqui — ver
+        # app/cronograma_anomalias.py (usado pelo Dashboard e pelo Relatório Executivo).
+        if a.get("data_execucao_fixada") and a.get("dtini_prev") and a.get("dtfim_prev"):
+            ini_fix, fim_fix = _to_date(a["dtini_prev"]), _to_date(a["dtfim_prev"])
+            ES[n] = offset(ini_fix)
+            EF[n] = offset(fim_fix) + 1
             continue
 
         prazo = float(a["prazo_horas"]) if a.get("prazo_horas") else 0.0

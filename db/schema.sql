@@ -258,6 +258,11 @@ CREATE TABLE atividades (
                                        -- de eh_atividade_master: um entregável faturável não é necessariamente um
                                        -- marco mestre do projeto (migração 017). Valores de faturamento ficam para
                                        -- uma tela própria futura — aqui só marca "isto é um entregável".
+  data_execucao_fixada boolean NOT NULL DEFAULT false,  -- migração 031: trava dtini_prev/dtfim_prev contra
+                                       -- recálculo automático por dependência (Replanejamento e a cascata da
+                                       -- Edição em Lote) — só edição manual direta pode mudar essas datas
+                                       -- quando ligada. Ver app/cronograma_anomalias.py para a detecção de
+                                       -- conflito quando uma predecessora muda e a fixada fica em desacordo.
   criado_em         timestamptz NOT NULL DEFAULT now(),
   atualizado_em     timestamptz NOT NULL DEFAULT now(),
 
@@ -274,11 +279,13 @@ CREATE INDEX idx_atividades_dtini_prev ON atividades(dtini_prev);
 CREATE INDEX idx_atividades_origem_importacao ON atividades(projeto_id, origem_importacao_id);
 CREATE INDEX idx_atividades_master ON atividades(projeto_id) WHERE eh_atividade_master = true;
 CREATE INDEX idx_atividades_entregavel ON atividades(projeto_id) WHERE eh_entregavel = true;
+CREATE INDEX idx_atividades_data_fixada ON atividades(projeto_id) WHERE data_execucao_fixada = true;
 CREATE TRIGGER trg_atividades_atualizado_em BEFORE UPDATE ON atividades
   FOR EACH ROW EXECUTE FUNCTION set_atualizado_em();
 COMMENT ON TABLE atividades IS 'Atividade elementar do cronograma. atividade_pai_id permite desdobrar uma atividade em subatividades quando necessário (WBS).';
 COMMENT ON COLUMN atividades.cpm_folga_dias IS 'Folga total calculada pelo método do caminho crítico; 0 = atividade crítica.';
 COMMENT ON COLUMN atividades.requisito_tr_id IS 'Item do Termo de Referência ao qual esta atividade se relaciona (opcional). Subatividades herdam do pai na criação.';
+COMMENT ON COLUMN atividades.data_execucao_fixada IS 'Trava dtini_prev/dtfim_prev desta atividade contra recálculo automático por dependência (cronograma_replanejamento.py e a cascata de cronograma_edicao_lote.py) -- só edição manual direta (ver ATIVIDADE_FIELDS/update_atividade em main.py) pode mudar essas datas quando esta trava está ligada. Ver app/cronograma_anomalias.py para a detecção de conflito quando uma predecessora muda e a atividade fixada fica em desacordo com o que a dependência exige (mostrado como anomalia no Dashboard e no Relatório Executivo).';
 
 -- Histórico de mudança de status (auditoria automática via trigger)
 CREATE TABLE historico_status_atividade (
@@ -365,11 +372,47 @@ CREATE TABLE atividade_recurso (
 );
 
 -- ============================================================================
--- 9. CICLOS DE MIGRAÇÃO  (execuções semanais — extração/carga/rejeições)
+-- 9. ITENS DE MIGRAÇÃO E CICLOS  (48ª rodada: catálogo de tabelas do legado a
+--    migrar, meta x carregado por item, e execuções — extração/carga/rejeições)
 -- ============================================================================
+-- Uma linha por TABELA do sistema legado a migrar pro Ergon, dentro do tema
+-- de uma atividade do cronograma (ex: atividade "Migração de Pessoas" contém
+-- os itens RH_FUNCIONARIOS, RH_DEPENDENTES, ...). Meta de registros
+-- (qtd_registros_estimada) x carregado, apurado a partir do último ciclo em
+-- ciclos_migracao vinculado a este item (ver abaixo).
+CREATE TYPE status_item_migracao_enum AS ENUM (
+  'Não iniciado', 'Em andamento', 'Concluído', 'Bloqueado'
+);
+CREATE TABLE itens_migracao (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  projeto_id uuid NOT NULL REFERENCES projetos(id) ON DELETE CASCADE,
+  atividade_id uuid REFERENCES atividades(id),
+  nome_tabela_legado text NOT NULL,
+  nome_tabela_destino text,
+  sistema_origem text,
+  qtd_registros_estimada integer,
+  status status_item_migracao_enum NOT NULL DEFAULT 'Não iniciado',
+  responsavel_id uuid REFERENCES recursos(id),
+  observacoes text,
+  criado_em timestamptz NOT NULL DEFAULT now(),
+  atualizado_em timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (projeto_id, nome_tabela_legado)
+);
+CREATE INDEX idx_itens_migracao_projeto ON itens_migracao(projeto_id);
+CREATE INDEX idx_itens_migracao_status ON itens_migracao(status);
+CREATE TRIGGER trg_itens_migracao_atualizado_em
+  BEFORE UPDATE ON itens_migracao
+  FOR EACH ROW EXECUTE FUNCTION set_atualizado_em();
+COMMENT ON TABLE itens_migracao IS 'Uma linha por tabela/entidade do sistema legado a migrar pro Ergon — meta de registros (qtd_registros_estimada) x carregado, apurado a partir do último ciclo em ciclos_migracao vinculado a este item.';
+
+-- Cada linha é uma execução (extração/carga/rejeições) de um item_migracao.
+-- atividade_id fica opcional aqui (era o vínculo original, ligado ao "tema";
+-- mantido só por compatibilidade) — o vínculo principal passa a ser
+-- item_migracao_id, ligado a uma tabela específica.
 CREATE TABLE ciclos_migracao (
   id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  atividade_id          uuid NOT NULL REFERENCES atividades(id) ON DELETE CASCADE,
+  atividade_id          uuid REFERENCES atividades(id) ON DELETE CASCADE,
+  item_migracao_id      uuid REFERENCES itens_migracao(id) ON DELETE CASCADE,
   numero_ciclo          int NOT NULL,
   data_execucao         date NOT NULL,
   qtd_registros_extraidos int,
@@ -384,7 +427,9 @@ CREATE TABLE ciclos_migracao (
   criado_em             timestamptz NOT NULL DEFAULT now(),
   UNIQUE (atividade_id, numero_ciclo)
 );
-COMMENT ON TABLE ciclos_migracao IS 'Uma linha por rodada semanal de migração de um tema (a atividade "pai" representa o tema, ex: Migração de Pessoas).';
+CREATE INDEX idx_ciclos_migracao_item ON ciclos_migracao(item_migracao_id);
+CREATE UNIQUE INDEX ciclos_migracao_item_numero_key ON ciclos_migracao(item_migracao_id, numero_ciclo) WHERE item_migracao_id IS NOT NULL;
+COMMENT ON TABLE ciclos_migracao IS 'Uma linha por rodada de execução (extração/carga/rejeições) de um item_migracao (tabela do legado); atividade_id é o vínculo antigo com o "tema" no cronograma, opcional.';
 
 -- ============================================================================
 -- 10. REQUISITOS DO TERMO DE REFERÊNCIA

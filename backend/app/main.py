@@ -8,7 +8,7 @@ from datetime import datetime, date, timedelta
 
 from flask import Flask, request, jsonify, send_from_directory, send_file, abort, session
 
-from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_export, cronograma_comparacao, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, drive_rubricas, comparacao_folha, comparacao_folha_import, drive_comparacao_folha
+from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_anomalias, cronograma_export, cronograma_comparacao, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, drive_rubricas, comparacao_folha, comparacao_folha_import, drive_comparacao_folha
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 FRONTEND_DIR = os.environ.get(
@@ -105,6 +105,10 @@ ATIVIDADE_FIELDS = [
     "prazo_horas", "horas_realizadas", "dtini_prev", "dtfim_prev",
     "dtini_real", "dtfim_real", "percentual_concluido", "status", "prioridade", "observacoes",
     "eh_atividade_master", "eh_entregavel",
+    # 57ª/58ª rodada (migração 031): trava dtini_prev/dtfim_prev contra recálculo automático
+    # por dependência (Replanejamento e cascata da Edição em Lote) — só edição manual direta
+    # (aqui mesmo) pode mudar a data de uma atividade fixada. Ver app/cronograma_anomalias.py.
+    "data_execucao_fixada",
 ]
 RELATO_FIELDS = ["autor_id", "autor_nome", "texto"]  # eh_pendencia/pendencia_* removidos na 41ª rodada (migração 027) — ver PENDENCIA_FIELDS abaixo
 # Status que exigem ao menos um relato de andamento registrado (ver create/update_atividade).
@@ -1172,40 +1176,19 @@ def create_app():
 
     @app.post("/api/atividades/<id>/duplicar")
     def duplicar_atividade(id):
-        """Cria uma cópia completa da atividade `id`: todos os campos de
-        ATIVIDADE_FIELDS (nome, código WBS, datas, status, percentual,
-        horas, etc. — tudo, sem "limpar" nada, pra depois o usuário fazer os
-        ajustes que quiser na cópia), os recursos alocados (atividade_recurso)
-        e as PREDECESSORAS da atividade original (atividade_dependencia onde
-        esta atividade é a sucessora) — a cópia passa a depender das mesmas
-        atividades que a original dependia.
-
-        Dois pontos que NÃO são copiados de propósito:
-        - `origem_importacao_id`: é o id da linha na planilha de origem do
-          MS Project, usado por cronograma_import.py pra casar uma
-          reimportação com a atividade já existente (ver comentário em
-          atividades.origem_importacao_id no schema). Copiar esse valor
-          deixaria duas atividades com o mesmo id de origem, e a próxima
-          reimportação não saberia qual delas atualizar.
-        - As SUCESSORAS da original (outras atividades que dependem dela)
-          não passam a depender também da cópia — só o sentido "esta
-          atividade depende de quem" é duplicado, não o grafo inteiro ao
-          redor dela. Se quiser que a cópia também preceda as mesmas
-          atividades que a original precede, isso é adicionado manualmente
-          na aba Dependências de cada sucessora.
-
-        Vínculos com requisitos do TR (atividade_requisito, N:N — distinto
-        do campo único requisito_tr_id, que já é copiado por fazer parte de
-        ATIVIDADE_FIELDS) também não são duplicados — não foram pedidos
-        explicitamente e são normalmente mais fáceis de revisar/re-vincular
-        manualmente na cópia do que herdar automaticamente.
-
-        Passa direto por insert_row (grava por SQL, como cronograma_import.py
-        já faz) em vez do fluxo de POST /api/atividades — não faz sentido
-        reaplicar aqui a validação de "status exige relato" (a cópia começa
-        sem nenhum relato próprio) nem a classificação automática de
-        conclusão: o objetivo é reproduzir a atividade original tal como
-        está, não validar um cadastro novo do zero."""
+        """56ª rodada — cria uma cópia completa de uma atividade: todos os campos de
+        ATIVIDADE_FIELDS (dados da atividade), os recursos alocados (atividade_recurso)
+        e as DEPENDÊNCIAS COMO PREDECESSORA (atividade_dependencia — só o lado em que a
+        atividade original é a sucessora; a cópia não vira predecessora automática de
+        quem dependia da original, isso o usuário ajusta manualmente depois se quiser).
+        origem_importacao_id NUNCA é copiado (é a chave de casamento da reimportação do
+        MS Project em cronograma_import.py — duas atividades com o mesmo valor
+        quebrariam esse casamento). atividade_requisito (vínculos com requisitos do TR)
+        também não é copiado — fora do escopo pedido ("duplique dados da atividade,
+        recursos, dependências"). Grava direto via insert_row (mesmo caminho de
+        auditoria/histórico do CRUD normal), sem passar pelas validações de
+        relato/consistência de conclusão do POST/PUT normais — mesma lógica que
+        cronograma_import.py já usa para inserção em lote."""
         original = db.fetch_one(f"SELECT * FROM atividades WHERE id = {db.q(id)}")
         if not original:
             abort(404)
@@ -1226,7 +1209,6 @@ def create_app():
             f"SELECT {db.q(novo_id)}, predecessora_id, tipo, lag_horas "
             f"FROM atividade_dependencia WHERE atividade_id = {db.q(id)}"
         )
-
         row = db.fetch_one(ATIVIDADE_SELECT + f" WHERE a.id = {db.q(novo_id)}")
         return jsonify(row), 201
 
@@ -2912,6 +2894,20 @@ def create_app():
         except relatorio_executivo.RelatorioExecutivoError as e:
             return jsonify({"erro": str(e)}), 404
         return jsonify({"gerado_em": dados["gerado_em"], "atividades_master": dados["atividades_master"]})
+
+    @app.get("/api/relatorios/anomalias-data-fixada")
+    def relatorio_anomalias_data_fixada():
+        """57ª/58ª rodada — atividades com data_execucao_fixada=true cuja data prevista
+        já não respeita o que uma predecessora direta exige hoje (ver
+        app/cronograma_anomalias.py). Checagem "ao vivo", independente de o usuário ter
+        rodado Replanejamento ou Edição em Lote — pro card ⚠📌 do Dashboard."""
+        pid = request.args.get("projeto_id")
+        if not pid:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        if not db.fetch_one(f"SELECT id FROM projetos WHERE id = {db.q(pid)}"):
+            return jsonify({"erro": "Projeto não encontrado"}), 404
+        anomalias = cronograma_anomalias.detectar(pid, STATUS_FAMILIA_CONCLUIDA)
+        return jsonify({"anomalias": anomalias, "total": len(anomalias)})
 
     # ------------------------------------------------- relatório executivo (IA)
     @app.get("/api/relatorios/executivo")

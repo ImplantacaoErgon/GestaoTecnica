@@ -43,7 +43,7 @@ from datetime import date, timedelta
 
 import networkx as nx
 
-from . import db
+from . import db, cronograma_anomalias
 from .cpm import _dur_dias, _business_day_offset, dias_uteis_entre
 
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
@@ -469,6 +469,12 @@ def coletar_dados_projeto(projeto_id):
         "marcos_proximos": [{"nome": m["nome"], "data_prevista": m["data_prevista"]} for m in marcos_proximos],
         "riscos_abertos": riscos,
         "atividades_master": atividades_master,
+        # 57ª/58ª rodada (migração 031) — atividades com data_execucao_fixada=true cuja
+        # data prevista já não respeita o que uma predecessora direta exige hoje (ver
+        # app/cronograma_anomalias.py). Reaproveita o mesmo detector do card do
+        # Dashboard, por isso passa a própria STATUS_FAMILIA_CONCLUIDA deste módulo
+        # (duplicada de main.py de propósito — ver comentário no topo do arquivo).
+        "anomalias_data_fixada": cronograma_anomalias.detectar(projeto_id, STATUS_FAMILIA_CONCLUIDA),
         # 50ª rodada — dois temas novos, sempre ao final do relatório (ver PROMPT_TEMPLATE):
         "migracao_de_dados": _migracao_de_dados(projeto_id),
         # Folha de Pagamento: tema ainda em levantamento, sem dado estruturado próprio pra
@@ -529,6 +535,16 @@ Folha Definitiva) para que este relatório possa estimar uma data de conclusão 
 projeto. Se houver itens, para cada um: status atual, data prevista original x data
 projetada, o tamanho do desvio em dias úteis, o nível de confiança dessa previsão, e se
 depende de alguma atividade bloqueada.
+
+## Anomalias de Data Fixada
+Se "anomalias_data_fixada" estiver vazio, escreva 1 frase confirmando que nenhuma
+atividade com data de execução fixada está em conflito com suas predecessoras no momento
+— não precisa de mais nada nesta seção. Se houver itens, para cada um explique: qual
+atividade está com a data fixada, qual predecessora dela mudou/está causando o conflito,
+o tipo de dependência (FS/SS/FF/SF) envolvido, e a diferença em dias úteis entre a data
+fixada e a data que a dependência exigiria — deixe claro que o sistema NÃO altera essa
+data sozinho (é fixada, só edição manual muda) e que por isso precisa de uma decisão
+humana: manter a data mesmo assim, ou desmarcar a trava e deixar recalcular.
 
 ## Riscos abertos
 Resuma os riscos abertos, priorizando por probabilidade/impacto.

@@ -602,6 +602,14 @@
         <tbody id="dash-esforco"></tbody>
       </table></div>
     </div>
+    <div class="card" id="dash-anomalias-fixada-card" hidden>
+      <h3>📌 Anomalias de data fixada</h3>
+      <div class="view-sub" style="margin-top:-6px;">Atividades com a data de execução fixada (📌) cuja data prevista atual já não respeita o que uma predecessora direta exige — a data fixada não é alterada automaticamente, então precisa de uma decisão manual: manter assim ou desmarcar a trava e deixar recalcular.</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Código</th><th>Atividade (fixada)</th><th>Predecessora</th><th>Dependência</th><th>Data fixada</th><th>Data exigida</th><th>Diferença</th></tr></thead>
+        <tbody id="dash-anomalias-fixada"></tbody>
+      </table></div>
+    </div>
     <div class="card">
       <h3>Horas por recurso (previsto × realizado)</h3>
       <div class="view-sub" style="margin-top:-6px;">Soma das horas previstas e realizadas nas atividades em que cada recurso aparece como participante. Usa a hora alocada especificamente daquela pessoa na atividade (aba Responsáveis, no modal de atividade) quando informada; sem alocação específica, conta a atividade inteira para ela. A diferença só considera atividades com horas realizadas já lançadas — passe o mouse sobre o valor para ver quantas.</div>
@@ -1285,6 +1293,12 @@
         <div class="field"><label>Fim previsto</label><input id="at-dtfim-prev" type="date" title="Preenchido junto com Horas previstas, calcula automaticamente o Início previsto (dias úteis) se ele estiver vazio."></div>
         <div class="field"><label>Início real</label><input id="at-dtini-real" type="date"></div>
         <div class="field"><label>Fim real</label><input id="at-dtfim-real" type="date"></div>
+        <div class="field full" style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" id="at-data-fixada" style="width:auto;">
+          <label for="at-data-fixada" style="margin:0;" title="Trava Início/Fim previsto desta atividade contra recálculo automático (Replanejar e a cascata de dependências da Edição em Lote) — só dá para mudar essas datas aqui, manualmente. Se uma predecessora mudar de um jeito que exigiria mover esta data, o sistema NÃO move sozinho: mostra um alerta de anomalia no Dashboard e no Relatório Executivo.">
+            📌 Fixar data de execução (Início/Fim previsto só mudam manualmente)
+          </label>
+        </div>
 
         <div class="field full"><label>Observações</label><textarea id="at-observacoes"></textarea></div>
       </div>
@@ -3026,7 +3040,7 @@ function renderAtividadesTable(list){
   $("atividades-tbody").innerHTML = list.map(a=>`
     <tr class="clickable" data-id="${a.id}">
       <td class="mono">${esc(a.codigo_wbs||"—")}</td>
-      <td>${a.eh_atividade_master?`<span title="Atividade master (entregável mestre do projeto)">★</span> `:""}${a.eh_entregavel?`<span title="Entregável (atrelado a faturamento)">💰</span> `:""}${esc(a.nome)}${a.requisito_tr_codigo?`<div class="muted" style="font-size:11px;">TR: ${esc(a.requisito_tr_codigo)}</div>`:""}</td>
+      <td>${a.eh_atividade_master?`<span title="Atividade master (entregável mestre do projeto)">★</span> `:""}${a.eh_entregavel?`<span title="Entregável (atrelado a faturamento)">💰</span> `:""}${a.data_execucao_fixada?`<span title="Data de execução fixada — Início/Fim previsto só mudam manualmente">📌</span> `:""}${esc(a.nome)}${a.requisito_tr_codigo?`<div class="muted" style="font-size:11px;">TR: ${esc(a.requisito_tr_codigo)}</div>`:""}</td>
       <td>${a.etapa_numero!=null?a.etapa_numero+".":""}${esc(a.frente_nome||"—")}</td>
       <td style="white-space:nowrap;">${pill(a.status, STATUS_COLOR[a.status]||"faint")}${a.atrasada?" "+pill("Atrasada","danger"):""}${a.esforco_estourado?" "+pill("Esforço acima do previsto","warn"):""}</td>
       <td class="mono">${fmtDate(a.dtini_prev)}</td>
@@ -3289,6 +3303,33 @@ function renderDashboard(){
   renderEsforcoEstourado();
   renderHorasPorRecurso();
   renderAtividadesMaster();
+  renderAnomaliasDataFixada();
+}
+
+// Anomalias de Data Fixada (57ª/58ª rodada): atividades marcadas com 📌 (Fixar data de
+// execução) cuja data prevista atual já não respeita o que uma predecessora direta
+// exige agora — ver app/cronograma_anomalias.py. Checagem "ao vivo": não depende do
+// usuário ter rodado Replanejar/Edição em massa, reflete o estado atual do cronograma.
+const TIPO_DEP_ROTULO = {FS: "Fim → Início", SS: "Início → Início", FF: "Fim → Fim", SF: "Início → Fim"};
+function renderAnomaliasDataFixada(){
+  api(`/relatorios/anomalias-data-fixada?projeto_id=${PROJETO.id}`).then(res=>{
+    const lista = res.anomalias || [];
+    $("dash-anomalias-fixada-card").hidden = lista.length === 0;
+    if(!lista.length) return;
+    $("dash-anomalias-fixada").innerHTML = lista.map(a=>`
+      <tr class="clickable" data-id="${a.atividade_id}">
+        <td class="mono">${esc(a.codigo_wbs||"—")}</td>
+        <td>${esc(a.nome)}</td>
+        <td>${esc(a.predecessora_codigo_wbs||"—")} ${esc(a.predecessora_nome)}</td>
+        <td class="mono" title="${esc(TIPO_DEP_ROTULO[a.tipo]||a.tipo)}">${esc(a.tipo)}${a.lag_horas?` +${a.lag_horas}h`:""}</td>
+        <td class="mono">${fmtDate(a.data_fixada_atual)}</td>
+        <td class="mono">${fmtDate(a.data_exigida_pela_dependencia)}</td>
+        <td class="mono" style="color:var(--danger);">${a.dias_uteis_de_diferenca}d</td>
+      </tr>`).join("");
+    $("dash-anomalias-fixada").querySelectorAll("tr[data-id]").forEach(tr=>{
+      tr.addEventListener("click", ()=>{ goToView("cronograma"); openAtividadeModal(byId(ATIVIDADES, tr.dataset.id)); });
+    });
+  }).catch(()=>{ $("dash-anomalias-fixada-card").hidden = true; });
 }
 
 const DASH_MASTER_VAZIO_PADRAO = "Nenhuma atividade marcada como ★ atividade master ainda. Marque uma atividade como master no Cronograma (aba de edição da atividade) para acompanhar aqui a previsão de conclusão.";
@@ -4571,6 +4612,7 @@ function openAtividadeModal(atividade){
   $("at-dtfim-prev").value = atividade?.dtfim_prev || "";
   $("at-dtini-real").value = atividade?.dtini_real || "";
   $("at-dtfim-real").value = atividade?.dtfim_real || "";
+  $("at-data-fixada").checked = !!atividade?.data_execucao_fixada;
   $("at-observacoes").value = atividade?.observacoes || "";
   $("at-relato-texto").value="";
   switchPane($("overlay-atividade"), "detalhes");
@@ -4600,6 +4642,7 @@ async function saveAtividade(){
     horas_realizadas: $("at-horas-real").value ? Number($("at-horas-real").value) : null,
     dtini_prev: $("at-dtini-prev").value || null, dtfim_prev: $("at-dtfim-prev").value || null,
     dtini_real: $("at-dtini-real").value || null, dtfim_real: $("at-dtfim-real").value || null,
+    data_execucao_fixada: $("at-data-fixada").checked,
     observacoes: $("at-observacoes").value.trim(),
   };
   if(!data.nome){ toast("Informe o nome da atividade.", true); return; }
