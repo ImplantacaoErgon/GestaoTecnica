@@ -70,10 +70,14 @@ def _parse_data(v):
 def _projetar_datas(projeto_id, horas_dia_util, non_working):
     """Retorna {atividade_id: {"inicio_proj": date, "fim_proj": date, "confianca": str}}.
     "confianca": "alta" (já aconteceu — concluída), "média" (extrapolação de ritmo ou
-    duração planejada restante) ou "baixa" (atividade bloqueada — data é um piso, não
-    uma previsão confiável, porque não sabemos quando o bloqueio será resolvido)."""
+    duração planejada restante), "baixa" (atividade bloqueada — data é um piso, não
+    uma previsão confiável, porque não sabemos quando o bloqueio será resolvido) ou
+    "fixada" (57ª/58ª rodada — atividade com Data de Execução Fixada que ainda não
+    começou de verdade: o Fim projetado é o próprio Fim previsto no plano, nunca
+    recalculado a partir do que aconteceu com as predecessoras)."""
     atividades = db.fetch_all(f"""
-        SELECT id, status, percentual_concluido, prazo_horas, dtini_prev, dtfim_prev, dtini_real, dtfim_real
+        SELECT id, status, percentual_concluido, prazo_horas, dtini_prev, dtfim_prev, dtini_real, dtfim_real,
+               data_execucao_fixada
         FROM atividades WHERE projeto_id = {db.q(projeto_id)}
     """)
     if not atividades:
@@ -134,6 +138,22 @@ def _projetar_datas(projeto_id, horas_dia_util, non_working):
                 fim_proj[n] = max(fim, hoje)
                 confianca[n] = "média"
                 continue
+
+        # Atividade com Data de Execução Fixada (57ª/58ª rodada — migração 031) que
+        # ainda não começou de verdade (sem dtini_real): a mesma trava que já vale pro
+        # Replanejamento e pela cascata da Edição em Lote (não recalcular
+        # dtini_prev/dtfim_prev a partir de dependências) também precisa valer aqui —
+        # senão a projeção "antecipa" (ou atrasa) uma atividade fixada só porque uma
+        # predecessora terminou mais cedo/tarde do que o plano, o que contradiz a
+        # trava. Fim projetado = o próprio Fim previsto no plano, sem olhar pro grafo.
+        # Uma vez que a atividade realmente começa (dtini_real preenchido, ramo "Em
+        # andamento" acima), a extrapolação de ritmo real volta a valer normalmente —
+        # a trava é sobre o PLANO, não sobre esconder o andamento real já observado.
+        if a.get("data_execucao_fixada") and dtini_prev and dtfim_prev:
+            inicio_proj[n] = dtini_real or dtini_prev
+            fim_proj[n] = dtfim_prev
+            confianca[n] = "fixada"
+            continue
 
         # Fallback: não iniciada, bloqueada, ou em andamento sem % lançado ainda.
         # Início = o mais tarde entre: fim projetado dos predecessores (considerando o
@@ -506,7 +526,9 @@ propagando atrasos pela cadeia de dependências) — não recalcule, apenas inte
 explique o que esses números significam na prática. O campo "confianca_da_previsao"
 indica quão confiável é essa previsão ("alta" = já concluída/fato consumado; "média" =
 extrapolação de ritmo; "baixa" = atividade bloqueada, data é um piso mínimo, não uma
-previsão real).
+previsão real; "fixada" = atividade com a data de execução travada manualmente — o fim
+projetado é o próprio fim previsto no plano, propositalmente sem levar em conta o que
+aconteceu com as predecessoras, porque essa trava só é removida por decisão humana).
 
 DADOS DO PROJETO (JSON):
 {dados_json}
