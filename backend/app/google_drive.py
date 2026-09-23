@@ -23,9 +23,15 @@ normalmente — só o botão que depende disso (e nada mais) devolve um erro
 explicando o que falta, seguindo o mesmo padrão já usado pro Relatório
 Executivo/IA (ANTHROPIC_API_KEY) e pro "Esqueci a senha" (SMTP_*).
 
-Sempre lê o arquivo MAIS RECENTEMENTE MODIFICADO dentro da pasta configurada
-— não um nome fixo — porque o cliente sobe revisões da planilha com sufixos
-diferentes a cada vez (ex: "..._revisadas_5.xlsx", depois "_6", "_7"...).
+Por padrão, lê o arquivo MAIS RECENTEMENTE MODIFICADO dentro da pasta
+configurada — não um nome fixo — porque o cliente sobe revisões da planilha
+com sufixos diferentes a cada vez (ex: "..._revisadas_5.xlsx", depois "_6",
+"_7"...). Desde a 55ª rodada (Adendo 3), quando o chamador passa um
+`validar` (ver baixar_arquivo_mais_recente), essa regra vira "o mais recente
+QUE VALIDAR como o tipo certo de planilha" — tentando os próximos mais
+antigos antes de desistir — porque, em produção, a pasta compartilhada
+acabou tendo outros arquivos não relacionados que também batiam o tipo MIME
+reconhecido, e um deles era mais recente que a planilha de verdade.
 """
 import io
 import json
@@ -103,9 +109,9 @@ def _google_libs():
     dessas integrações não precisa ter esses pacotes instalados pra o resto
     do sistema funcionar (mesmo espírito do ANTHROPIC_API_KEY ausente não
     travar o resto do relatório executivo). Qualquer chamador (inclusive
-    baixar_arquivo_mais_recente, que também precisa de MediaIoBaseDownload)
-    passa por aqui, então o ModuleNotFoundError nunca escapa cru — sempre
-    vira GoogleDriveError com a mensagem de instalação."""
+    _baixar_conteudo, que também precisa de MediaIoBaseDownload) passa por
+    aqui, então o ModuleNotFoundError nunca escapa cru — sempre vira
+    GoogleDriveError com a mensagem de instalação."""
     try:
         from google.oauth2 import service_account
         from googleapiclient.discovery import build
@@ -128,7 +134,14 @@ def _drive_service():
         raise GoogleDriveError(f"Falha ao autenticar com a conta de serviço do Google: {e}")
 
 
-def _arquivo_mais_recente(service, folder_id_env, contexto):
+def _candidatos_arquivos(service, folder_id_env, contexto):
+    """Lista os arquivos "que parecem planilha" (MIME reconhecido) da pasta,
+    do mais pro menos recentemente modificado. Retorna a LISTA inteira (não
+    só o primeiro) — ver baixar_arquivo_mais_recente, que agora pode
+    precisar tentar mais de um candidato (55ª rodada: a pasta compartilhada
+    tinha um documento não relacionado, mais recentemente modificado que a
+    planilha de verdade, sendo escolhido por engano pela regra antiga de
+    "sempre pega só o mais recente")."""
     folder_id = _folder_id(folder_id_env)
     query = f"'{folder_id}' in parents and trashed = false"
     try:
@@ -168,32 +181,89 @@ def _arquivo_mais_recente(service, folder_id_env, contexto):
             f"{listagem}{' (e outros)' if len(todos) > 10 else ''} — confira se o arquivo "
             "certo está nessa pasta e nesse formato."
         )
-    return candidatos[0]
+    return candidatos
 
 
-def baixar_arquivo_mais_recente(folder_id_env, contexto):
-    """Retorna (conteudo_bytes, nome_arquivo, modificado_em_iso) do arquivo
-    mais recentemente modificado na pasta apontada pela variável de ambiente
-    `folder_id_env`. `contexto` é só pra mensagem de erro (ex: "Rubricas",
-    "Comparação Folha"). Levanta GoogleDriveError, com uma mensagem pronta
-    pra mostrar ao usuário, se falhar em qualquer etapa (configuração,
-    autenticação, listagem ou download)."""
+def _baixar_conteudo(service, arquivo):
+    """Baixa o conteúdo bruto (bytes) de UM arquivo já identificado (id +
+    mimeType já conhecidos) — separado de baixar_arquivo_mais_recente pra
+    poder ser chamado uma vez por candidato, quando há validação (ver
+    abaixo)."""
     _, _, MediaIoBaseDownload = _google_libs()
-    service = _drive_service()
-    arquivo = _arquivo_mais_recente(service, folder_id_env, contexto)
-    try:
-        if arquivo["mimeType"] == _MIME_GOOGLE_SHEETS:
-            request = service.files().export_media(fileId=arquivo["id"], mimeType=_MIME_XLSX)
-        else:
-            request = service.files().get_media(fileId=arquivo["id"])
-        buf = io.BytesIO()
-        downloader = MediaIoBaseDownload(buf, request)
-        done = False
-        while not done:
-            _, done = downloader.next_chunk()
-    except Exception as e:
-        raise GoogleDriveError(
-            f"Falha ao baixar '{arquivo.get('name')}' do Google Drive: {e}"
-        )
+    if arquivo["mimeType"] == _MIME_GOOGLE_SHEETS:
+        request = service.files().export_media(fileId=arquivo["id"], mimeType=_MIME_XLSX)
+    else:
+        request = service.files().get_media(fileId=arquivo["id"])
+    buf = io.BytesIO()
+    downloader = MediaIoBaseDownload(buf, request)
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
     buf.seek(0)
-    return buf.read(), arquivo.get("name") or "planilha.xlsx", arquivo.get("modifiedTime")
+    return buf.read()
+
+
+def baixar_arquivo_mais_recente(folder_id_env, contexto, validar=None, max_tentativas=5):
+    """Retorna (conteudo_bytes, nome_arquivo, modificado_em_iso) de um
+    arquivo da pasta apontada pela variável de ambiente `folder_id_env`.
+    `contexto` é só pra mensagem de erro (ex: "Rubricas", "Comparação
+    Folha"). Levanta GoogleDriveError, com uma mensagem pronta pra mostrar
+    ao usuário, se falhar em qualquer etapa (configuração, autenticação,
+    listagem ou download).
+
+    Sem `validar`: usa sempre o arquivo mais recentemente modificado da
+    pasta, sem checar o conteúdo — comportamento original (54ª/55ª rodada).
+
+    Com `validar` (uma função que recebe conteudo_bytes e LEVANTA UMA
+    EXCEÇÃO se o arquivo não parecer ser do tipo esperado — ex:
+    rubricas_import.parse_rubricas_document, que levanta RubricasImportError
+    se o cabeçalho não bater): tenta, em ordem do mais recente pro mais
+    antigo, até `max_tentativas` candidatos da pasta — baixando e validando
+    um de cada vez — e usa o primeiro que passar na validação, pulando os
+    que não passarem. Existe pra cobrir o caso visto em produção (55ª
+    rodada) de uma pasta compartilhada que tem, além da planilha de
+    verdade, outros arquivos não relacionados (ex: um outro documento da
+    consultoria) que por acaso são reconhecidos como planilha (mesmo MIME)
+    e que podem ter sido modificados mais recentemente — sem validação de
+    conteúdo, esse outro arquivo seria escolhido por engano, como aconteceu
+    com "Especificação da migração de Atributos.xlsx" sendo importado no
+    lugar de "Levantamento Rubricas". Se NENHUM candidato passar, levanta
+    GoogleDriveError detalhando, arquivo por arquivo, por que cada um foi
+    rejeitado."""
+    service = _drive_service()
+    candidatos = _candidatos_arquivos(service, folder_id_env, contexto)
+
+    if validar is None:
+        arquivo = candidatos[0]
+        try:
+            conteudo = _baixar_conteudo(service, arquivo)
+        except Exception as e:
+            raise GoogleDriveError(f"Falha ao baixar '{arquivo.get('name')}' do Google Drive: {e}")
+        return conteudo, arquivo.get("name") or "planilha.xlsx", arquivo.get("modifiedTime")
+
+    tentativas = candidatos[:max_tentativas]
+    erros = []
+    for arquivo in tentativas:
+        nome = arquivo.get("name") or "?"
+        try:
+            conteudo = _baixar_conteudo(service, arquivo)
+        except Exception as e:
+            erros.append(f'"{nome}": falha ao baixar ({e})')
+            continue
+        try:
+            validar(conteudo)
+        except Exception as e:
+            erros.append(f'"{nome}": {e}')
+            continue
+        return conteudo, nome, arquivo.get("modifiedTime")
+
+    restantes = len(candidatos) - len(tentativas)
+    detalhe = " | ".join(erros)
+    raise GoogleDriveError(
+        f"Nenhum dos {len(tentativas)} arquivo(s) mais recentes da pasta do Drive de "
+        f"{contexto} passou na validação de conteúdo esperada"
+        f"{f' ({restantes} arquivo(s) mais antigos na pasta nem chegaram a ser tentados)' if restantes > 0 else ''}. "
+        f"Confira se o arquivo certo está nessa pasta (e se não há outros arquivos não "
+        f"relacionados nela que possam estar confundindo a busca automática). "
+        f"Detalhe por arquivo tentado: {detalhe}"
+    )

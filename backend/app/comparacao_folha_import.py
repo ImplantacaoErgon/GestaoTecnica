@@ -230,6 +230,22 @@ def _mapear_cabecalho(ws):
     return indice_para_coluna
 
 
+def validar_estrutura(conteudo_bytes):
+    """Validação RÁPIDA e barata, usada só pra ESCOLHER qual arquivo do
+    Drive é o certo (ver google_drive.baixar_arquivo_mais_recente, chamado
+    por drive_comparacao_folha.py) — não itera as ~300 mil linhas de dados,
+    só confere que a primeira aba com dados tem cara de Comparação Folha
+    (cabeçalho na linha 1 com pelo menos 3 das colunas essenciais). Reusa
+    _abrir_primeira_aba_com_dados (já é streaming/read_only) e
+    _mapear_cabecalho (só lê a linha 1), então baixar e validar um
+    candidato errado custa pouco mesmo sendo um arquivo grande — bem mais
+    barato que rodar importar_comparacao_folha() inteiro só pra descartar
+    um arquivo errado. Levanta ComparacaoFolhaImportError se não bater; não
+    tem nenhum efeito no banco."""
+    ws = _abrir_primeira_aba_com_dados(conteudo_bytes)
+    _mapear_cabecalho(ws)
+
+
 def _detectar_mesano_alvo(ws, indice_para_coluna, linhas_amostra=200):
     """Espia as primeiras linhas de dados até achar um MESANO válido —
     single-pass por design (ver comentário no topo do arquivo sobre por que
