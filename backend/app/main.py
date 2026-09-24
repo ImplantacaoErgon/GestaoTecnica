@@ -8,7 +8,7 @@ from datetime import datetime, date, timedelta
 
 from flask import Flask, request, jsonify, send_from_directory, send_file, abort, session
 
-from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_anomalias, cronograma_export, cronograma_comparacao, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, drive_rubricas, comparacao_folha, comparacao_folha_import, drive_comparacao_folha
+from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_anomalias, cronograma_export, cronograma_comparacao, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, drive_rubricas, comparacao_folha, comparacao_folha_import, google_drive
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 FRONTEND_DIR = os.environ.get(
@@ -2224,32 +2224,40 @@ def create_app():
             resp.headers["X-Export-Truncado"] = "1"
         return resp
 
-    @app.post("/api/comparacao-folha/importar/drive")
-    def importar_comparacao_folha_drive():
+    @app.post("/api/comparacao-folha/importar/picker")
+    def importar_comparacao_folha_picker():
         """Único passo (sem prévia — ver comentário no topo de
-        comparacao_folha_import.py): busca o arquivo mais recente da pasta do
-        Google Drive configurada (GOOGLE_DRIVE_COMPARACAO_FOLDER_ID) e já
-        grava, substituindo as linhas da competência detectada. Pesado (até
-        ~300 mil linhas) — pode demorar; ver timeout do gunicorn no
-        Dockerfile e o parâmetro `timeout` de importar_comparacao_folha."""
+        comparacao_folha_import.py): baixa o arquivo que o PRÓPRIO USUÁRIO
+        escolheu no Google Picker (frontend) — não uma pasta fixa varrida
+        pela conta de serviço — e já grava, substituindo as linhas da
+        competência detectada. Substitui o antigo endpoint
+        /importar/drive (busca automática "mais recente numa pasta fixa"):
+        cada comparação sai num arquivo/diretório novo no Drive do usuário,
+        então buscar sozinho numa pasta fixa não dava conta do caso real —
+        ver 60ª rodada. Pesado (até ~300 mil linhas) — pode demorar; ver
+        timeout do gunicorn no Dockerfile e o parâmetro `timeout` de
+        importar_comparacao_folha."""
         data = request.get_json(silent=True) or {}
         projeto_id = data.get("projeto_id") or request.args.get("projeto_id")
+        file_id = data.get("file_id")
+        access_token = data.get("access_token")
+        mime_type = data.get("mime_type")
+        nome_arquivo = data.get("nome_arquivo") or file_id
         if not projeto_id:
             return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        if not file_id or not access_token:
+            return jsonify({"erro": "Selecione o arquivo no Google Drive antes de importar."}), 400
         try:
-            conteudo, nome_arquivo, modificado_em = drive_comparacao_folha.baixar_planilha_mais_recente()
-        except drive_comparacao_folha.DriveComparacaoFolhaError as e:
+            conteudo = google_drive.baixar_arquivo_selecionado(file_id, mime_type, access_token, nome_arquivo)
+        except google_drive.GoogleDriveError as e:
             return jsonify({"erro": str(e)}), 502
         try:
             resultado = comparacao_folha_import.importar_comparacao_folha(projeto_id, conteudo)
         except comparacao_folha_import.ComparacaoFolhaImportError as e:
-            # Mesma razão do endpoint de Rubricas acima: sem o nome do arquivo
-            # aqui, um erro de parse não diz se foi o arquivo errado que caiu
-            # como "mais recentemente modificado" da pasta do Drive.
-            return jsonify({"erro": f'{e} (arquivo do Drive: "{nome_arquivo}", modificado em {modificado_em})'}), 400
+            return jsonify({"erro": f'{e} (arquivo selecionado: "{nome_arquivo}")'}), 400
         except Exception as e:
             return jsonify({"erro": f'Falha ao importar a planilha "{nome_arquivo}": {e}'}), 400
-        resultado["arquivo_origem"] = {"nome": nome_arquivo, "modificado_em": modificado_em}
+        resultado["arquivo_origem"] = {"nome": nome_arquivo}
         auditoria.registrar_evento_manual(
             "edicao", f"Atualizou Comparação Folha — competência {resultado['mesano'][:7]} "
             f"({resultado['total_linhas']} linhas, arquivo \"{nome_arquivo}\")",

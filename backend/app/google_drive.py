@@ -1,12 +1,15 @@
 """
-Busca automática de um arquivo direto do Google Drive — implementação
-compartilhada usada tanto pelo botão "Atualizar Rubricas" (54ª rodada,
-app/drive_rubricas.py) quanto pelo botão "Atualizar Comparação Folha" (55ª
-rodada, app/drive_comparacao_folha.py). Cada um chama
-baixar_arquivo_mais_recente() com seu próprio nome de variável de ambiente
-pra pasta — dá pra usar a MESMA conta de serviço do Google Cloud pras duas
-coisas, só compartilhando as duas pastas do Drive com o e-mail dela (não
-precisa criar uma conta de serviço por planilha).
+Acesso ao Google Drive — implementação compartilhada com duas variantes:
+
+1. Busca automática numa pasta FIXA, via CONTA DE SERVIÇO do servidor —
+   usada pelo botão "Atualizar Rubricas" (54ª rodada, app/drive_rubricas.py):
+   chama baixar_arquivo_mais_recente() com seu próprio nome de variável de
+   ambiente pra pasta.
+2. Seleção pelo PRÓPRIO USUÁRIO no Google Picker, via token OAuth de
+   usuário — usada pelo botão "Selecionar arquivo no Drive" de Comparação
+   Folha (60ª rodada, substituiu a busca automática numa pasta fixa porque
+   cada comparação sai num arquivo/diretório novo): ver
+   baixar_arquivo_selecionado() abaixo.
 
 Autenticação via CONTA DE SERVIÇO do Google Cloud — não é usuário/senha do
 Google. Uma conta de serviço é uma identidade só para automação: você cria
@@ -63,15 +66,16 @@ _MIME_XLSM = "application/vnd.ms-excel.sheet.macroEnabled.12"
 _MIME_GOOGLE_SHEETS = "application/vnd.google-apps.spreadsheet"
 _MIMES_RECONHECIDOS = {_MIME_XLSX, _MIME_XLSM, _MIME_GOOGLE_SHEETS}
 
-# CSV — NÃO faz parte de _MIMES_RECONHECIDOS por padrão (só faz sentido pra
-# Comparação Folha: visto em produção, na 55ª rodada, que o arquivo real da
-# pasta de Comparação Folha é um .csv exportado direto do sistema legado,
-# não um .xlsx — a planilha de Rubricas, em contraste, é editada à mão em
-# Excel e não teria por que virar CSV). Quem quiser aceitar CSV também passa
-# `mimes_extra=MIMES_CSV` pra baixar_arquivo_mais_recente (ver
-# drive_comparacao_folha.py). Inclui duas variantes de MIME além da
-# "correta" (text/csv) por tolerância — o Drive/navegador às vezes classifica
-# um .csv como texto simples dependendo de como foi subido.
+# CSV — NÃO faz parte de _MIMES_RECONHECIDOS por padrão (visto em produção,
+# na 55ª rodada, que o arquivo real de Comparação Folha era um .csv
+# exportado direto do sistema legado, não um .xlsx — a planilha de
+# Rubricas, em contraste, é editada à mão em Excel e não teria por que virar
+# CSV). Usado por baixar_arquivo_selecionado() (mimeType or _MIME_CSV) e
+# disponível como `mimes_extra=MIMES_CSV` pra quem usar
+# baixar_arquivo_mais_recente com uma pasta que também aceite CSV. Inclui
+# duas variantes de MIME além da "correta" (text/csv) por tolerância — o
+# Drive/navegador às vezes classifica um .csv como texto simples dependendo
+# de como foi subido.
 _MIME_CSV = "text/csv"
 MIMES_CSV = {_MIME_CSV, "text/plain", "application/csv"}
 
@@ -166,6 +170,59 @@ def _drive_service():
         raise GoogleDriveError(f"Falha ao autenticar com a conta de serviço do Google: {e}")
 
 
+def _drive_service_com_token(access_token):
+    """Mesma ideia de _drive_service(), mas autenticando com um TOKEN OAuth
+    de usuário (vindo do Google Picker no navegador — ver
+    baixar_arquivo_selecionado) em vez da conta de serviço do servidor.
+    Token de curta duração (~1h), então não precisa (nem dá) pra renovar
+    aqui — se expirar no meio de uma importação grande, o chamador recebe o
+    erro do Google e o usuário só clica no botão de novo pra reautenticar."""
+    _, build, _ = _google_libs()
+    try:
+        from google.oauth2.credentials import Credentials
+    except ImportError as e:
+        raise GoogleDriveError(
+            f"Dependências do Google Drive não instaladas no servidor ({e}). Veja "
+            "backend/requirements.txt (google-api-python-client, google-auth)."
+        )
+    try:
+        creds = Credentials(token=access_token)
+        return build("drive", "v3", credentials=creds, cache_discovery=False)
+    except Exception as e:
+        raise GoogleDriveError(f"Falha ao autenticar com o token do Google: {e}")
+
+
+def baixar_arquivo_selecionado(file_id, mime_type, access_token, nome_arquivo=None):
+    """Baixa um arquivo ESPECÍFICO do Google Drive, escolhido pelo próprio
+    usuário no Google Picker (60ª rodada — botão "Selecionar arquivo no
+    Drive" de Comparação Folha) — diferente de baixar_arquivo_mais_recente
+    (que varre uma pasta FIXA configurada no servidor, com a conta de
+    serviço), aqui não existe pasta pré-compartilhada nem
+    GOOGLE_SERVICE_ACCOUNT_JSON envolvido: o usuário autentica com a PRÓPRIA
+    conta Google (token OAuth de curta duração, escopo drive.file — só
+    alcança arquivos que ele mesmo selecionou no Picker, nunca o Drive
+    inteiro) e escolhe visualmente o arquivo, navegando por onde ele estiver
+    — resolve o caso de Comparação Folha, em que cada comparação gera um
+    arquivo novo num diretório novo (a busca automática "mais recente numa
+    pasta fixa" não dava conta disso). `mime_type` vem do próprio Picker
+    (data.docs[0].mimeType) — usado só pra decidir download direto
+    (get_media) x exportação de Planilha Google nativa (export_media), igual
+    a _baixar_conteudo já faz pro fluxo automático."""
+    if not access_token:
+        raise GoogleDriveError("Token de acesso do Google ausente — selecione o arquivo de novo.")
+    if not file_id:
+        raise GoogleDriveError("Id do arquivo do Google Drive ausente — selecione o arquivo de novo.")
+    service = _drive_service_com_token(access_token)
+    arquivo = {"id": file_id, "mimeType": mime_type or _MIME_CSV}
+    try:
+        return _baixar_conteudo(service, arquivo)
+    except Exception as e:
+        raise GoogleDriveError(
+            f'Falha ao baixar "{nome_arquivo or file_id}" do Google Drive: {e} — se o token expirou '
+            "(sessão demorada), clique no botão de novo pra reautenticar."
+        )
+
+
 def _candidatos_arquivos(service, folder_id_env, contexto, mimes_aceitos):
     """Lista os arquivos "que parecem planilha" (MIME em `mimes_aceitos`) da
     pasta, do mais pro menos recentemente modificado. Retorna a LISTA
@@ -245,9 +302,8 @@ def baixar_arquivo_mais_recente(folder_id_env, contexto, validar=None, max_tenta
 
     `mimes_extra`: conjunto de MIME types aceitos ALÉM dos de planilha
     "de verdade" (.xlsx/.xlsm/Planilha Google, ver _MIMES_RECONHECIDOS) —
-    hoje usado só por Comparação Folha, que pode receber o arquivo como
-    .csv exportado direto do sistema legado (ver google_drive.MIMES_CSV e
-    drive_comparacao_folha.py).
+    ex: google_drive.MIMES_CSV, pra pastas que também podem receber o
+    arquivo como .csv exportado direto de um sistema legado.
 
     Sem `validar`: usa sempre o arquivo mais recentemente modificado da
     pasta, sem checar o conteúdo — comportamento original (54ª/55ª rodada).

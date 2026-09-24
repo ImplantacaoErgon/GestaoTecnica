@@ -325,9 +325,14 @@ def _mapear_cabecalho(ws):
 
 
 def validar_estrutura(conteudo_bytes):
-    """Validação RÁPIDA e barata, usada só pra ESCOLHER qual arquivo do
-    Drive é o certo (ver google_drive.baixar_arquivo_mais_recente, chamado
-    por drive_comparacao_folha.py) — não itera as ~300 mil linhas de dados,
+    """Validação RÁPIDA e barata, pensada originalmente (54ª/55ª rodada)
+    pra ESCOLHER qual arquivo de uma pasta fixa do Drive era o certo (ver
+    google_drive.baixar_arquivo_mais_recente, parâmetro `validar`) — sem
+    chamador ativo desde a 60ª rodada, quando Comparação Folha passou a usar
+    o Google Picker (o próprio usuário escolhe o arquivo, sem precisar
+    adivinhar entre candidatos de uma pasta). Mantida por se mostrar útil de
+    novo se outra integração precisar do mesmo padrão de busca automática.
+    Não itera as ~300 mil linhas de dados,
     só confere que a primeira aba com dados tem cara de Comparação Folha
     (cabeçalho na linha 1 com pelo menos 3 das colunas essenciais). Reusa
     _abrir_primeira_aba_com_dados (já é streaming/read_only) e

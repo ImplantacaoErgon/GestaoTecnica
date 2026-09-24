@@ -911,7 +911,7 @@
       </label>
       <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn secondary small" id="cf-exportar">⭳ Exportar CSV</button>
-        <button class="btn secondary small" id="btn-atualizar-comparacao" title="Busca automaticamente, no Google Drive, o arquivo mais recente de Comparação Folha">🔄 Atualizar Comparação</button>
+        <button class="btn secondary small" id="btn-atualizar-comparacao" title="Abre o Google Drive para você escolher o arquivo — cada comparação sai num arquivo/diretório novo, então não dá pra buscar sozinho numa pasta fixa">📁 Selecionar arquivo no Drive</button>
       </div>
     </div>
     <div class="muted" id="cf-status" style="font-size:12px;margin-bottom:8px;"></div>
@@ -2216,6 +2216,19 @@
 "use strict";
 const $ = id => document.getElementById(id);
 const API = "/api";
+
+// Google Picker — botão "📁 Selecionar arquivo no Drive" em Comparação Folha
+// (60ª rodada — substituiu a busca automática numa pasta fixa do Drive, que
+// não funcionava porque cada comparação gera um arquivo novo num diretório
+// novo). Client ID e API Key do Google NÃO são segredo (diferente de
+// GOOGLE_SERVICE_ACCOUNT_JSON, que fica só no servidor) — são feitos pra
+// ficar em código do navegador; a segurança vem de restringir, no Google
+// Cloud Console, quais origens/APIs podem usá-los. Preencha com os valores
+// reais do seu projeto do Google Cloud — ver .env.example (seção "Google
+// Picker") pro passo a passo. Enquanto ficarem com o placeholder, o botão
+// mostra um erro claro em vez de quebrar silenciosamente.
+const GOOGLE_PICKER_CLIENT_ID = "SEU_CLIENT_ID.apps.googleusercontent.com";
+const GOOGLE_PICKER_API_KEY = "SUA_API_KEY_DO_PICKER";
 
 const STATUS_COLOR = {"Não iniciada":"faint","Em andamento":"accent","Bloqueada":"warn","Concluída":"ok",
   "Concluída com atraso":"warn","Concluída com esforço maior":"warn","Concluída com atraso e esforço maior":"danger",
@@ -7238,20 +7251,114 @@ function wireComparacaoFolhaPane(){
   });
   $("cf-detalhe-close").addEventListener("click", ()=>{ $("overlay-cf-detalhe").hidden = true; });
   $("overlay-cf-detalhe").addEventListener("click", e=>{ if(e.target.id==="overlay-cf-detalhe") $("overlay-cf-detalhe").hidden = true; });
-  $("btn-atualizar-comparacao").addEventListener("click", atualizarComparacaoFolhaDrive);
+  $("btn-atualizar-comparacao").addEventListener("click", selecionarComparacaoFolhaNoDrive);
 }
 
-// Botão "🔄 Atualizar Comparação": busca o arquivo mais recente na pasta do
-// Google Drive configurada (ver app/drive_comparacao_folha.py) e já grava —
-// diferente de "Atualizar Rubricas", não existe uma tela de prévia aqui (o
+// ---------------------------------------------------------------------
+// Botão "📁 Selecionar arquivo no Drive" (60ª rodada) — abre o seletor
+// visual do próprio Google Drive (Google Picker) pra o usuário navegar até
+// a pasta/arquivo certo e escolher na hora, em vez de o sistema tentar
+// adivinhar sozinho "o mais recente numa pasta fixa" (não dava certo: cada
+// comparação sai num arquivo novo, num diretório novo, gerado pelo sistema
+// legado). O usuário autentica com a PRÓPRIA conta Google (token OAuth de
+// curta duração, escopo drive.file — só alcança o que ele mesmo selecionar
+// no Picker, nunca o Drive inteiro); não depende de nenhuma conta de
+// serviço nem pasta pré-compartilhada.
+// ---------------------------------------------------------------------
+let _gsiTokenClient = null;
+let _gsiAccessToken = null;
+
+function _carregarScriptUmaVez(src){
+  return new Promise((resolve, reject)=>{
+    if(document.querySelector(`script[src="${src}"]`)) return resolve();
+    const s = document.createElement("script");
+    s.src = src; s.async = true;
+    s.onload = ()=>resolve();
+    s.onerror = ()=>reject(new Error(`Falha ao carregar ${src} (rede bloqueada/sem internet?)`));
+    document.head.appendChild(s);
+  });
+}
+
+async function _prepararGooglePicker(){
+  if(GOOGLE_PICKER_CLIENT_ID.startsWith("SEU_") || GOOGLE_PICKER_API_KEY.startsWith("SUA_")){
+    throw new Error(
+      "Seleção do Google Drive não configurada — faltam GOOGLE_PICKER_CLIENT_ID e " +
+      "GOOGLE_PICKER_API_KEY em frontend/index.html (ver .env.example, seção \"Google Picker\", pro passo a passo)."
+    );
+  }
+  await _carregarScriptUmaVez("https://apis.google.com/js/api.js");
+  await new Promise((resolve, reject)=>{
+    gapi.load("picker", {callback: resolve, onerror: () => reject(new Error("Falha ao carregar o Google Picker."))});
+  });
+  await _carregarScriptUmaVez("https://accounts.google.com/gsi/client");
+  if(!_gsiTokenClient){
+    _gsiTokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_PICKER_CLIENT_ID,
+      scope: "https://www.googleapis.com/auth/drive.file",
+      callback: "", // definido a cada chamada em _obterTokenGoogle()
+    });
+  }
+}
+
+function _obterTokenGoogle(){
+  return new Promise((resolve, reject)=>{
+    _gsiTokenClient.callback = (resp)=>{
+      if(resp.error){ reject(new Error(resp.error)); return; }
+      _gsiAccessToken = resp.access_token;
+      resolve(resp.access_token);
+    };
+    _gsiTokenClient.error_callback = (err)=>{ reject(new Error(err?.message || "Login com o Google cancelado.")); };
+    // Reaproveita a sessão já autorizada quando ainda válida (sem pedir
+    // consentimento de novo a cada clique); só reabre o consentimento se
+    // ainda não tiver token nesta aba.
+    _gsiTokenClient.requestAccessToken({prompt: _gsiAccessToken ? "" : "consent"});
+  });
+}
+
+async function selecionarComparacaoFolhaNoDrive(){
+  const btn = $("btn-atualizar-comparacao");
+  const textoOriginal = btn.textContent;
+  btn.disabled = true; btn.textContent = "Abrindo o Google Drive…";
+  try{
+    await _prepararGooglePicker();
+    const token = await _obterTokenGoogle();
+    const view = new google.picker.DocsView(google.picker.ViewId.DOCS)
+      .setIncludeFolders(true)
+      .setSelectFolderEnabled(false)
+      .setMimeTypes([
+        "text/csv", "text/plain",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-excel.sheet.macroEnabled.12",
+        "application/vnd.google-apps.spreadsheet",
+      ].join(","));
+    const picker = new google.picker.PickerBuilder()
+      .setOAuthToken(token)
+      .setDeveloperKey(GOOGLE_PICKER_API_KEY)
+      .addView(view)
+      .setTitle("Selecione o arquivo de Comparação Folha")
+      .setCallback(data => {
+        if(data.action === google.picker.Action.PICKED){
+          _importarComparacaoFolhaSelecionada(data.docs[0], token);
+        }
+      })
+      .build();
+    picker.setVisible(true);
+  }catch(e){
+    toast(e.message || "Não foi possível abrir o seletor do Google Drive.", true);
+  }finally{
+    btn.disabled = false; btn.textContent = textoOriginal;
+  }
+}
+
+// Diferente de "Atualizar Rubricas", não existe uma tela de prévia aqui (o
 // arquivo é grande demais — até ~300 mil linhas — pra renderizar uma prévia
 // linha a linha no navegador; confirmado com o usuário). Por isso, e porque
 // a ação SUBSTITUI as linhas da competência detectada, pede confirmação
 // explícita antes, no mesmo padrão de outras ações destrutivas do sistema
 // (ex: excluir rubrica/item de migração).
-async function atualizarComparacaoFolhaDrive(){
+async function _importarComparacaoFolhaSelecionada(doc, accessToken){
   if(!confirm(
-    "Buscar o arquivo mais recente de Comparação Folha no Google Drive e importar?\n\n" +
+    `Importar "${doc.name}" como Comparação Folha?\n\n` +
     "Isso SUBSTITUI as linhas já importadas da competência detectada no arquivo " +
     "(as demais competências não são afetadas). Pode demorar alguns minutos " +
     "(arquivo grande, até ~300 mil linhas)."
@@ -7259,9 +7366,12 @@ async function atualizarComparacaoFolhaDrive(){
   const btn = $("btn-atualizar-comparacao");
   btn.disabled = true; const textoOriginal = btn.textContent; btn.textContent = "Importando… (pode demorar)";
   try{
-    const r = await api("/comparacao-folha/importar/drive", {
+    const r = await api("/comparacao-folha/importar/picker", {
       method: "POST",
-      body: JSON.stringify({ projeto_id: PROJETO.id }),
+      body: JSON.stringify({
+        projeto_id: PROJETO.id, file_id: doc.id, mime_type: doc.mimeType,
+        nome_arquivo: doc.name, access_token: accessToken,
+      }),
     });
     const avisos = (r.avisos||[]).length ? " " + r.avisos.join(" ") : "";
     toast(`Comparação Folha atualizada: competência ${fmtDate(r.mesano)}, ${r.total_linhas.toLocaleString('pt-BR')} linha(s).${avisos}`);
@@ -7269,8 +7379,9 @@ async function atualizarComparacaoFolhaDrive(){
     // forçar o filtro (o usuário pode querer continuar vendo "todas").
     await renderComparacaoFolhaPane();
   }catch(e){
-    // api() já mostra um toast com o erro específico (ex: pasta do Drive não
-    // configurada, ou arquivo sem coluna MESANO reconhecível).
+    // api() já mostra um toast com o erro específico (ex: arquivo sem
+    // coluna MESANO reconhecível, ou token expirado — nesse caso, clique
+    // de novo no botão pra reautenticar).
   }finally{
     btn.disabled = false; btn.textContent = textoOriginal;
   }
