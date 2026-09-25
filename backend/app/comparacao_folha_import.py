@@ -216,18 +216,34 @@ def _parece_xlsx(conteudo_bytes):
     return conteudo_bytes[:4] == b"PK\x03\x04"
 
 
-def _decodificar_csv(conteudo_bytes):
+def _detectar_encoding(conteudo_bytes, tamanho_amostra=65536):
     """Tenta alguns encodings comuns em exports de sistema legado brasileiro
     — utf-8 (com ou sem BOM) é o mais provável vindo de um export recente,
     mas latin-1 (cp1252-like) ainda aparece em exports mais antigos/Windows.
     latin-1 nunca levanta UnicodeDecodeError (mapeia todo byte pra um
-    caractere), então serve de último recurso garantido."""
+    caractere), então serve de último recurso garantido.
+
+    Diferente da versão anterior (61ª rodada — ver _CsvComoAba): decide o
+    encoding olhando só uma AMOSTRA do início do arquivo (64KB), não o
+    arquivo inteiro — decodificar ~130MB só pra "adivinhar" o encoding era
+    desperdício de memória exatamente no momento mais crítico (bug de
+    produção que derrubou o servidor por falta de memória, ver
+    _CsvComoAba). A amostra é cortada no último "\\n" completo antes do
+    limite (nunca no meio do arquivo) — "\\n" (0x0A) nunca aparece como byte
+    de continuação em utf-8, então cortar ali é seguro e não arrisca partir
+    um caractere multi-byte ao meio, o que faria a detecção falhar por um
+    motivo errado (byte cortado, não encoding errado)."""
+    amostra = conteudo_bytes[:tamanho_amostra]
+    ultimo_nl = amostra.rfind(b"\n")
+    if ultimo_nl > 0:
+        amostra = amostra[:ultimo_nl]
     for encoding in ("utf-8-sig", "utf-8"):
         try:
-            return conteudo_bytes.decode(encoding)
+            amostra.decode(encoding)
+            return encoding
         except UnicodeDecodeError:
             continue
-    return conteudo_bytes.decode("latin-1")
+    return "latin-1"
 
 
 class _CsvComoAba:
@@ -238,33 +254,60 @@ class _CsvComoAba:
     tanto pra .xlsx/.xlsm quanto pra .csv, sem duplicar código.
 
     `conteudo_bytes` já está inteiro na memória de qualquer jeito (baixado
-    do Drive por completo antes de chegar aqui — ver google_drive.py), então
-    reabrir um `csv.reader` do zero a cada chamada de `iter_rows` (em vez de
-    guardar um único iterador consumível uma vez só) não perde nada da
-    vantagem de streaming que o modo read_only do openpyxl tem sobre XML —
-    o ganho de streaming de verdade deste módulo está na ESCRITA pro
-    Postgres via COPY (ver _linhas_copy/db.execute_stream), não na leitura,
-    que sempre trabalha em cima do conteúdo já carregado."""
+    do Drive, ou recebido por upload — ver google_drive.py/main.py), então
+    guardar SÓ os bytes aqui (em vez de também decodificar tudo pra uma
+    `str` Python logo de cara) evita manter duas a três cópias do conteúdo
+    inteiro na memória ao mesmo tempo — o `str` decodificado E a cópia
+    interna que um `io.StringIO(str)` faz por baixo dos panos. Cada
+    `iter_rows()` decodifica em streaming, direto dos bytes já guardados,
+    via `io.TextIOWrapper` (o "arquivo de texto" fica só na cabeça do
+    Python — cada linha é decodificada sob demanda conforme o csv.reader
+    avança, não tudo de uma vez).
+
+    Motivo desta mudança (61ª rodada): um arquivo real de Comparação Folha
+    (~130MB, ~300 mil linhas) chegou a estourar o limite de memória do
+    servidor (512MB no Render) e derrubar o CONTÊINER inteiro — 502 sem
+    nenhum traceback (processo morto pelo sistema operacional antes de
+    conseguir logar qualquer coisa; confirmado nos logs/métricas do Render:
+    reinícios completos do gunicorn, sem erro nenhum registrado entre eles,
+    bem no horário da tentativa de importação). Isso não elimina de vez o
+    limite de memória (os bytes brutos do arquivo continuam precisando
+    caber na memória de qualquer forma — reduzir isso também exigiria mudar
+    como o upload/download chega até aqui, um trabalho maior, não feito
+    nesta rodada), mas corta a duplicação desnecessária que a versão
+    anterior deste adaptador fazia especificamente na etapa de leitura."""
 
     def __init__(self, conteudo_bytes):
-        texto = _decodificar_csv(conteudo_bytes)
-        primeira_linha = texto.split("\n", 1)[0] if texto else ""
+        self._bytes = conteudo_bytes
+        self._encoding = _detectar_encoding(conteudo_bytes)
+        amostra_texto = conteudo_bytes[:65536].decode(self._encoding, errors="replace")
+        primeira_linha = amostra_texto.split("\n", 1)[0] if amostra_texto else ""
         # Exports de sistemas legados brasileiros frequentemente usam ";"
         # como separador (evita conflito com a vírgula decimal) — detecta
         # pelo que aparece mais na primeira linha.
         self._delimitador = ";" if primeira_linha.count(";") > primeira_linha.count(",") else ","
-        self._texto = texto
 
     def iter_rows(self, min_row=1, max_row=None, values_only=True):
         import csv
         import io
-        leitor = csv.reader(io.StringIO(self._texto), delimiter=self._delimitador)
-        for i, linha in enumerate(leitor, start=1):
-            if i < min_row:
-                continue
-            if max_row is not None and i > max_row:
-                return
-            yield tuple(v if v != "" else None for v in linha)
+        # errors="replace" (em vez de deixar propagar UnicodeDecodeError):
+        # o encoding já foi o melhor detectado pela amostra, mas um arquivo
+        # de ~300 mil linhas pode ter algum byte isolado fora do padrão bem
+        # mais à frente — preferimos substituir esse caractere pontual
+        # (mesmo comportamento "nunca falha" que o latin-1 já garantia na
+        # versão anterior) a derrubar a importação inteira por causa de 1
+        # caractere estranho numa única célula.
+        texto_stream = io.TextIOWrapper(io.BytesIO(self._bytes), encoding=self._encoding, errors="replace", newline="")
+        try:
+            leitor = csv.reader(texto_stream, delimiter=self._delimitador)
+            for i, linha in enumerate(leitor, start=1):
+                if i < min_row:
+                    continue
+                if max_row is not None and i > max_row:
+                    return
+                yield tuple(v if v != "" else None for v in linha)
+        finally:
+            texto_stream.close()
 
 
 def _abrir_primeira_aba_com_dados(conteudo_bytes):
