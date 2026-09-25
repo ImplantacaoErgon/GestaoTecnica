@@ -2269,6 +2269,38 @@ def create_app():
         )
         return jsonify(resultado)
 
+    @app.post("/api/comparacao-folha/importar/upload")
+    def importar_comparacao_folha_upload():
+        """Alternativa simples ao Picker acima (61ª rodada) — upload manual
+        comum, igual ao usado em Rubricas/Cronograma/etc: o usuário escolhe
+        o arquivo direto do computador dele, sem precisar de nenhuma
+        configuração do Google (Client ID, Chave de API, tela de
+        consentimento OAuth, resource key...). Único passo, sem prévia —
+        mesmo motivo do /importar/picker (arquivo grande demais, até ~300
+        mil linhas, pra renderizar prévia linha a linha)."""
+        projeto_id = request.form.get("projeto_id")
+        file = request.files.get("file")
+        if not projeto_id:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        if not file:
+            return jsonify({"erro": "Selecione o arquivo."}), 400
+        nome_arquivo = file.filename
+        conteudo = file.read()
+        try:
+            resultado = comparacao_folha_import.importar_comparacao_folha(projeto_id, conteudo)
+        except comparacao_folha_import.ComparacaoFolhaImportError as e:
+            return jsonify({"erro": f'{e} (arquivo enviado: "{nome_arquivo}")'}), 400
+        except Exception as e:
+            return jsonify({"erro": f'Falha ao importar a planilha "{nome_arquivo}": {e}'}), 400
+        resultado["arquivo_origem"] = {"nome": nome_arquivo}
+        auditoria.registrar_evento_manual(
+            "edicao", f"Atualizou Comparação Folha (upload manual) — competência "
+            f"{resultado['mesano'][:7]} ({resultado['total_linhas']} linhas, arquivo \"{nome_arquivo}\")",
+            entidade="comparacao_folha", entidade_rotulo=resultado["mesano"][:7],
+            projeto_id=projeto_id, sensivel=False,
+        )
+        return jsonify(resultado)
+
     # ------------------------------------------------------------------ marcos
     @app.get("/api/marcos")
     def list_marcos():

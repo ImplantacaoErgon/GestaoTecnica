@@ -912,6 +912,8 @@
       <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn secondary small" id="cf-exportar">⭳ Exportar CSV</button>
         <button class="btn secondary small" id="btn-atualizar-comparacao" title="Abre o Google Drive para você escolher o arquivo — cada comparação sai num arquivo/diretório novo, então não dá pra buscar sozinho numa pasta fixa">📁 Selecionar arquivo no Drive</button>
+        <input type="file" id="cf-upload-file" accept=".csv,.xlsx,.xlsm" hidden>
+        <button class="btn secondary small" id="btn-upload-comparacao" title="Escolhe o arquivo direto do seu computador — sem depender do Google">📤 Enviar arquivo do computador</button>
       </div>
     </div>
     <div class="muted" id="cf-status" style="font-size:12px;margin-bottom:8px;"></div>
@@ -7252,6 +7254,42 @@ function wireComparacaoFolhaPane(){
   $("cf-detalhe-close").addEventListener("click", ()=>{ $("overlay-cf-detalhe").hidden = true; });
   $("overlay-cf-detalhe").addEventListener("click", e=>{ if(e.target.id==="overlay-cf-detalhe") $("overlay-cf-detalhe").hidden = true; });
   $("btn-atualizar-comparacao").addEventListener("click", selecionarComparacaoFolhaNoDrive);
+  $("btn-upload-comparacao").addEventListener("click", ()=> $("cf-upload-file").click());
+  $("cf-upload-file").addEventListener("change", uploadComparacaoFolhaDoComputador);
+}
+
+// ---------------------------------------------------------------------
+// Botão "📤 Enviar arquivo do computador" (61ª rodada) — alternativa simples
+// ao Google Picker acima: upload manual comum, direto do computador do
+// usuário, sem depender de nenhuma configuração do Google (Client ID,
+// Chave de API, tela de consentimento OAuth, etc.). Mesmo padrão já usado
+// em Rubricas (ver analisarRubricas()) — FormData com projeto_id + file.
+// ---------------------------------------------------------------------
+async function uploadComparacaoFolhaDoComputador(){
+  const input = $("cf-upload-file");
+  const file = input.files[0];
+  input.value = ""; // permite selecionar o mesmo arquivo de novo depois
+  if(!file) return;
+  if(!confirm(
+    `Importar "${file.name}" como Comparação Folha?\n\n` +
+    "Isso SUBSTITUI as linhas já importadas da competência detectada no arquivo " +
+    "(as demais competências não são afetadas). Pode demorar alguns minutos " +
+    "(arquivo grande, até ~300 mil linhas)."
+  )) return;
+  const btn = $("btn-upload-comparacao");
+  btn.disabled = true; const textoOriginal = btn.textContent; btn.textContent = "Importando… (pode demorar)";
+  try{
+    const fd = new FormData();
+    fd.append("projeto_id", PROJETO.id);
+    fd.append("file", file);
+    const r = await api("/comparacao-folha/importar/upload", {method: "POST", body: fd});
+    const avisos = (r.avisos||[]).length ? " " + r.avisos.join(" ") : "";
+    toast(`Comparação Folha atualizada: competência ${fmtDate(r.mesano)}, ${r.total_linhas.toLocaleString('pt-BR')} linha(s).${avisos}`);
+    await renderComparacaoFolhaPane();
+  }catch(e){
+    // api() já mostra um toast com o erro específico
+  }
+  btn.disabled = false; btn.textContent = textoOriginal;
 }
 
 // ---------------------------------------------------------------------
