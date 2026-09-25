@@ -192,7 +192,7 @@ def _drive_service_com_token(access_token):
         raise GoogleDriveError(f"Falha ao autenticar com o token do Google: {e}")
 
 
-def baixar_arquivo_selecionado(file_id, mime_type, access_token, nome_arquivo=None):
+def baixar_arquivo_selecionado(file_id, mime_type, access_token, nome_arquivo=None, resource_key=None):
     """Baixa um arquivo ESPECÍFICO do Google Drive, escolhido pelo próprio
     usuário no Google Picker (60ª rodada — botão "Selecionar arquivo no
     Drive" de Comparação Folha) — diferente de baixar_arquivo_mais_recente
@@ -207,7 +207,16 @@ def baixar_arquivo_selecionado(file_id, mime_type, access_token, nome_arquivo=No
     pasta fixa" não dava conta disso). `mime_type` vem do próprio Picker
     (data.docs[0].mimeType) — usado só pra decidir download direto
     (get_media) x exportação de Planilha Google nativa (export_media), igual
-    a _baixar_conteudo já faz pro fluxo automático."""
+    a _baixar_conteudo já faz pro fluxo automático.
+
+    `resource_key` (data.docs[0].resourceKey no Picker, pode vir ausente):
+    desde set/2021 o Google exige essa chave, junto com o id, pra arquivos
+    que só foram compartilhados por LINK (não com o e-mail direto) — sem
+    ela, a Drive API responde 404 "File not found" mesmo com um token OAuth
+    válido e com acesso de verdade ao arquivo (erro visto em produção nesta
+    rodada, exatamente com esse sintoma: usuário escolhe o arquivo certo no
+    Picker, autentica certinho, e mesmo assim cai em 404). Ver
+    _baixar_conteudo, que aplica isso no header X-Goog-Drive-Resource-Keys."""
     if not access_token:
         raise GoogleDriveError("Token de acesso do Google ausente — selecione o arquivo de novo.")
     if not file_id:
@@ -215,7 +224,7 @@ def baixar_arquivo_selecionado(file_id, mime_type, access_token, nome_arquivo=No
     service = _drive_service_com_token(access_token)
     arquivo = {"id": file_id, "mimeType": mime_type or _MIME_CSV}
     try:
-        return _baixar_conteudo(service, arquivo)
+        return _baixar_conteudo(service, arquivo, resource_key=resource_key)
     except Exception as e:
         raise GoogleDriveError(
             f'Falha ao baixar "{nome_arquivo or file_id}" do Google Drive: {e} — se o token expirou '
@@ -273,16 +282,25 @@ def _candidatos_arquivos(service, folder_id_env, contexto, mimes_aceitos):
     return candidatos
 
 
-def _baixar_conteudo(service, arquivo):
+def _baixar_conteudo(service, arquivo, resource_key=None):
     """Baixa o conteúdo bruto (bytes) de UM arquivo já identificado (id +
     mimeType já conhecidos) — separado de baixar_arquivo_mais_recente pra
     poder ser chamado uma vez por candidato, quando há validação (ver
-    abaixo)."""
+    abaixo).
+
+    `resource_key`: ver baixar_arquivo_selecionado — quando presente, vai no
+    header X-Goog-Drive-Resource-Keys (formato oficial do Google:
+    "<id>/<resource_key>"), do jeito documentado pro cliente Python da API
+    do Drive (o método files().get_media()/export_media() não tem parâmetro
+    próprio pra isso — o objeto de request retornado é um HttpRequest comum,
+    com um dict .headers que dá pra completar antes de executar)."""
     _, _, MediaIoBaseDownload = _google_libs()
     if arquivo["mimeType"] == _MIME_GOOGLE_SHEETS:
         request = service.files().export_media(fileId=arquivo["id"], mimeType=_MIME_XLSX)
     else:
         request = service.files().get_media(fileId=arquivo["id"])
+    if resource_key:
+        request.headers["X-Goog-Drive-Resource-Keys"] = f"{arquivo['id']}/{resource_key}"
     buf = io.BytesIO()
     downloader = MediaIoBaseDownload(buf, request)
     done = False

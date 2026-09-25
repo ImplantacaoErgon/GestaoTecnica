@@ -7371,6 +7371,12 @@ async function _importarComparacaoFolhaSelecionada(doc, accessToken){
       body: JSON.stringify({
         projeto_id: PROJETO.id, file_id: doc.id, mime_type: doc.mimeType,
         nome_arquivo: doc.name, access_token: accessToken,
+        // resourceKey: exigido pelo Google (desde set/2021) pra baixar pela API
+        // arquivos que só foram compartilhados por LINK (não direto com o
+        // e-mail) — sem isso, a API responde 404 mesmo com token válido e
+        // acesso de verdade ao arquivo (visto em produção, 60ª rodada). Fica
+        // ausente/undefined pra arquivos que não precisam dele.
+        resource_key: doc.resourceKey || null,
       }),
     });
     const avisos = (r.avisos||[]).length ? " " + r.avisos.join(" ") : "";

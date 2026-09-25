@@ -2242,13 +2242,16 @@ def create_app():
         file_id = data.get("file_id")
         access_token = data.get("access_token")
         mime_type = data.get("mime_type")
+        resource_key = data.get("resource_key")
         nome_arquivo = data.get("nome_arquivo") or file_id
         if not projeto_id:
             return jsonify({"erro": "projeto_id é obrigatório"}), 400
         if not file_id or not access_token:
             return jsonify({"erro": "Selecione o arquivo no Google Drive antes de importar."}), 400
         try:
-            conteudo = google_drive.baixar_arquivo_selecionado(file_id, mime_type, access_token, nome_arquivo)
+            conteudo = google_drive.baixar_arquivo_selecionado(
+                file_id, mime_type, access_token, nome_arquivo, resource_key=resource_key,
+            )
         except google_drive.GoogleDriveError as e:
             return jsonify({"erro": str(e)}), 502
         try:
