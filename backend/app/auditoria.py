@@ -9,11 +9,12 @@ Duas famílias de evento:
   2. Dado: criacao, edicao, exclusao — gravados a partir de UM ÚNICO PONTO
      cada, dentro de insert_row/patch_row/delete_row (main.py), que são as
      3 funções genéricas por onde passa a esmagadora maioria das ~30 rotas
-     de criar/editar/excluir do sistema. Isso cobre de uma vez ~16 entidades
-     (atividades, requisitos do TR, faturas, riscos, marcos, recursos,
-     etapas, frentes de trabalho, tipos de atividade elementar, usuários,
-     manuais, calendário de feriados, projetos, ciclos de migração, relatos
-     de atividade, dependências) sem precisar instrumentar rota por rota.
+     de criar/editar/excluir do sistema. Isso cobre de uma vez ~17 entidades
+     (atividades, requisitos do TR, faturas, riscos, marcos, pendências,
+     recursos, etapas, frentes de trabalho, tipos de atividade elementar,
+     usuários, manuais, calendário de feriados, projetos, ciclos de
+     migração, relatos de atividade, dependências) sem precisar
+     instrumentar rota por rota.
 
 Princípio inegociável: uma falha ao GRAVAR o log NUNCA pode quebrar a
 operação real do usuário. Toda escrita aqui é best-effort — qualquer
@@ -53,6 +54,7 @@ ENTIDADE_ROTULOS = {
     "ciclos_migracao": "Ciclo de migração",
     "marcos": "Marco",
     "riscos": "Risco",
+    "pendencias": "Pendência",
     "calendario_util": "Calendário de feriados",
     "cronograma": "Cronograma",
 }
@@ -108,10 +110,7 @@ CAMPO_ROTULOS = {
         "eh_entregavel": "É entregável",
     },
     "atividade_relato": {
-        "texto": "Relato", "eh_pendencia": "É pendência",
-        "pendencia_responsavel_id": "Responsável pela pendência",
-        "pendencia_prazo_possivel": "Prazo possível da pendência",
-        "pendencia_data_limite": "Data limite da pendência",
+        "texto": "Relato",
     },
     "requisitos_tr": {
         "codigo": "Código", "titulo": "Título", "descricao": "Descrição", "tipo_requisito": "Tipo",
@@ -141,6 +140,15 @@ CAMPO_ROTULOS = {
         "impacto": "Impacto", "mitigacao": "Mitigação", "responsavel_id": "Responsável",
         "status": "Status", "identificado_em": "Identificado em",
     },
+    "pendencias": {
+        "titulo": "Identificação", "frente_trabalho_id": "Frente de trabalho",
+        "atividade_id": "Atividade", "risco_id": "Risco", "descricao": "Descrição",
+        "impactos": "Impactos", "responsavel_consultoria_id": "Responsável (Consultoria)",
+        "responsavel_cliente_id": "Responsável (Cliente)", "data_identificacao": "Identificada em",
+        "data_limite": "Data limite de solução", "data_prevista": "Data prevista de solução",
+        "data_real": "Data real de solução", "status": "Status", "prioridade": "Prioridade",
+        "categoria": "Categoria", "acoes_necessarias": "Ações necessárias", "observacoes": "Observações",
+    },
     "calendario_util": {"data": "Data", "descricao": "Descrição"},
     "ciclos_migracao": {
         "numero_ciclo": "Número do ciclo", "data_execucao": "Data de execução",
@@ -154,7 +162,7 @@ _CAMPO_ROTULO_REGISTRO = {
     "projetos": "nome", "usuarios": "nome", "recursos": "nome", "etapas": "nome",
     "frentes_trabalho": "nome", "tipos_atividade_elementar": "nome", "atividades": "nome",
     "requisitos_tr": "titulo", "manuais": "nome", "marcos": "nome", "calendario_util": "descricao",
-    "ciclos_migracao": "numero_ciclo",
+    "ciclos_migracao": "numero_ciclo", "pendencias": "titulo",
 }
 
 # Campos que nunca devem aparecer no diff (irrelevantes ou ruidosos demais).
