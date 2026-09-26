@@ -144,6 +144,16 @@
   .frente-row .bar-track{flex:1;height:8px;background:var(--surface-2);border-radius:5px;overflow:hidden;display:flex;}
   .frente-row .bar-track div{height:100%;}
   .frente-row .count{width:70px;text-align:right;color:var(--text-faint);font-family:'IBM Plex Mono';flex-shrink:0;}
+  /* 65ª rodada: mesmo padrão visual do .frente-row (Dashboard principal),
+     reaproveitado no Dashboard de Comparação Folha — nome mais largo (nomes
+     de situação/empresa tendem a ser mais longos que nome de frente) e
+     .bar-track/.count soltos (não escopados a .cf-dash-row) porque também
+     são usados dentro de uma célula de tabela (ver cfdCarregarDados()). */
+  .cf-dash-row{display:flex;align-items:center;gap:10px;padding:7px 0;font-size:12.5px;}
+  .cf-dash-row .nome{width:220px;flex-shrink:0;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .bar-track{height:8px;background:var(--surface-2);border-radius:5px;overflow:hidden;display:flex;}
+  .bar-track div{height:100%;}
+  .cf-dash-row .count{width:150px;text-align:right;color:var(--text-faint);font-family:'IBM Plex Mono';flex-shrink:0;}
 
   /* ---- filters ---- */
   .filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;}
@@ -228,6 +238,12 @@
   #el-linhas-tbody td{white-space:nowrap;}
   #el-linhas-tbody td.el-td-obs{white-space:normal;}
   #el-linhas-tbody th{white-space:nowrap;}
+  /* 65ª rodada: grade de Comparação Folha com todas as ~65 colunas — nowrap
+     pra manter linha compacta (rolagem horizontal, não vertical, cuida do
+     excesso — .table-wrap já tem overflow:auto), exceto os campos de texto
+     livre mais longos (Observações), que quebram linha normalmente. */
+  #cf-tbody td{white-space:nowrap;}
+  #cf-tbody td.cf-td-wrap{white-space:normal;max-width:260px;}
   .el-recursos-cell{position:relative;}
   .el-recursos-btn{
     background:transparent;border:1px solid var(--border);border-radius:6px;padding:4px 9px;
@@ -302,8 +318,43 @@
      medindo a altura real de cada linha da tabela de rótulos depois de
      desenhada e aplicando a mesma altura na barra correspondente à direita,
      pra rótulo × barra não desalinharem. */
-  .gantt-wrap{background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);margin-bottom:16px;overflow:hidden;}
-  .gantt-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--surface-2);flex-wrap:wrap;}
+  .gantt-wrap{background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);margin-bottom:16px;}
+  /* 65ª rodada — "o quadro navegável esteja dentro do campo visual da
+     página, para termos o cabeçalho e as barras de rolagem numa mesma
+     visão": até então só .gantt-scroll tinha altura limitada (750px fixos);
+     a página em volta (filtros, título) continuava rolando normalmente, e
+     ao rolar a JANELA (não o mouse sobre a grade) pra baixo, o bloco inteiro
+     — toolbar com zoom/Salvar e o próprio cabeçalho das colunas — saía da
+     tela junto, sobrando só o meio da grade sem nenhum cabeçalho visível.
+     Primeira tentativa desta rodada grudou (position:sticky) só a
+     .gantt-toolbar/.gantt-salvar-painel — não bastou: .gantt-scroll (que
+     não tinha virado sticky) continuava no fluxo normal da página, e uma
+     vez que a toolbar parava de "andar" (grudada), .gantt-scroll seguia
+     subindo por baixo dela ao rolar mais, escondendo o PRÓPRIO cabeçalho da
+     grade (thead, sticky só em relação a .gantt-scroll) atrás da toolbar —
+     o mesmo sintoma, só que um nível mais embaixo. A correção: TODAS as três
+     peças (.gantt-toolbar, .gantt-salvar-painel, .gantt-scroll) grudam em
+     cascata, cada uma logo abaixo da anterior (top calculado somando as
+     alturas reais, medidas em JS — ver _ganttAjustarLayoutSticky() — porque
+     podem variar com quebra de linha em telas estreitas ou o painel de
+     Salvar aberto/fechado). Uma vez que .gantt-scroll também para de
+     "andar", seu próprio thead interno (sticky relativo a .gantt-scroll)
+     finalmente fica numa posição ESTÁVEL, e aí sim se mantém visível.
+     .gantt-scroll ganha ainda uma altura calculada (mesma função) que
+     preenche exatamente o resto da janela a partir de onde ela grudou —
+     assim a barra de rolagem vertical (e a horizontal, do gráfico) sempre
+     cabem entre o cabeçalho grudado e o rodapé da janela. overflow:hidden
+     saiu de .gantt-wrap porque um ancestral com overflow!=visible vira o
+     "contêiner de rolagem" pra position:sticky dos filhos (spec do CSS) —
+     com overflow:hidden aqui, a rolagem que importa pro sticky (a da
+     JANELA) deixava de valer; o arredondamento das bordas passou a ficar
+     por conta de cada peça (topo na toolbar, base em .gantt-scroll) em vez
+     do wrapper. */
+  .gantt-toolbar{
+    display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;
+    border-bottom:1px solid var(--border);background:var(--surface-2);flex-wrap:wrap;
+    border-radius:12px 12px 0 0;position:sticky;top:var(--topbar-h,96px);z-index:12;
+  }
   .gantt-toolbar .zoom-group{display:flex;gap:4px;}
   .gantt-toolbar .zoom-group button{background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:5px 10px;font-size:12px;font-family:inherit;cursor:pointer;color:var(--text-muted);}
   .gantt-toolbar .zoom-group button.active{background:var(--accent);color:#fff;border-color:var(--accent);}
@@ -312,15 +363,24 @@
      na própria barra de ferramentas do Gantt, pra reforçar que a edição
      agora acontece ali mesmo, sem precisar abrir um modal separado. */
   .gantt-toolbar-edicao{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--text-muted);}
-  .gantt-salvar-painel{padding:12px 14px;border-bottom:1px solid var(--border);background:var(--accent-soft);}
+  .gantt-salvar-painel{
+    padding:12px 14px;border-bottom:1px solid var(--border);background:var(--accent-soft);
+    position:sticky;top:calc(var(--topbar-h,96px) + var(--gantt-toolbar-h,44px));z-index:11;
+  }
   .gantt-salvar-resumo{font-size:12.5px;margin-bottom:8px;}
   .gantt-salvar-relatos{display:flex;flex-direction:column;gap:6px;margin-bottom:10px;max-height:220px;overflow:auto;}
   .gantt-salvar-acoes{display:flex;justify-content:flex-end;gap:8px;}
-  /* a rolagem (25 linhas ~ pedido da rodada anterior) fica só nesta camada
-     interna, embaixo da toolbar — que assim nunca some ao rolar. */
-  .gantt-scroll{overflow:auto;max-height:750px;}
+  /* .gantt-scroll agora é ELA MESMA sticky (ver comentário grande acima) —
+     grudada logo abaixo da toolbar (+ painel de Salvar, quando aberto), com
+     altura calculada dinamicamente por _ganttAjustarLayoutSticky() (65ª
+     rodada); max-height aqui é só o valor de fallback antes do primeiro
+     cálculo (ou com JS indisponível). */
+  .gantt-scroll{
+    overflow:auto;max-height:750px;border-radius:0 0 12px 12px;
+    position:sticky;top:calc(var(--topbar-h,96px) + var(--gantt-toolbar-h,44px) + var(--gantt-painel-h,0px));z-index:10;
+  }
   .gantt{display:grid;} /* grid-template-columns (largura da coluna de rótulos + 1fr do gráfico) é definido inline por render, conforme a soma das larguras de coluna */
-  .gantt-labels{border-right:1px solid var(--border);overflow-x:auto;}
+  .gantt-labels{border-right:1px solid var(--border);}
   .grid-tabela{border-collapse:collapse;table-layout:fixed;width:100%;font-size:12px;}
   .grid-tabela thead th{
     position:sticky;top:0;z-index:3;background:var(--surface);font-weight:700;text-align:left;
@@ -573,10 +633,12 @@
       <button data-view="faturas">💵 Faturas</button>
       <button data-view="migracao">📦 Migração de Dados</button>
       <div class="tab-group" data-group>
-        <button type="button" class="tab-group-trigger" data-views="rubricas,comparacao-folha">💰 Folha de Pagamento <span class="caret">▾</span></button>
+        <button type="button" class="tab-group-trigger" data-views="rubricas,comparacao-folha,comparacao-folha-dashboard">💰 Folha de Pagamento <span class="caret">▾</span></button>
         <div class="tab-group-menu">
           <button data-view="rubricas">🧾 Rubricas</button>
           <button data-view="comparacao-folha">⚖️ Comparação Folha</button>
+          <!-- 65ª rodada: aba dedicada de convergência — ver view-comparacao-folha-dashboard -->
+          <button data-view="comparacao-folha-dashboard">📊 Dashboard Comparação</button>
         </div>
       </div>
       <div class="tab-group" data-group>
@@ -764,6 +826,13 @@
       </div>
       <div class="gantt-scroll"><div id="gantt"></div></div>
     </div>
+    <!-- Popup de Dependências da grade unificada (65ª rodada) — mesma classe
+         (.el-deps-pop) do popup usado dentro do modal "Editar em massa", mas
+         um elemento PRÓPRIO: aquele fica dentro de #overlay-edicao-lote-cronograma,
+         que é hidden quando o modal está fechado, e um ancestral hidden
+         esconde até um descendente position:fixed — não dava pra reusar o
+         mesmo nó fora do modal. -->
+    <div id="grid-deps-popup" class="el-deps-pop" hidden style="position:fixed;"></div>
   </section>
 
   <!-- ============ CAMINHO CRÍTICO ============ -->
@@ -982,6 +1051,16 @@
       <select id="cf-f-mesano"><option value="">Competência (todas)</option></select>
       <select id="cf-f-situacao"><option value="">Situação (todas)</option></select>
       <select id="cf-f-tiporubr"><option value="">Tipo de rubrica (todos)</option></select>
+      <!-- 65ª rodada: Empresa/TipoVINC/Rubrica Ergon/Verba Consist — os dois
+           últimos são <select>, não texto livre, de propósito: só oferecem
+           código que já existe de verdade nos dados importados (populados em
+           cfCarregarResumo(), a partir de resumo().rubricas_ergon_disponiveis/
+           verbas_consist_disponiveis) — pedido do usuário: "não permitir
+           qualquer número, apenas os válidos". -->
+      <select id="cf-f-empresa"><option value="">Empresa (todas)</option></select>
+      <select id="cf-f-tipovinc"><option value="">Tipo de vínculo (todos)</option></select>
+      <select id="cf-f-rubrica-ergon" title="Só lista rubricas que já aparecem na Comparação (código válido)."><option value="">Rubrica Ergon (todas)</option></select>
+      <select id="cf-f-verba-consist" title="Só lista verbas que já aparecem na Comparação (código válido)."><option value="">Verba Consist (todas)</option></select>
       <input type="text" id="cf-f-busca" placeholder="Buscar por matrícula, nome, CPF, rubrica…">
       <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;white-space:nowrap;">
         <input type="checkbox" id="cf-f-divergentes"> Só divergentes
@@ -994,17 +1073,88 @@
       </div>
     </div>
     <div class="muted" id="cf-status" style="font-size:12px;margin-bottom:8px;"></div>
+    <!-- 65ª rodada: cabeçalho gerado em JS a partir de CF_COLUNAS_GRID (todas
+         as ~65 colunas da planilha, não só as 9 de antes) — ver
+         cfMontarThead()/cfLinhaHtml() abaixo. .table-wrap já tem
+         overflow:auto (ver CSS), então a rolagem horizontal pra uma tabela
+         bem mais larga que a tela já funciona sem precisar de nada novo. -->
     <div class="table-wrap">
       <table>
-        <thead><tr>
-          <th>Situação</th><th>Matrícula</th><th>Nome</th><th>Competência</th>
-          <th>Rubrica Ergon</th><th>Verba legado</th><th>Valor Ergon</th><th>Valor legado</th><th>Diferença</th>
-        </tr></thead>
+        <thead><tr id="cf-thead-row"></tr></thead>
         <tbody id="cf-tbody"></tbody>
       </table>
     </div>
     <div style="display:flex;justify-content:center;margin-top:14px;">
       <button class="btn small ghost" id="cf-carregar-mais" hidden>Carregar mais</button>
+    </div>
+  </section>
+
+  <!-- ============ DASHBOARD DE CONVERGÊNCIA (Comparação Folha) ============ -->
+  <!-- 65ª rodada: aba separada da grade de consulta, focada nas perguntas
+       que ajudam a equipe a AUMENTAR a convergência entre Ergon e o legado
+       (pedido do usuário) — não é sobre valor financeiro, é sobre cobertura
+       e % sem divergência. Ver app/comparacao_folha.dashboard() (leitura) e
+       cfd*/CFD_* abaixo (JS). -->
+  <section class="view" id="view-comparacao-folha-dashboard">
+    <h2 class="view-title">📊 Dashboard Comparação Folha</h2>
+    <div class="view-sub">Indicadores de convergência entre o Ergon e a ficha financeira do sistema legado — foco em quantidade e cobertura de rubricas, não em valor financeiro.</div>
+    <div class="filters">
+      <select id="cfd-f-mesano"><option value="">Competência (todas)</option></select>
+    </div>
+    <div class="kpis" id="cfd-kpis"></div>
+    <div class="grid-2">
+      <div class="card">
+        <h3>% sem divergência por situação</h3>
+        <div class="view-sub" style="margin-top:-6px;">De tudo que foi comparado, quanto já bate certo entre os dois sistemas — quebrado por situação, pra mostrar onde focar primeiro.</div>
+        <div id="cfd-situacao"></div>
+      </div>
+      <div class="card">
+        <h3>Rubricas Ergon × Verbas Consist, por empresa</h3>
+        <div class="view-sub" style="margin-top:-6px;">Quantidade de códigos distintos de cada lado aparecendo na comparação, por empresa — não é valor financeiro. Uma diferença grande entre as duas colunas é sinal de mapeamento incompleto naquela empresa.</div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Empresa</th><th>Linhas</th><th>Rubricas Ergon</th><th>Verbas Consist</th><th>% sem divergência</th></tr></thead>
+          <tbody id="cfd-empresa-tbody"></tbody>
+        </table></div>
+      </div>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+        <h3>🎯 Cobertura de mapeamento (× parametrização de Rubricas)</h3>
+        <span class="muted" style="font-size:11.5px;" title="Cruza com a aba Rubricas (parametrização oficial de-para Ergon × legado). Rubricas com status Excluída não contam como parametrização válida.">ⓘ como funciona</span>
+      </div>
+      <div class="view-sub" style="margin-top:-6px;">Consultas pensadas pra apontar exatamente onde agir pra aumentar a convergência: código já parametrizado que nunca aparece na comparação (regra parada, ou de-para errado) e código que aparece na comparação sem nenhuma parametrização correspondente (rubrica nova, ainda não levantada, ou erro de código).</div>
+        <div class="grid-2" style="margin-top:10px;">
+          <div>
+            <h4 style="margin:0 0 6px;font-size:13px;">Rubricas Ergon parametrizadas sem uso na Comparação</h4>
+            <div class="table-wrap"><table>
+              <thead><tr><th>Código</th><th>Nome</th><th>Linhas parametrizadas</th></tr></thead>
+              <tbody id="cfd-rubricas-sem-uso-tbody"></tbody>
+            </table></div>
+          </div>
+          <div>
+            <h4 style="margin:0 0 6px;font-size:13px;">Verbas Consist parametrizadas sem uso na Comparação</h4>
+            <div class="table-wrap"><table>
+              <thead><tr><th>Código</th><th>Nome</th><th>Linhas parametrizadas</th></tr></thead>
+              <tbody id="cfd-verbas-sem-uso-tbody"></tbody>
+            </table></div>
+          </div>
+        </div>
+        <div class="grid-2" style="margin-top:14px;">
+          <div>
+            <h4 style="margin:0 0 6px;font-size:13px;">Rubricas Ergon usadas na Comparação sem parametrização</h4>
+            <div class="table-wrap"><table>
+              <thead><tr><th>Código</th><th>Nome</th><th>Linhas na Comparação</th></tr></thead>
+              <tbody id="cfd-rubricas-sem-param-tbody"></tbody>
+            </table></div>
+          </div>
+          <div>
+            <h4 style="margin:0 0 6px;font-size:13px;">Verbas Consist usadas na Comparação sem parametrização</h4>
+            <div class="table-wrap"><table>
+              <thead><tr><th>Código</th><th>Nome</th><th>Linhas na Comparação</th></tr></thead>
+              <tbody id="cfd-verbas-sem-param-tbody"></tbody>
+            </table></div>
+          </div>
+        </div>
     </div>
   </section>
 
@@ -2656,7 +2806,7 @@ async function afterProjetoReady(){
   aplicarMarcaNoTopo();
   fillStaticSelects();
   wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireGanttToolbar(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireExportarCronograma(); wireRemoverCronograma(); wireRemoverRequisitos(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma();
-  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros(); wireRubricaModal(); wireRubricasFiltros(); wireImportRubricas(); wireComparacaoFolhaPane();
+  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros(); wireRubricaModal(); wireRubricasFiltros(); wireImportRubricas(); wireComparacaoFolhaPane(); wireComparacaoFolhaDashboard();
   setupCsvTemplateLink();
   await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias(), loadItensMigracao(), loadRubricas()]);
   // Reaplica agora que REQUISITOS/ATIVIDADES já estão carregados — os selects
@@ -3005,6 +3155,7 @@ function goToView(view){
   if(view==="minhas-atividades") carregarMinhasAtividades();
   if(view==="analisar-requisitos") renderAnalisarRequisitos();
   if(view==="comparacao-folha") renderComparacaoFolhaPane();
+  if(view==="comparacao-folha-dashboard") renderComparacaoFolhaDashboard();
   if(view==="calendario" || view==="manuais"){
     // Nenhum botão/gatilho de #cfg-tabs corresponde a "calendario"/"manuais"
     // (foram retirados de lá nesta rodada) — destacarCfgTabs() (chamada por
@@ -3243,15 +3394,21 @@ function responsaveisCell(a){
 // reordenável arrastando o cabeçalho (drag-and-drop nativo do HTML5) — ordem
 // e largura persistidas no localStorage (mesmo padrão do zoom/colapso de
 // grupos, sobrevive a F5).
+// 65ª rodada — pedido do usuário: "O campo Status deve ser trocado pelo
+// percentual pois posso ajustar esse campo" (Status nunca foi editável
+// nesta grade — só % é —, então saiu daqui; continua visível no modal
+// completo da atividade) "campo Dependências deve estar disponível para
+// ajustes" (nova coluna "dependencias", editável por popup — ver
+// _gridAbrirPopupDeps()).
 const GANTT_COLUNAS_BASE = [
   { key:"codigo_wbs",           label:"Código",               largura:80  },
   { key:"nome",                 label:"Atividade",            largura:260 },
   { key:"etapa_id",             label:"Etapa",                 largura:150 },
   { key:"frente_trabalho_id",   label:"Frente",                largura:150 },
-  { key:"status",               label:"Status",                largura:130 },
   { key:"dtini_prev",           label:"Início prev.",          largura:106 },
   { key:"dtfim_prev",           label:"Fim prev.",             largura:106 },
   { key:"percentual_concluido", label:"%",                     largura:56  },
+  { key:"dependencias",         label:"Dependências",          largura:150 },
   { key:"horas",                label:"Horas (prev./real.)",   largura:120 },
   { key:"recursos",             label:"Recursos",              largura:150 },
   { key:"critica",              label:"Crítica",               largura:70  },
@@ -3295,6 +3452,91 @@ let PENDENTES = {};
 let CASCATA_PREVIA = {};
 let GANTT_ULTIMAS_LINHAS = [];
 let GANTT_ULTIMAS_ATIV_COM_DATA = [];
+
+// GRID_DEPS_PENDENTES (65ª rodada — coluna "Dependências" editável): só as
+// atividades cujo popup de dependências foi realmente alterado nesta sessão
+// — {atividadeId: Map(predecessora_id -> {tipo, lag_horas})}, já com o
+// conjunto INTEIRO desejado (não um diff) pra facilitar reabrir o popup e
+// continuar editando. O diff contra a linha de base (o que já está gravado,
+// em DEPENDENCIAS_PROJETO) só é calculado na hora de montar o payload pro
+// backend (ver _gridDepsDiffParaPayload) — dependencias_adicionar/remover,
+// mesma convenção da tela "Editar em massa" (ver elDependenciasState).
+let GRID_DEPS_PENDENTES = {};
+let GRID_DEPS_POPUP_ATIVIDADE_ID = null, GRID_DEPS_POPUP_BTN = null;
+
+// Predecessoras atualmente gravadas de uma atividade, a partir de
+// DEPENDENCIAS_PROJETO (carregado por loadAtividades() — mesmo array cru
+// usado por abrirEdicaoLoteModal()).
+function _gridDepsBaseline(atividadeId){
+  const mapa = new Map();
+  (DEPENDENCIAS_PROJETO||[]).forEach(d=>{
+    if(d.atividade_id===atividadeId) mapa.set(d.predecessora_id, {tipo: d.tipo, lag_horas: Number(d.lag_horas||0)});
+  });
+  return mapa;
+}
+// Estado efetivo pra exibir/editar: o que está pendente nesta sessão, senão
+// a linha de base gravada — mesma prioridade de _efetivo() pros outros campos.
+function _gridDepsEfetivo(atividadeId){
+  return GRID_DEPS_PENDENTES[atividadeId] || _gridDepsBaseline(atividadeId);
+}
+function _gridDepsMapsIguais(a, b){
+  if(a.size !== b.size) return false;
+  for(const [k, v] of a){
+    const w = b.get(k);
+    if(!w || w.tipo!==v.tipo || Number(w.lag_horas)!==Number(v.lag_horas)) return false;
+  }
+  return true;
+}
+// Resumo compacto pra célula/botão da coluna — "1.2 (FS), 2.1 (SS)", como
+// pedido pelo usuário, com "+N" pro resto (mesmo padrão de responsaveisCell).
+function _gridRotuloDeps(atividadeId){
+  const mapa = _gridDepsEfetivo(atividadeId);
+  if(!mapa.size) return `<span class="muted">🔗 —</span>`;
+  const partes = [...mapa.entries()].map(([pid, v])=>{
+    const p = byId(ATIVIDADES, pid);
+    return `${p?.codigo_wbs || "?"} (${v.tipo})`;
+  });
+  const visiveis = partes.slice(0,2).join(", ");
+  const resto = partes.length>2 ? ` +${partes.length-2}` : "";
+  return `${esc(visiveis)}${esc(resto)}`;
+}
+// Converte o conjunto INTEIRO desejado (GRID_DEPS_PENDENTES[id]) num diff
+// contra a linha de base — dependencias_adicionar (nova ou com tipo/lag
+// diferente) / dependencias_remover (sumiu do conjunto) — formato que
+// backend/app/cronograma_edicao_lote.py espera. Devolve null se essa
+// atividade não tem edição pendente de dependências.
+function _gridDepsDiffParaPayload(atividadeId){
+  const atual = GRID_DEPS_PENDENTES[atividadeId];
+  if(!atual) return null;
+  const base = _gridDepsBaseline(atividadeId);
+  const adicionar = [];
+  atual.forEach((v, pid)=>{
+    const antigo = base.get(pid);
+    if(!antigo || antigo.tipo!==v.tipo || Number(antigo.lag_horas)!==Number(v.lag_horas)){
+      adicionar.push({predecessora_id: pid, tipo: v.tipo, lag_horas: Number(v.lag_horas)||0});
+    }
+  });
+  const remover = [];
+  base.forEach((v, pid)=>{ if(!atual.has(pid)) remover.push(pid); });
+  return {adicionar, remover};
+}
+// União dos ids com QUALQUER edição pendente (campo simples/data/% OU
+// dependências) — usada pra montar o payload de preview/salvar e pro
+// contador/beforeunload, no lugar de olhar só Object.keys(PENDENTES).
+function _gridIdsComEdicao(){
+  return Array.from(new Set([...Object.keys(PENDENTES), ...Object.keys(GRID_DEPS_PENDENTES)]));
+}
+function _gridColetarEdicoes(){
+  return _gridIdsComEdicao().map(id=>{
+    const edicao = {id, ...(PENDENTES[id]||{})};
+    const diff = _gridDepsDiffParaPayload(id);
+    if(diff){
+      if(diff.adicionar.length) edicao.dependencias_adicionar = diff.adicionar;
+      if(diff.remover.length) edicao.dependencias_remover = diff.remover;
+    }
+    return edicao;
+  });
+}
 
 function _gridBloqueada(a){ return STATUS_FAMILIA_CONCLUIDA.includes(a.status) || a.status==="Cancelada"; }
 
@@ -3351,8 +3593,6 @@ function _gridCelulaHtml(a, col){
         .map(f=>`<option value="${f.id}" ${String(v||"")===f.id?"selected":""}>${esc(f.nome)}</option>`).join("");
       return `<select data-campo="frente_trabalho_id" ${dis}>${opts}</select>`;
     }
-    case "status":
-      return `${pill(a.status, STATUS_COLOR[a.status]||"faint")}${a.atrasada?" "+pill("Atrasada","danger"):""}`;
     case "dtini_prev":
       return `<input type="date" data-campo="dtini_prev" value="${_efetivo(a,"dtini_prev")||""}" ${dis}>`;
     case "dtfim_prev":
@@ -3361,6 +3601,8 @@ function _gridCelulaHtml(a, col){
       const v = _efetivo(a, "percentual_concluido");
       return `<input type="number" min="0" max="100" step="1" data-campo="percentual_concluido" value="${v==null?0:v}" ${dis}>`;
     }
+    case "dependencias":
+      return `<button type="button" class="el-deps-btn" data-deps-grid-btn="${a.id}" ${dis} title="Predecessoras desta atividade — clique para adicionar/remover">${_gridRotuloDeps(a.id)}</button>`;
     case "horas":
       return horasCell(a);
     case "recursos":
@@ -3393,7 +3635,7 @@ function _linhaAtividadeGridHtml(a, colunas){
   const pend = PENDENTES[a.id];
   const cascataItem = CASCATA_PREVIA[a.id];
   let cls = "grid-row-atividade";
-  if(pend && Object.keys(pend).length) cls += " linha-editada";
+  if((pend && Object.keys(pend).length) || GRID_DEPS_PENDENTES[a.id]) cls += " linha-editada";
   else if(cascataItem && !cascataItem.editado && cascataItem.mudou) cls += " linha-cascata";
   const tds = colunas.map(c=>`<td>${_gridCelulaHtml(a,c)}</td>`).join("");
   return `<tr class="${cls}" data-id="${a.id}">${tds}</tr>`;
@@ -3483,9 +3725,22 @@ function _gridWireEdicao(){
     campoEl.addEventListener("input", disparar);
     campoEl.addEventListener("change", disparar);
   });
+  // Botão da coluna "Dependências" (65ª rodada) — abre o popup de
+  // predecessoras, em vez de um input/select direto na célula (ver
+  // _gridAbrirPopupDeps). stopPropagation pra não também abrir o modal
+  // completo da atividade (o clique num <button> já é excluído lá embaixo,
+  // mas o clique some antes do listener do <tr> rodar de qualquer forma).
+  el.querySelectorAll(".gantt-labels tbody tr.grid-row-atividade [data-deps-grid-btn]").forEach(btn=>{
+    btn.addEventListener("click", (e)=>{
+      e.stopPropagation();
+      _gridAbrirPopupDeps(btn, btn.dataset.depsGridBtn);
+    });
+  });
   // Clique na linha (fora de um campo editável) abre o modal completo —
-  // continua sendo o caminho pra tudo que a grade não cobre (Recursos,
-  // Dependências, Observações, Descrição, Objetivo etc.).
+  // continua sendo o caminho pra tudo que a grade não cobre (Observações,
+  // Descrição, Objetivo, Prioridade, Master/Entregável, datas reais etc. —
+  // Recursos e, desde a 65ª rodada, Dependências já têm seu próprio botão
+  // direto na grade).
   el.querySelectorAll(".gantt-labels tbody tr.grid-row-atividade").forEach(tr=>{
     tr.addEventListener("click", (e)=>{
       if(e.target.closest("input,select,button,.col-resize")) return;
@@ -3517,10 +3772,116 @@ function _gridOnEdicaoCampo(id, campo, el){
   const tr = el.closest("tr[data-id]");
   if(tr){
     tr.classList.remove("linha-cascata");
-    tr.classList.toggle("linha-editada", !!PENDENTES[id]);
+    tr.classList.toggle("linha-editada", !!PENDENTES[id] || !!GRID_DEPS_PENDENTES[id]);
   }
   _gridAtualizarToolbar();
   _gridPreviewDebounced();
+}
+
+// ---- Popup de Dependências da grade (65ª rodada) ----
+// Mesmo padrão visual/estrutural do popup já existente na tela "Editar em
+// massa" (abrirPopupDependenciasLote/elDependenciasState — ver mais abaixo
+// no arquivo), adaptado pra escrever em GRID_DEPS_PENDENTES (que já entra
+// no fluxo de preview automático/Salvar da grade) em vez de
+// elDependenciasState (que só existe dentro daquele modal). Reaproveita as
+// mesmas classes CSS (.el-deps-pop/.el-dep-row/...), só num elemento próprio
+// (#grid-deps-popup, fora do modal — ver comentário no HTML).
+function _gridFecharPopupDeps(){
+  const pop = $("grid-deps-popup");
+  if(pop) pop.hidden = true;
+  GRID_DEPS_POPUP_ATIVIDADE_ID = null; GRID_DEPS_POPUP_BTN = null;
+}
+function _gridSincronizarLinhaDeps(atividadeId){
+  const tr = document.querySelector(`.gantt-labels tbody tr[data-id="${atividadeId}"]`);
+  if(tr){
+    const pend = PENDENTES[atividadeId];
+    if(!(pend && Object.keys(pend).length)) tr.classList.remove("linha-cascata");
+    tr.classList.toggle("linha-editada", !!(pend && Object.keys(pend).length) || !!GRID_DEPS_PENDENTES[atividadeId]);
+    const btn = tr.querySelector(`[data-deps-grid-btn]`);
+    if(btn) btn.innerHTML = _gridRotuloDeps(atividadeId);
+  }
+  _gridAtualizarToolbar();
+  _gridPreviewDebounced();
+}
+function _gridAbrirPopupDeps(btn, atividadeId){
+  if(GRID_DEPS_POPUP_ATIVIDADE_ID === atividadeId && !$("grid-deps-popup").hidden){ _gridFecharPopupDeps(); return; }
+  GRID_DEPS_POPUP_ATIVIDADE_ID = atividadeId; GRID_DEPS_POPUP_BTN = btn;
+  const baseline = _gridDepsBaseline(atividadeId);
+  // Cópia editável independente — se já havia uma edição pendente nesta
+  // sessão, continua a partir dela; senão parte da linha de base gravada.
+  const selecionadas = GRID_DEPS_PENDENTES[atividadeId] ? new Map(GRID_DEPS_PENDENTES[atividadeId]) : new Map(baseline);
+  const candidatas = ATIVIDADES.filter(x=>x.id!==atividadeId)
+    .slice().sort((a,b)=>(a.codigo_wbs||"zzzz").localeCompare(b.codigo_wbs||"zzzz", undefined, {numeric:true}));
+
+  const renderLista = (filtro) => {
+    const termo = (filtro||"").trim().toLowerCase();
+    const visiveis = termo
+      ? candidatas.filter(a=>`${a.codigo_wbs||""} ${a.nome||""}`.toLowerCase().includes(termo))
+      : candidatas;
+    return visiveis.length ? visiveis.map(a=>{
+      const atual = selecionadas.get(a.id);
+      const marcado = !!atual;
+      const tipo = atual ? atual.tipo : "FS";
+      const lag = atual ? atual.lag_horas : 0;
+      return `<label class="el-dep-row" data-dep-row="${a.id}">
+        <input type="checkbox" data-dep-check="${a.id}" ${marcado?"checked":""}>
+        <span class="el-dep-nome" title="${esc(a.nome||"")}">${esc(a.codigo_wbs||"—")} ${esc(a.nome||"")}</span>
+        <select data-dep-tipo="${a.id}" ${marcado?"":"disabled"} onclick="event.stopPropagation()">
+          ${["FS","SS","FF","SF"].map(t=>`<option value="${t}" ${tipo===t?"selected":""}>${t}</option>`).join("")}
+        </select>
+        <input type="number" data-dep-lag="${a.id}" value="${lag}" placeholder="lag(h)" title="lag (h)" ${marcado?"":"disabled"} onclick="event.stopPropagation()">
+      </label>`;
+    }).join("") : `<span class="muted" style="font-size:12px;">Nenhuma atividade encontrada.</span>`;
+  };
+
+  const pop = $("grid-deps-popup");
+  pop.innerHTML = `
+    <input type="text" class="el-deps-filtro" placeholder="Buscar por código ou nome…" autocomplete="off">
+    <div class="el-deps-lista">${renderLista("")}</div>
+  `;
+
+  const registrarMudanca = () => {
+    if(_gridDepsMapsIguais(selecionadas, baseline)) delete GRID_DEPS_PENDENTES[atividadeId];
+    else GRID_DEPS_PENDENTES[atividadeId] = selecionadas;
+    _gridSincronizarLinhaDeps(atividadeId);
+  };
+
+  const wireLinhas = () => {
+    pop.querySelectorAll("input[data-dep-check]").forEach(cb=>cb.addEventListener("change", ()=>{
+      const pid = cb.dataset.depCheck;
+      const row = cb.closest(".el-dep-row");
+      const selTipo = row.querySelector("select[data-dep-tipo]");
+      const inpLag = row.querySelector("input[data-dep-lag]");
+      if(cb.checked){
+        selecionadas.set(pid, {tipo: selTipo.value||"FS", lag_horas: Number(inpLag.value||0)});
+        selTipo.disabled = false; inpLag.disabled = false;
+      } else {
+        selecionadas.delete(pid);
+        selTipo.disabled = true; inpLag.disabled = true;
+      }
+      registrarMudanca();
+    }));
+    pop.querySelectorAll("select[data-dep-tipo]").forEach(sel=>sel.addEventListener("change", ()=>{
+      const pid = sel.dataset.depTipo;
+      if(selecionadas.has(pid)){ selecionadas.get(pid).tipo = sel.value; registrarMudanca(); }
+    }));
+    pop.querySelectorAll("input[data-dep-lag]").forEach(inp=>inp.addEventListener("input", ()=>{
+      const pid = inp.dataset.depLag;
+      if(selecionadas.has(pid)){ selecionadas.get(pid).lag_horas = Number(inp.value||0); registrarMudanca(); }
+    }));
+  };
+  wireLinhas();
+
+  pop.querySelector(".el-deps-filtro").addEventListener("input", (e)=>{
+    pop.querySelector(".el-deps-lista").innerHTML = renderLista(e.target.value);
+    wireLinhas();
+  });
+
+  const r = btn.getBoundingClientRect();
+  pop.style.left = Math.round(Math.min(r.left, window.innerWidth-450)) + "px";
+  pop.style.top = Math.round(r.bottom + 4) + "px";
+  pop.hidden = false;
+  pop.querySelector(".el-deps-filtro").focus();
 }
 
 // Preview automático (debounced) — chama o MESMO endpoint de simulação da
@@ -3536,14 +3897,14 @@ function _gridPreviewDebounced(){
   _gridPreviewTimer = setTimeout(_gridExecutarPreview, 450);
 }
 async function _gridExecutarPreview(){
-  const ids = Object.keys(PENDENTES);
+  const ids = _gridIdsComEdicao();
   const meuToken = ++GRID_PREVIEW_TOKEN;
   if(!ids.length){
     CASCATA_PREVIA = {};
     _gridAplicarPreviewNaTela();
     return;
   }
-  const edicoes = ids.map(id=>({id, ...PENDENTES[id]}));
+  const edicoes = _gridColetarEdicoes();
   let itens;
   try{
     const r = await api("/cronograma/edicao-lote/preview", { method:"POST", body: JSON.stringify({projeto_id: PROJETO.id, edicoes}) });
@@ -3580,7 +3941,7 @@ function _gridAtualizarToolbar(){
   const info = $("grid-pendentes-info");
   const btnSalvar = $("btn-grid-salvar"), btnDescartar = $("btn-grid-descartar");
   if(!info || !btnSalvar || !btnDescartar) return;
-  const n = Object.keys(PENDENTES).length;
+  const n = _gridIdsComEdicao().length;
   if(n>0){
     const cascataN = Object.values(CASCATA_PREVIA).filter(i=>!i.editado && i.mudou).length;
     info.textContent = `${n} atividade(s) alterada(s)${cascataN?` · +${cascataN} em cascata`:""} — não salvo`;
@@ -3592,11 +3953,13 @@ function _gridAtualizarToolbar(){
   }
 }
 function _gridDescartar(){
-  if(!Object.keys(PENDENTES).length) return;
-  PENDENTES = {}; CASCATA_PREVIA = {}; GRID_ULTIMA_ANALISE_JSON = null;
+  if(!_gridIdsComEdicao().length) return;
+  PENDENTES = {}; CASCATA_PREVIA = {}; GRID_DEPS_PENDENTES = {}; GRID_ULTIMA_ANALISE_JSON = null;
   clearTimeout(_gridPreviewTimer);
   $("gantt-salvar-painel").hidden = true;
+  _gridFecharPopupDeps();
   renderCronograma();
+  _ganttAjustarLayoutSticky();
   toast("Alterações descartadas.");
 }
 
@@ -3605,9 +3968,9 @@ function _gridDescartar(){
 // confirmar, com relato obrigatório/opcional quando há retrocesso). ----
 let GRID_ULTIMA_ANALISE_JSON = null, gridSalvando = false;
 async function _gridAbrirPainelSalvar(){
-  const ids = Object.keys(PENDENTES);
+  const ids = _gridIdsComEdicao();
   if(!ids.length){ toast("Nada para salvar.", true); return; }
-  const edicoes = ids.map(id=>({id, ...PENDENTES[id]}));
+  const edicoes = _gridColetarEdicoes();
   let r;
   try{
     r = await api("/cronograma/edicao-lote/preview", { method:"POST", body: JSON.stringify({projeto_id: PROJETO.id, edicoes}) });
@@ -3617,6 +3980,7 @@ async function _gridAbrirPainelSalvar(){
   _gridRenderPainelSalvar(r);
   $("gantt-salvar-painel").hidden = false;
   _gridAplicarPreviewNaTela();
+  _ganttAjustarLayoutSticky();
   $("gantt-salvar-painel").scrollIntoView({behavior:"smooth", block:"nearest"});
 }
 function _gridRenderPainelSalvar(r){
@@ -3648,11 +4012,11 @@ function _gridAtualizarBotaoConfirmarSalvar(){
 }
 function _gridCancelarPainelSalvar(){
   $("gantt-salvar-painel").hidden = true;
+  _ganttAjustarLayoutSticky();
 }
 async function _gridConfirmarSalvar(){
   if(gridSalvando) return;
-  const ids = Object.keys(PENDENTES);
-  const edicoes = ids.map(id=>({id, ...PENDENTES[id]}));
+  const edicoes = _gridColetarEdicoes();
   if(!edicoes.length || JSON.stringify(edicoes) !== GRID_ULTIMA_ANALISE_JSON){
     toast("A grade mudou desde a última análise — abra o painel de salvar novamente.", true);
     return;
@@ -3671,8 +4035,9 @@ async function _gridConfirmarSalvar(){
     const r = await api("/cronograma/edicao-lote/confirmar", { method:"POST", body: JSON.stringify({projeto_id: PROJETO.id, edicoes}) });
     toast(`Cronograma atualizado: ${r.atividades_editadas} atividade(s) editada(s), ${r.atividades_cascata} em cascata`
       + (r.relatos_criados ? `, ${r.relatos_criados} relato(s) registrado(s)` : "") + ".");
-    PENDENTES = {}; CASCATA_PREVIA = {}; GRID_ULTIMA_ANALISE_JSON = null;
+    PENDENTES = {}; CASCATA_PREVIA = {}; GRID_DEPS_PENDENTES = {}; GRID_ULTIMA_ANALISE_JSON = null;
     $("gantt-salvar-painel").hidden = true;
+    _gridFecharPopupDeps();
     await loadAtividades();
     renderDashboard(); renderCronograma();
   }catch(e){}
@@ -3727,8 +4092,29 @@ function wireGanttToolbar(){
   // sem avisar custaria bem mais caro que um alerta do navegador ao tentar
   // fechar/recarregar a aba com alterações pendentes não salvas.
   window.addEventListener("beforeunload", (e)=>{
-    if(Object.keys(PENDENTES).length){ e.preventDefault(); e.returnValue = ""; }
+    if(_gridIdsComEdicao().length){ e.preventDefault(); e.returnValue = ""; }
   });
+  // Popup de Dependências da grade (65ª rodada) — fecha ao clicar fora, apertar
+  // Esc, ou rolar a grade (o popup é position:fixed, então não acompanharia o
+  // botão que o abriu se a linha rolasse pra fora da vista — mesma limitação
+  // já aceita pelo popup equivalente da tela "Editar em massa").
+  document.addEventListener("click", e=>{
+    const pop = $("grid-deps-popup");
+    if(!pop || pop.hidden) return;
+    if(pop.contains(e.target) || e.target.closest("[data-deps-grid-btn]")) return;
+    _gridFecharPopupDeps();
+  });
+  document.addEventListener("keydown", e=>{
+    if(e.key === "Escape") _gridFecharPopupDeps();
+  });
+  const scrollEl = document.querySelector(".gantt-scroll");
+  if(scrollEl) scrollEl.addEventListener("scroll", _gridFecharPopupDeps, {passive:true});
+  // 65ª rodada — mantém o bloco do Gantt (toolbar + cabeçalho + rolagem)
+  // dentro do campo visual da página conforme a janela é redimensionada ou
+  // a página rolada (ver _ganttAjustarLayoutSticky()).
+  window.addEventListener("resize", _ganttAjustarLayoutSticky);
+  window.addEventListener("scroll", _ganttAjustarLayoutSticky, {passive:true});
+  _ganttAjustarLayoutSticky();
 }
 
 // Marcações do cabeçalho/grade vertical do Gantt, conforme a granularidade
@@ -3777,6 +4163,65 @@ function _ganttMarcacoes(minDate, maxDate, zoom){
 // diferente da IBM Plex Sans depois de trocada — sem essa segunda passada, a
 // barra ficava com a altura "errada" (medida antes da troca de fonte) até o
 // próximo re-render.
+// 65ª rodada — "o quadro navegável esteja dentro do campo visual da
+// página, para termos o cabeçalho e as barras de rolagem numa mesma
+// visão": calcula, em JS (a altura do header.topbar/gantt-toolbar pode
+// variar — quebram de linha em telas estreitas —, então um valor fixo em
+// CSS não seria confiável), as duas variáveis CSS que .gantt-toolbar/
+// .gantt-salvar-painel usam pra grudar (position:sticky) logo abaixo do
+// topbar, e a altura de .gantt-scroll pra preencher exatamente o resto da
+// janela a partir da posição atual do bloco — assim a rolagem vertical (e a
+// horizontal do gráfico, na base) sempre cabe entre o cabeçalho grudado e o
+// rodapé da janela, sem precisar rolar a PÁGINA pra reencontrá-los. Chamada
+// depois de todo render do Gantt, ao entrar na aba Cronograma, ao
+// abrir/fechar o painel de Salvar (muda quanto espaço ele ocupa acima da
+// grade) e em resize/scroll da janela (throttled via requestAnimationFrame).
+let _ganttLayoutRaf = null;
+function _ganttAjustarLayoutSticky(){
+  if(_ganttLayoutRaf) return;
+  _ganttLayoutRaf = requestAnimationFrame(()=>{
+    _ganttLayoutRaf = null;
+    const scrollEl = document.querySelector(".gantt-scroll");
+    const toolbarEl = document.querySelector(".gantt-toolbar");
+    const topbarEl = document.querySelector("header.topbar");
+    const painelEl = document.querySelector(".gantt-salvar-painel");
+    if(!scrollEl || !toolbarEl) return;
+    const rect = scrollEl.getBoundingClientRect();
+    if(rect.width===0 && rect.height===0) return; // aba Cronograma não está visível agora (display:none)
+    // Altura de cada peça que gruda ACIMA de .gantt-scroll (ver CSS) — soma
+    // dá a posição exata onde .gantt-scroll também gruda (--topbar-h +
+    // --gantt-toolbar-h + --gantt-painel-h, usado no `top` dela). Medido em
+    // JS (não fixo em CSS) porque topbar/toolbar podem quebrar linha em
+    // telas estreitas, e o painel de Salvar só existe quando aberto —
+    // calculado a partir das ALTURAS reais, não da posição atual de rolagem
+    // (evita um loop: se dependesse de getBoundingClientRect().top de
+    // .gantt-scroll, que ela mesma passou a ser sticky, o valor mudaria
+    // conforme rolava e nunca estabilizaria).
+    const topbarH = topbarEl ? Math.round(topbarEl.getBoundingClientRect().height) : 0;
+    const toolbarH = Math.round(toolbarEl.getBoundingClientRect().height);
+    const painelH = (painelEl && !painelEl.hidden) ? Math.round(painelEl.getBoundingClientRect().height) : 0;
+    document.documentElement.style.setProperty("--topbar-h", topbarH+"px");
+    document.documentElement.style.setProperty("--gantt-toolbar-h", toolbarH+"px");
+    document.documentElement.style.setProperty("--gantt-painel-h", painelH+"px");
+    // .gantt-scroll não pode grudar além do fim do PRÓPRIO .gantt-wrap (é o
+    // "containing block" dela — regra do position:sticky): se o cálculo
+    // pedir mais altura do que sobra ali, o navegador puxa ela de volta pra
+    // caber, e ela desgruda perto do fim (mesmo sintoma, só que na última
+    // rolagem). #app-main tem um respiro por baixo (padding-bottom, pra
+    // toda página) que deixa a JANELA rolar um pouco além do que
+    // .gantt-wrap realmente precisa — sem descontar isso, sobra menos
+    // espaço dentro do wrap do que o calculado aqui. Descontado com o valor
+    // real medido (não fixo), pra não quebrar se o padding mudar.
+    const wrapEl = scrollEl.closest(".gantt-wrap");
+    const mainEl = document.getElementById("app-main");
+    const wrapMarginBottom = wrapEl ? parseFloat(getComputedStyle(wrapEl).marginBottom) || 0 : 0;
+    const mainPaddingBottom = mainEl ? parseFloat(getComputedStyle(mainEl).paddingBottom) || 0 : 0;
+    const margemInferior = wrapMarginBottom + mainPaddingBottom + 4; // respiro real até o fim do wrap (+ folga de arredondamento)
+    const disponivel = window.innerHeight - (topbarH + toolbarH + painelH) - margemInferior;
+    scrollEl.style.maxHeight = Math.max(280, Math.round(disponivel)) + "px";
+  });
+}
+
 function _ganttSincronizarAlturas(){
   const el = $("gantt");
   if(!el) return;
@@ -3795,6 +4240,7 @@ function _ganttSincronizarAlturas(){
     if(bar) bar.style.top = Math.round((h-18)/2)+"px";
   });
   _ganttDesenharDependencias();
+  _ganttAjustarLayoutSticky();
 }
 
 // 63ª rodada — "as atividades devem sofrer efeitos das dependências":
@@ -3946,7 +4392,7 @@ function _ganttRedesenharBarras(){
     const pend = PENDENTES[a.id];
     const cascataItem = CASCATA_PREVIA[a.id];
     let extraClass = "";
-    if(pend && Object.keys(pend).length) extraClass = " linha-editada";
+    if((pend && Object.keys(pend).length) || GRID_DEPS_PENDENTES[a.id]) extraClass = " linha-editada";
     else if(cascataItem && !cascataItem.editado && cascataItem.mudou) extraClass = " linha-cascata";
     const ini = _efIni(a), fim = _efFim(a);
     if(!(ini && fim)) return `<div class="gantt-row ${parClass}${extraClass}" data-atividade-id="${a.id}"></div>`;
@@ -7811,6 +8257,10 @@ function cfFiltrosAtuais(){
     mesano: $("cf-f-mesano").value || null,
     situacao: $("cf-f-situacao").value || null,
     tiporubr: $("cf-f-tiporubr").value || null,
+    empresa: $("cf-f-empresa").value || null,
+    tipovinc: $("cf-f-tipovinc").value || null,
+    rubrica_ergon: $("cf-f-rubrica-ergon").value || null,
+    verba_consist: $("cf-f-verba-consist").value || null,
     busca: $("cf-f-busca").value.trim() || null,
     so_divergentes: $("cf-f-divergentes").checked,
   };
@@ -7841,18 +8291,24 @@ async function cfCarregarResumo(){
   $("cf-kpis").innerHTML = itens.map(([rotulo,valor])=>`
     <div><div style="font-size:20px;font-weight:600;">${valor}</div><div class="muted" style="font-size:11.5px;">${esc(rotulo)}</div></div>
   `).join("");
-  // Popula os selects de competência/tipo de rubrica com o que existe de
-  // verdade nos dados do projeto (não uma lista fixa) — refeito a cada
-  // resumo pra acompanhar novas competências importadas, preservando a
-  // seleção atual do usuário.
-  const selMes = $("cf-f-mesano"), selTipo = $("cf-f-tiporubr");
-  const mesAtual = selMes.value, tipoAtual = selTipo.value;
+  // Popula os selects com o que existe de verdade nos dados do projeto (não
+  // uma lista fixa) — refeito a cada resumo pra acompanhar novas
+  // competências/códigos importados, preservando a seleção atual do
+  // usuário. cfPopularSelect() cobre os selects "simples" (valor = rótulo);
+  // Rubrica Ergon/Verba Consist têm rótulo "código — nome" (ver abaixo),
+  // então são montados à parte.
+  const selMes = $("cf-f-mesano");
+  const mesAtual = selMes.value;
   selMes.innerHTML = `<option value="">Competência (todas)</option>` +
     (r.meses_disponiveis||[]).map(m=>`<option value="${m}">${m}</option>`).join("");
   selMes.value = mesAtual;
-  selTipo.innerHTML = `<option value="">Tipo de rubrica (todos)</option>` +
-    (r.tipos_rubrica_disponiveis||[]).map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join("");
-  selTipo.value = tipoAtual;
+  cfPopularSelect("cf-f-tiporubr", "Tipo de rubrica (todos)", r.tipos_rubrica_disponiveis);
+  cfPopularSelect("cf-f-empresa", "Empresa (todas)", r.empresas_disponiveis);
+  cfPopularSelect("cf-f-tipovinc", "Tipo de vínculo (todos)", r.tipovinc_disponiveis);
+  cfPopularSelect("cf-f-rubrica-ergon", "Rubrica Ergon (todas)",
+    (r.rubricas_ergon_disponiveis||[]).map(x=>({valor:x.codigo, rotulo:x.nome?`${x.codigo} — ${x.nome}`:x.codigo})));
+  cfPopularSelect("cf-f-verba-consist", "Verba Consist (todas)",
+    (r.verbas_consist_disponiveis||[]).map(x=>({valor:x.codigo, rotulo:x.nome?`${x.codigo} — ${x.nome}`:x.codigo})));
   if(!$("cf-f-situacao").dataset.montado || $("cf-f-situacao").dataset.montado !== JSON.stringify((r.por_situacao||[]).map(s=>s.situacao))){
     const situacaoAtual = $("cf-f-situacao").value;
     const situacoes = (r.por_situacao||[]).map(s=>s.situacao).filter(Boolean);
@@ -7863,6 +8319,26 @@ async function cfCarregarResumo(){
   }
 }
 
+// Popula um <select> de filtro a partir de uma lista de valores já
+// existentes nos dados (não uma lista fixa) — cada item de `opcoes` é ou uma
+// string (valor = rótulo, ex: tipo de rubrica) ou {valor, rotulo} (ex:
+// Rubrica Ergon, "código — nome"). Preserva a seleção atual do usuário
+// mesmo depois de reconstruir as <option>, contanto que o valor escolhido
+// continue existindo na nova lista (senão volta pra "(todos/todas)" sozinho
+// — comportamento padrão do <select> ao não achar a <option> com esse value).
+function cfPopularSelect(id, placeholder, opcoes){
+  const sel = $(id);
+  const atual = sel.value;
+  const lista = (opcoes||[]).filter(o=>o!=null && o!=="");
+  sel.innerHTML = `<option value="">${esc(placeholder)}</option>` +
+    lista.map(o=>{
+      const valor = typeof o === "object" ? o.valor : o;
+      const rotulo = typeof o === "object" ? o.rotulo : o;
+      return `<option value="${esc(valor)}">${esc(rotulo)}</option>`;
+    }).join("");
+  sel.value = atual;
+}
+
 async function cfCarregarLista(acumular){
   let r;
   $("cf-status").textContent = "Carregando…";
@@ -7871,8 +8347,9 @@ async function cfCarregarLista(acumular){
   CF_TOTAL = r.total;
   if(!acumular) CF_ITENS_MAP = {};
   r.itens.forEach(it=>{ CF_ITENS_MAP[it.id] = it; });
+  cfMontarThead();
   const linhasHtml = r.itens.map(cfLinhaHtml).join("");
-  $("cf-tbody").innerHTML = (acumular ? $("cf-tbody").innerHTML : "") + (linhasHtml || (acumular ? "" : `<tr class="empty-row"><td colspan="9">Nenhuma linha encontrada com estes filtros.</td></tr>`));
+  $("cf-tbody").innerHTML = (acumular ? $("cf-tbody").innerHTML : "") + (linhasHtml || (acumular ? "" : `<tr class="empty-row"><td colspan="${CF_COLUNAS_GRID.length}">Nenhuma linha encontrada com estes filtros.</td></tr>`));
   const carregados = $("cf-tbody").querySelectorAll("tr[data-id]").length;
   $("cf-carregar-mais").hidden = carregados >= CF_TOTAL;
   $("cf-status").textContent = CF_TOTAL
@@ -7880,19 +8357,107 @@ async function cfCarregarLista(acumular){
     : "";
 }
 
+// Todas as ~65 colunas da planilha/tabela `comparacao_folha` (65ª rodada —
+// antes só 9 apareciam na grade, o resto só no modal de detalhe). Ordem
+// segue a mesma da tabela no banco (ver db/migration_030_comparacao_folha.sql),
+// que já agrupa por assunto (identificação, lotação/cargo, competência, lado
+// legado, lado Ergon, comparação) — mais fácil de navegar rolando pra direita
+// do que uma ordem alfabética. `tipo` decide a formatação da célula:
+// "situacao" (pill), "data", "datahora", "moeda", "numero", "texto-longo"
+// (quebra linha, largura máxima — só Observações) ou texto simples (default).
+const CF_COLUNAS_GRID = [
+  {key:"situacao", label:"Situação", tipo:"situacao"},
+  {key:"tipo_comparacao", label:"Tipo Comparação"},
+  {key:"matricula", label:"Matrícula"},
+  {key:"prontuario", label:"Prontuário"},
+  {key:"nome", label:"Nome"},
+  {key:"cpf", label:"CPF"},
+  {key:"mesano", label:"Competência", tipo:"data"},
+  {key:"folha", label:"Folha"},
+  {key:"convenio", label:"Convênio"},
+  {key:"empresa_consist", label:"Empresa (Consist)"},
+  {key:"emp_codigo", label:"Código da empresa"},
+  {key:"categoria_consist", label:"Categoria (Consist)"},
+  {key:"numfunc", label:"Nº funcional"},
+  {key:"numvinc", label:"Nº vínculo"},
+  {key:"numpens", label:"Nº pensão"},
+  {key:"tipovinc", label:"Tipo de vínculo"},
+  {key:"regimejur", label:"Regime jurídico"},
+  {key:"categoria", label:"Categoria"},
+  {key:"numvincant", label:"Nº vínculo anterior"},
+  {key:"numvincpos", label:"Nº vínculo posterior"},
+  {key:"modalidade", label:"Modalidade"},
+  {key:"tipopens", label:"Tipo de pensão"},
+  {key:"percentual", label:"Percentual", tipo:"numero"},
+  {key:"dtexerc", label:"Data de exercício", tipo:"data"},
+  {key:"dtaposent", label:"Data de aposentadoria", tipo:"data"},
+  {key:"tipoapos", label:"Tipo de aposentadoria"},
+  {key:"dtvac", label:"Data de vacância", tipo:"data"},
+  {key:"orgao", label:"Órgão"},
+  {key:"setorfunc", label:"Setor funcional"},
+  {key:"cargo", label:"Cargo"},
+  {key:"nome_cargo", label:"Nome do cargo"},
+  {key:"referencia", label:"Referência"},
+  {key:"tabvenccargo", label:"Tabela vencimento (cargo)"},
+  {key:"funcao", label:"Função"},
+  {key:"nome_funcao", label:"Nome da função"},
+  {key:"referencia_desig", label:"Referência (designação)"},
+  {key:"tabvencfuncao", label:"Tabela vencimento (função)"},
+  {key:"grupo", label:"Grupo"},
+  {key:"rubrica_ergon", label:"Rubrica Ergon"},
+  {key:"rubrica_nome_ergon", label:"Nome (Rubrica Ergon)"},
+  {key:"nome_abrev", label:"Nome abreviado (Ergon)"},
+  {key:"conta_ergon", label:"Conta (Ergon)"},
+  {key:"valor_ergon", label:"Valor Ergon", tipo:"moeda"},
+  {key:"verba_consist", label:"Verba legado"},
+  {key:"nomeabrev_consist", label:"Nome abrev. (Consist)"},
+  {key:"conta_consist", label:"Conta (Consist)"},
+  {key:"valor_consist", label:"Valor legado", tipo:"moeda"},
+  {key:"dif_consist_ergon", label:"Diferença", tipo:"moeda"},
+  {key:"vantagem", label:"Vantagem/Desconto"},
+  {key:"tiporubr", label:"Tipo de rubrica"},
+  {key:"class_rubrica", label:"Classificação da rubrica"},
+  {key:"obs_evento", label:"Obs. evento"},
+  {key:"obs_atributo", label:"Obs. atributo"},
+  {key:"data_convergencia", label:"Data de convergência", tipo:"data"},
+  {key:"data_hora_convergencia", label:"Data/hora de convergência", tipo:"datahora"},
+  {key:"fato_origem", label:"Fato de origem"},
+  {key:"complemento", label:"Complemento"},
+  {key:"cod_calc", label:"Código de cálculo"},
+  {key:"cod_lotacao_1", label:"Código de lotação"},
+  {key:"tipoarq", label:"Tipo de arquivo"},
+  {key:"jornada", label:"Jornada"},
+  {key:"afastamento", label:"Afastamento"},
+  {key:"dtini_afast", label:"Início do afastamento", tipo:"data"},
+  {key:"dtfim_afast", label:"Fim do afastamento", tipo:"data"},
+  {key:"obs", label:"Observações", tipo:"texto-longo"},
+];
+
+function cfMontarThead(){
+  const tr = $("cf-thead-row");
+  if(tr.dataset.montado === "1") return; // colunas são fixas — monta uma vez só
+  tr.innerHTML = CF_COLUNAS_GRID.map(c=>`<th>${esc(c.label)}</th>`).join("");
+  tr.dataset.montado = "1";
+}
+
+function cfCelulaHtml(l, coluna){
+  const v = l[coluna.key];
+  if(coluna.tipo === "situacao"){
+    const divergente = v && v.toUpperCase() !== "NÃO DIVERGENTE";
+    return `<td>${divergente ? pill(v||"—","warn") : pill(v||"—","ok")}</td>`;
+  }
+  if(coluna.tipo === "moeda") return `<td>${fmtMoeda(v)}</td>`;
+  if(coluna.tipo === "data") return `<td>${v ? fmtDate(v) : "—"}</td>`;
+  if(coluna.tipo === "datahora") return `<td>${v ? fmtDateTime(v) : "—"}</td>`;
+  if(coluna.tipo === "numero") return `<td>${v==null||v===""? "—" : v}</td>`;
+  if(coluna.tipo === "texto-longo") return `<td class="cf-td-wrap">${esc(v||"—")}</td>`;
+  return `<td>${esc(v||"—")}</td>`;
+}
+
 function cfLinhaHtml(l){
-  const divergente = l.situacao && l.situacao.toUpperCase() !== "NÃO DIVERGENTE";
   return `
     <tr data-id="${l.id}" style="cursor:pointer;" onclick="abrirDetalheComparacaoFolha('${l.id}')">
-      <td>${divergente ? pill(l.situacao||"—","warn") : pill(l.situacao||"—","ok")}</td>
-      <td>${esc(l.matricula||"—")}</td>
-      <td>${esc(l.nome||"—")}</td>
-      <td>${l.mesano ? fmtDate(l.mesano) : "—"}</td>
-      <td>${esc(l.rubrica_ergon||"—")} ${l.rubrica_nome_ergon?`<span class="muted">— ${esc(l.rubrica_nome_ergon)}</span>`:""}</td>
-      <td>${esc(l.verba_consist||"—")}</td>
-      <td>${fmtMoeda(l.valor_ergon)}</td>
-      <td>${fmtMoeda(l.valor_consist)}</td>
-      <td>${fmtMoeda(l.dif_consist_ergon)}</td>
+      ${CF_COLUNAS_GRID.map(c=>cfCelulaHtml(l, c)).join("")}
     </tr>`;
 }
 
@@ -7950,7 +8515,8 @@ function abrirDetalheComparacaoFolha(id){
 }
 
 function wireComparacaoFolhaPane(){
-  ["cf-f-mesano","cf-f-situacao","cf-f-tiporubr","cf-f-divergentes"].forEach(id=>{
+  ["cf-f-mesano","cf-f-situacao","cf-f-tiporubr","cf-f-empresa","cf-f-tipovinc",
+   "cf-f-rubrica-ergon","cf-f-verba-consist","cf-f-divergentes"].forEach(id=>{
     $(id).addEventListener("change", ()=>{ CF_PAGINA = 1; cfCarregarResumo(); cfCarregarLista(false); });
   });
   let cfBuscaTimer = null;
@@ -7967,6 +8533,87 @@ function wireComparacaoFolhaPane(){
   $("btn-atualizar-comparacao").addEventListener("click", selecionarComparacaoFolhaNoDrive);
   $("btn-upload-comparacao").addEventListener("click", ()=> $("cf-upload-file").click());
   $("cf-upload-file").addEventListener("change", uploadComparacaoFolhaDoComputador);
+}
+
+// ---------------------------------------------------------------------
+// Dashboard de Convergência da Comparação Folha (65ª rodada) — aba separada
+// (ver view-comparacao-folha-dashboard no HTML), focada em nortear o
+// trabalho de aumentar a convergência Ergon × legado. Só um filtro
+// (Competência, opcional — "todas" agrega tudo que já foi importado);
+// GET /api/comparacao-folha/dashboard faz todo o trabalho pesado no
+// servidor (ver app/comparacao_folha.dashboard()). Prefixo "cfd" (distinto
+// de "cf" da aba de consulta) — telas irmãs, mas estado independente.
+// ---------------------------------------------------------------------
+async function renderComparacaoFolhaDashboard(){
+  await cfdCarregarMeses();
+  await cfdCarregarDados();
+}
+
+async function cfdCarregarMeses(){
+  let r;
+  try{ r = await api(`/comparacao-folha/resumo?projeto_id=${PROJETO.id}`); }
+  catch(e){ return; }
+  const sel = $("cfd-f-mesano");
+  const atual = sel.value;
+  sel.innerHTML = `<option value="">Competência (todas)</option>` +
+    (r.meses_disponiveis||[]).map(m=>`<option value="${m}">${m}</option>`).join("");
+  sel.value = atual;
+}
+
+function cfdListaCoberturaHtml(lista, campoLinhas, colspan){
+  if(!lista || !lista.length) return `<tr class="empty-row"><td colspan="${colspan}">Nenhum. 🎉</td></tr>`;
+  return lista.map(x=>`
+    <tr><td class="mono">${esc(x.codigo)}</td><td>${esc(x.nome||"—")}</td><td class="mono">${x[campoLinhas]}</td></tr>
+  `).join("");
+}
+
+async function cfdCarregarDados(){
+  const mesano = $("cfd-f-mesano").value || "";
+  let r;
+  try{ r = await api(`/comparacao-folha/dashboard?projeto_id=${PROJETO.id}${mesano?`&mesano=${encodeURIComponent(mesano)}`:""}`); }
+  catch(e){ return; }
+
+  const g = r.geral || {};
+  $("cfd-kpis").innerHTML = [
+    ["Linhas comparadas", (g.total||0).toLocaleString('pt-BR')],
+    ["Sem divergência", (g.total_nao_divergentes||0).toLocaleString('pt-BR')],
+    ["% sem divergência (geral)", g.pct_nao_divergente==null ? "—" : `${g.pct_nao_divergente}%`],
+  ].map(([l,v])=>`<div><div style="font-size:20px;font-weight:600;">${v}</div><div class="muted" style="font-size:11.5px;">${esc(l)}</div></div>`).join("");
+
+  const porSituacao = r.por_situacao || [];
+  $("cfd-situacao").innerHTML = porSituacao.length ? porSituacao.map(s=>{
+    const naoDivergente = (s.situacao||"").toUpperCase() === "NÃO DIVERGENTE";
+    return `<div class="cf-dash-row">
+      <span class="nome" title="${esc(s.situacao)}">${esc(s.situacao)}</span>
+      <span class="bar-track"><div style="width:${s.pct_do_total}%;background:${naoDivergente?"var(--ok)":"var(--warn)"};"></div></span>
+      <span class="count">${s.total.toLocaleString('pt-BR')} (${s.pct_do_total}%)</span>
+    </div>`;
+  }).join("") : `<div class="muted" style="font-size:12.5px;">Nenhum dado para esta competência.</div>`;
+
+  const porEmpresa = r.por_empresa || [];
+  $("cfd-empresa-tbody").innerHTML = porEmpresa.length ? porEmpresa.map(e=>`
+    <tr>
+      <td>${esc(e.empresa)}</td>
+      <td class="mono">${e.total_linhas.toLocaleString('pt-BR')}</td>
+      <td class="mono">${e.qtd_rubricas_ergon}</td>
+      <td class="mono">${e.qtd_verbas_consist}</td>
+      <td>
+        <div class="cf-dash-row" style="padding:0;">
+          <span class="bar-track" style="flex:1;"><div style="width:${e.pct_nao_divergente}%;background:var(--ok);"></div></span>
+          <span class="count" style="width:52px;">${e.pct_nao_divergente}%</span>
+        </div>
+      </td>
+    </tr>`).join("") : `<tr class="empty-row"><td colspan="5">Nenhum dado para esta competência.</td></tr>`;
+
+  const cob = r.cobertura_mapeamento || {};
+  $("cfd-rubricas-sem-uso-tbody").innerHTML = cfdListaCoberturaHtml(cob.rubricas_parametrizadas_sem_uso, "linhas_parametrizadas", 3);
+  $("cfd-verbas-sem-uso-tbody").innerHTML = cfdListaCoberturaHtml(cob.verbas_parametrizadas_sem_uso, "linhas_parametrizadas", 3);
+  $("cfd-rubricas-sem-param-tbody").innerHTML = cfdListaCoberturaHtml(cob.rubricas_sem_parametrizacao, "linhas", 3);
+  $("cfd-verbas-sem-param-tbody").innerHTML = cfdListaCoberturaHtml(cob.verbas_sem_parametrizacao, "linhas", 3);
+}
+
+function wireComparacaoFolhaDashboard(){
+  $("cfd-f-mesano").addEventListener("change", cfdCarregarDados);
 }
 
 // ---------------------------------------------------------------------

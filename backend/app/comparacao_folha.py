@@ -20,7 +20,8 @@ from . import db
 
 
 def _where_filtros(projeto_id=None, mesano=None, situacao=None, tipo_comparacao=None,
-                    tiporubr=None, busca=None, so_divergentes=False):
+                    tiporubr=None, empresa=None, tipovinc=None, rubrica_ergon=None,
+                    verba_consist=None, busca=None, so_divergentes=False):
     cond = []
     if projeto_id:
         cond.append(f"projeto_id = {db.q(projeto_id)}")
@@ -35,6 +36,20 @@ def _where_filtros(projeto_id=None, mesano=None, situacao=None, tipo_comparacao=
         cond.append(f"tipo_comparacao = {db.q(tipo_comparacao)}")
     if tiporubr:
         cond.append(f"tiporubr = {db.q(tiporubr)}")
+    # 65ª rodada: Empresa/TipoVINC/Rubrica Ergon/Verba Consist — os dois
+    # últimos são filtros de igualdade exata (não ILIKE) de propósito: o
+    # combo no front-end só oferece códigos que já existem de verdade nos
+    # dados (ver resumo() abaixo — rubricas_ergon_disponiveis/
+    # verbas_consist_disponiveis), pra não deixar o usuário filtrar por um
+    # código "de mentirinha" que nunca vai bater com nada.
+    if empresa:
+        cond.append(f"empresa_consist = {db.q(empresa)}")
+    if tipovinc:
+        cond.append(f"tipovinc = {db.q(tipovinc)}")
+    if rubrica_ergon:
+        cond.append(f"rubrica_ergon = {db.q(rubrica_ergon)}")
+    if verba_consist:
+        cond.append(f"verba_consist = {db.q(verba_consist)}")
     if so_divergentes:
         cond.append("UPPER(situacao) <> 'NÃO DIVERGENTE'")
     if busca:
@@ -67,7 +82,20 @@ def resumo(projeto_id=None, mesano=None):
     """KPIs pro topo da tela: total de linhas, quantas são divergentes
     (situação diferente de "Não Divergente"), soma da diferença, e as listas
     de meses/situações/tipos de rubrica disponíveis pra popular os filtros —
-    calculadas dentro do mesmo projeto (e mês, se filtrado), não fixas."""
+    calculadas dentro do mesmo projeto (e mês, se filtrado), não fixas.
+
+    65ª rodada: mais 4 listas de "válidos" pros novos filtros (Empresa,
+    TipoVINC, Rubrica Ergon, Verba Consist) — sempre calculadas a partir do
+    PROJETO inteiro (where_projeto, ignorando mês/situação/etc já
+    selecionados), mesmo critério que meses_disponiveis/
+    tipos_rubrica_disponiveis já usavam: o combo precisa mostrar toda opção
+    que existe em algum ponto dos dados, não só as que sobram depois do
+    filtro atual (senão o usuário nunca conseguiria trocar de filtro pra
+    "voltar" a ver uma opção que ficou escondida). Rubrica Ergon e Verba
+    Consist vêm como {codigo, nome} (MAX do nome associado a cada código —
+    qualquer um serve de rótulo, já que na prática um código sempre carrega
+    o mesmo nome) pra o combo mostrar "código — nome", igual já aparece na
+    tabela e no modal de detalhe."""
     where = _where_filtros(projeto_id=projeto_id, mesano=mesano)
     row = db.fetch_one(f"""
         SELECT
@@ -90,6 +118,22 @@ def resumo(projeto_id=None, mesano=None):
     tipos_rubrica = db.fetch_all(f"""
         SELECT DISTINCT tiporubr FROM comparacao_folha{where_projeto}{conector}tiporubr IS NOT NULL ORDER BY 1
     """)
+    empresas = db.fetch_all(f"""
+        SELECT DISTINCT empresa_consist FROM comparacao_folha{where_projeto}{conector}empresa_consist IS NOT NULL ORDER BY 1
+    """)
+    tipovinc = db.fetch_all(f"""
+        SELECT DISTINCT tipovinc FROM comparacao_folha{where_projeto}{conector}tipovinc IS NOT NULL ORDER BY 1
+    """)
+    rubricas_ergon = db.fetch_all(f"""
+        SELECT rubrica_ergon AS codigo, MAX(rubrica_nome_ergon) AS nome
+        FROM comparacao_folha{where_projeto}{conector}rubrica_ergon IS NOT NULL
+        GROUP BY rubrica_ergon ORDER BY 1
+    """)
+    verbas_consist = db.fetch_all(f"""
+        SELECT verba_consist AS codigo, MAX(nomeabrev_consist) AS nome
+        FROM comparacao_folha{where_projeto}{conector}verba_consist IS NOT NULL
+        GROUP BY verba_consist ORDER BY 1
+    """)
     return {
         "total": (row or {}).get("total", 0),
         "total_divergentes": (row or {}).get("total_divergentes", 0),
@@ -97,6 +141,129 @@ def resumo(projeto_id=None, mesano=None):
         "por_situacao": por_situacao,
         "meses_disponiveis": [m["mesano"] for m in meses],
         "tipos_rubrica_disponiveis": [t["tiporubr"] for t in tipos_rubrica],
+        "empresas_disponiveis": [e["empresa_consist"] for e in empresas],
+        "tipovinc_disponiveis": [t["tipovinc"] for t in tipovinc],
+        "rubricas_ergon_disponiveis": rubricas_ergon,
+        "verbas_consist_disponiveis": verbas_consist,
+    }
+
+
+# ---- Dashboard de Convergência (65ª rodada) ----
+# Consultas pensadas pra nortear o trabalho de aumentar a convergência entre
+# Ergon e o sistema legado (pedido do usuário) — não é só um espelho dos
+# dados, cada consulta aqui tem uma pergunta de negócio por trás:
+#   - "geral"/"por_situacao": de tudo que foi comparado, quanto já bate sem
+#     divergência (mesmo critério de "divergente" já usado no resto da tela:
+#     situação diferente de "Não Divergente")? Quebrado por situação pra
+#     mostrar ONDE está o problema (ex: "Sem Provimento" pode ser uma
+#     categoria inteira ainda não mapeada, não um monte de erros soltos).
+#   - "por_empresa": quantos CÓDIGOS distintos de rubrica cada lado usa, por
+#     empresa — não é sobre valor financeiro (o usuário pediu explicitamente
+#     pra deixar de lado), é sobre COBERTURA: uma empresa com 40 rubricas
+#     Ergon e só 12 verbas Consist aparecendo na comparação é sinal de que
+#     o de-para daquela empresa provavelmente está incompleto.
+#   - "cobertura_mapeamento": cruza com a tabela `rubricas` (parametrização
+#     -- de-para oficial Ergon x legado, ver db/migration_029_rubricas.sql)
+#     pra apontar DUAS lacunas diferentes, cada uma pedindo uma ação
+#     diferente da equipe:
+#       (a) rubrica/verba JÁ PARAMETRIZADA que nunca aparece na Comparação
+#           — ou a regra ainda não está em produção, ou ninguém recebeu
+#           esse provento/desconto ainda, ou o de-para está errado.
+#       (b) rubrica/verba usada NA COMPARAÇÃO que não bate com NENHUM
+#           código parametrizado — sinal de rubrica nova, ainda não
+#           levantada, ou erro de digitação/código no legado.
+#     Rubricas com status 'Excluída' não contam como "parametrizadas
+#     válidas" pra este cruzamento (foram descartadas de propósito).
+def dashboard(projeto_id, mesano=None):
+    # (mesano só filtra "where" — as consultas de cobertura de mapeamento
+    # abaixo usam projeto_id direto, sem `where`, porque parametrização de
+    # Rubricas não é mensal: ver comentário do bloco.)
+    where = _where_filtros(projeto_id=projeto_id, mesano=mesano)
+
+    geral = db.fetch_one(f"""
+        SELECT
+          COUNT(*) AS total,
+          COUNT(*) FILTER (WHERE UPPER(situacao) = 'NÃO DIVERGENTE') AS total_nao_divergentes
+        FROM comparacao_folha{where}
+    """) or {"total": 0, "total_nao_divergentes": 0}
+    total_geral = geral.get("total") or 0
+    geral["pct_nao_divergente"] = round(100 * (geral.get("total_nao_divergentes") or 0) / total_geral, 1) if total_geral else None
+
+    por_situacao = db.fetch_all(f"""
+        SELECT
+          COALESCE(situacao, '(sem situação)') AS situacao,
+          COUNT(*) AS total,
+          ROUND(100.0 * COUNT(*) / {total_geral or 1}, 1) AS pct_do_total
+        FROM comparacao_folha{where}
+        GROUP BY situacao ORDER BY total DESC
+    """)
+
+    por_empresa = db.fetch_all(f"""
+        SELECT
+          COALESCE(empresa_consist, '(sem empresa)') AS empresa,
+          COUNT(*) AS total_linhas,
+          COUNT(DISTINCT rubrica_ergon) FILTER (WHERE rubrica_ergon IS NOT NULL) AS qtd_rubricas_ergon,
+          COUNT(DISTINCT verba_consist) FILTER (WHERE verba_consist IS NOT NULL) AS qtd_verbas_consist,
+          COUNT(*) FILTER (WHERE UPPER(situacao) = 'NÃO DIVERGENTE') AS total_nao_divergentes,
+          ROUND(100.0 * COUNT(*) FILTER (WHERE UPPER(situacao) = 'NÃO DIVERGENTE') / GREATEST(COUNT(*), 1), 1) AS pct_nao_divergente
+        FROM comparacao_folha{where}
+        GROUP BY empresa_consist
+        ORDER BY total_linhas DESC
+    """)
+
+    # Cobertura de mapeamento — cruza com a parametrização de Rubricas do
+    # MESMO projeto (ignora o filtro de mês: parametrização não é mensal).
+    rubricas_parametrizadas_sem_uso = db.fetch_all(f"""
+        SELECT r.codigo_ergon AS codigo, MAX(r.nome_abreviado) AS nome, COUNT(*) AS linhas_parametrizadas
+        FROM rubricas r
+        WHERE r.projeto_id = {db.q(projeto_id)} AND r.status <> 'Excluída' AND r.codigo_ergon IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM comparacao_folha cf
+            WHERE cf.projeto_id = r.projeto_id AND cf.rubrica_ergon = r.codigo_ergon
+          )
+        GROUP BY r.codigo_ergon ORDER BY 1
+    """)
+    verbas_parametrizadas_sem_uso = db.fetch_all(f"""
+        SELECT r.verba_legado AS codigo, MAX(r.descricao_legado) AS nome, COUNT(*) AS linhas_parametrizadas
+        FROM rubricas r
+        WHERE r.projeto_id = {db.q(projeto_id)} AND r.status <> 'Excluída' AND r.verba_legado IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM comparacao_folha cf
+            WHERE cf.projeto_id = r.projeto_id AND cf.verba_consist = r.verba_legado
+          )
+        GROUP BY r.verba_legado ORDER BY 1
+    """)
+    rubricas_sem_parametrizacao = db.fetch_all(f"""
+        SELECT cf.rubrica_ergon AS codigo, MAX(cf.rubrica_nome_ergon) AS nome, COUNT(*) AS linhas
+        FROM comparacao_folha cf
+        WHERE cf.projeto_id = {db.q(projeto_id)} AND cf.rubrica_ergon IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM rubricas r
+            WHERE r.projeto_id = cf.projeto_id AND r.status <> 'Excluída' AND r.codigo_ergon = cf.rubrica_ergon
+          )
+        GROUP BY cf.rubrica_ergon ORDER BY linhas DESC
+    """)
+    verbas_sem_parametrizacao = db.fetch_all(f"""
+        SELECT cf.verba_consist AS codigo, MAX(cf.nomeabrev_consist) AS nome, COUNT(*) AS linhas
+        FROM comparacao_folha cf
+        WHERE cf.projeto_id = {db.q(projeto_id)} AND cf.verba_consist IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM rubricas r
+            WHERE r.projeto_id = cf.projeto_id AND r.status <> 'Excluída' AND r.verba_legado = cf.verba_consist
+          )
+        GROUP BY cf.verba_consist ORDER BY linhas DESC
+    """)
+
+    return {
+        "geral": geral,
+        "por_situacao": por_situacao,
+        "por_empresa": por_empresa,
+        "cobertura_mapeamento": {
+            "rubricas_parametrizadas_sem_uso": rubricas_parametrizadas_sem_uso,
+            "verbas_parametrizadas_sem_uso": verbas_parametrizadas_sem_uso,
+            "rubricas_sem_parametrizacao": rubricas_sem_parametrizacao,
+            "verbas_sem_parametrizacao": verbas_sem_parametrizacao,
+        },
     }
 
 

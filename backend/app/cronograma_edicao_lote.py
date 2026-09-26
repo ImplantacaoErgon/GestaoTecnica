@@ -76,6 +76,24 @@ Campos novos da 40ª rodada e como cada grupo se comporta:
   `recursos_remover` (listas de id de `recursos`) — grava/apaga em
   `atividade_recurso` sem tocar em `horas_alocadas` por pessoa (isso
   continua só no modal individual, aba Responsáveis).
+
+**Dependências (65ª rodada)**: uma linha pode vir com
+`dependencias_adicionar` (lista de `{predecessora_id, tipo, lag_horas}` —
+upsert: reenviar uma predecessora já existente troca o tipo/lag dela) e
+`dependencias_remover` (lista de `predecessora_id`) — grava/apaga em
+`atividade_dependencia`. Diferente de Recursos, isso ENTRA no motor de
+cascata: `calcular()` aplica essas mudanças no grafo antes do
+`topological_sort` (que também passa a rejeitar um ciclo recém-criado por
+essa mudança, de graça) e antes do recálculo de posição — a própria
+atividade editada (ainda que só na dependência, sem mexer em Início/Fim/
+Esforço) entra como uma "sucessora pura", recalculada a partir das
+predecessoras já atualizadas, podendo mover a atividade e toda a cadeia de
+sucessoras dela. Até a 64ª rodada o front-end (tela "Editar em massa") já
+montava esses dois campos e mandava pro `/preview`/`/confirmar`, mas o
+backend nunca chegou a lê-los — uma predecessora adicionada/removida por lá
+não tinha efeito nenhum, silenciosamente (sem erro, sem gravação). Corrigido
+nesta rodada, junto da nova coluna "Dependências" editável na grade
+unificada do Cronograma.
 """
 from datetime import date
 
@@ -231,11 +249,54 @@ def _validar_recursos(a, edicao_raw, recursos_validos):
     return adicionar, remover
 
 
+TIPOS_DEPENDENCIA_VALIDOS = {"FS", "SS", "FF", "SF"}
+
+
+def _validar_dependencias(a, edicao_raw, by_id):
+    """dependencias_adicionar/dependencias_remover — predecessoras da
+    própria atividade (linhas de `atividade_dependencia` onde
+    `atividade_id = a["id"]`). Cada item de dependencias_adicionar é
+    {predecessora_id, tipo, lag_horas}; reenviar uma predecessora que já
+    existe funciona como upsert (troca tipo/lag dela). dependencias_remover
+    é só uma lista de predecessora_id. `calcular()` aplica essas mudanças no
+    grafo ANTES do recálculo de datas — ver ali o motivo (65ª rodada:
+    grade unificada ganhou uma coluna "Dependências" editável; até então
+    esses dois campos eram montados pelo front-end mas o backend nunca
+    tinha sido atualizado pra realmente lê-los — uma predecessora
+    adicionada/removida por aqui não tinha efeito nenhum, silenciosamente)."""
+    adicionar_raw = edicao_raw.get("dependencias_adicionar") or []
+    remover_raw = edicao_raw.get("dependencias_remover") or []
+
+    adicionar = []
+    vistos = set()
+    for d in adicionar_raw:
+        pid = d.get("predecessora_id")
+        if not pid:
+            continue
+        if pid == a["id"]:
+            raise ValueError(f'"{a["nome"]}": uma atividade não pode depender dela mesma.')
+        if pid not in by_id:
+            raise ValueError(f'"{a["nome"]}": uma predecessora informada não pertence a este projeto (ou foi excluída).')
+        tipo = (d.get("tipo") or "FS").upper()
+        if tipo not in TIPOS_DEPENDENCIA_VALIDOS:
+            raise ValueError(f'"{a["nome"]}": tipo de dependência inválido ("{tipo}") — use FS, SS, FF ou SF.')
+        try:
+            lag = float(d.get("lag_horas") or 0)
+        except (TypeError, ValueError):
+            raise ValueError(f'"{a["nome"]}": lag da dependência inválido.')
+        adicionar.append({"predecessora_id": pid, "tipo": tipo, "lag_horas": lag})
+        vistos.add(pid)
+
+    remover = [pid for pid in remover_raw if pid and pid not in vistos]
+    return adicionar, remover
+
+
 def _validar_edicao(atividade_id, by_id, edicao_raw, status_familia_concluida, prioridade_validas, recursos_validos):
     """Valida e normaliza uma linha de `edicoes` (payload do front-end) —
     levanta ValueError com mensagem amigável em qualquer inconsistência.
-    Devolve um dict com os quatro grupos de campos (cascata/simples/
-    progresso/recursos), cada um só com o que realmente está presente."""
+    Devolve um dict com os cinco grupos de campos (cascata/simples/
+    progresso/recursos/dependências), cada um só com o que realmente está
+    presente."""
     a = by_id.get(atividade_id)
     if not a:
         raise ValueError("Uma das atividades enviadas não pertence a este projeto (ou foi excluída).")
@@ -260,6 +321,7 @@ def _validar_edicao(atividade_id, by_id, edicao_raw, status_familia_concluida, p
     simples = _validar_campos_simples(a, edicao_raw, prioridade_validas)
     progresso, relato_necessario, relato_sugerido = _avaliar_progresso(a, edicao_raw)
     recursos_add, recursos_rem = _validar_recursos(a, edicao_raw, recursos_validos)
+    deps_add, deps_rem = _validar_dependencias(a, edicao_raw, by_id)
 
     return {
         "cascata": cascata,
@@ -270,6 +332,8 @@ def _validar_edicao(atividade_id, by_id, edicao_raw, status_familia_concluida, p
         "relato_texto": (edicao_raw.get("relato_texto") or "").strip(),
         "recursos_adicionar": recursos_add,
         "recursos_remover": recursos_rem,
+        "dependencias_adicionar": deps_add,
+        "dependencias_remover": deps_rem,
     }
 
 
@@ -305,7 +369,8 @@ def calcular(projeto_id, edicoes, status_familia_concluida, prioridade_validas,
     validado_por_id = {}
     for e in edicoes:
         v = _validar_edicao(e.get("id"), by_id, e, status_familia_concluida, prioridade_validas, recursos_validos)
-        if v["cascata"] or v["simples"] or v["progresso"] or v["recursos_adicionar"] or v["recursos_remover"]:
+        if (v["cascata"] or v["simples"] or v["progresso"] or v["recursos_adicionar"] or v["recursos_remover"]
+                or v["dependencias_adicionar"] or v["dependencias_remover"]):
             validado_por_id[e["id"]] = v
     if not validado_por_id:
         return {"itens": []}
@@ -314,6 +379,13 @@ def calcular(projeto_id, edicoes, status_familia_concluida, prioridade_validas,
     # Só entram aqui as linhas com algo em "cascata" — exatamente o mesmo
     # motor da 39ª rodada, sem nenhuma mudança.
     edicoes_por_id = {id_: v["cascata"] for id_, v in validado_por_id.items() if v["cascata"]}
+    # Linhas que só mexeram em Dependências (65ª rodada) — não têm "cascata"
+    # (não digitaram Início/Fim/Esforço), mas precisam entrar no recálculo de
+    # posição mesmo assim: adicionar/remover uma predecessora pode empurrar a
+    # própria atividade (ela vira uma "sucessora pura" no motor abaixo, ver
+    # `edit = edicoes_por_id.get(n)` mais adiante).
+    deps_editadas_ids = {id_ for id_, v in validado_por_id.items()
+                          if v["dependencias_adicionar"] or v["dependencias_remover"]}
 
     deps = db.fetch_all(
         "SELECT ad.atividade_id, ad.predecessora_id, ad.tipo, ad.lag_horas "
@@ -327,18 +399,34 @@ def calcular(projeto_id, edicoes, status_familia_concluida, prioridade_validas,
             lag = _dur_dias(d["lag_horas"], horas_dia_util) if d["lag_horas"] else 0
             g.add_edge(d["predecessora_id"], d["atividade_id"], tipo=d["tipo"], lag=lag)
 
+    # Aplica no grafo, ANTES do topological_sort, as mudanças de dependência
+    # pedidas nesta edição — assim o cálculo de posição abaixo já enxerga o
+    # estado NOVO (com a predecessora adicionada/removida) e a verificação de
+    # ciclo do topological_sort já cobre também um ciclo recém-introduzido
+    # por essa mudança, de graça (remove antes de adicionar, pra uma
+    # predecessora "trocada" — mesma predecessora com tipo/lag diferente,
+    # que o front-end já manda só em dependencias_adicionar — virar upsert).
+    for id_ in deps_editadas_ids:
+        v = validado_por_id[id_]
+        for pid in v["dependencias_remover"]:
+            if g.has_edge(pid, id_):
+                g.remove_edge(pid, id_)
+        for d in v["dependencias_adicionar"]:
+            lag = _dur_dias(d["lag_horas"], horas_dia_util) if d["lag_horas"] else 0
+            g.add_edge(d["predecessora_id"], id_, tipo=d["tipo"], lag=lag)
+
     try:
         ordem = list(nx.topological_sort(g))
     except nx.NetworkXUnfeasible:
         raise ValueError("Existe um ciclo de dependências entre atividades — corrija antes de editar em lote.")
 
     itens = []
-    if edicoes_por_id:
-        # afetados = as editadas (em cascata) + todas as sucessoras delas
-        # (diretas e indiretas) — é só nesse conjunto que alguma data pode
-        # mudar; o resto do cronograma fica intocado, mesmo que apareça
-        # como predecessora de algo afetado.
-        afetados = set(edicoes_por_id.keys())
+    if edicoes_por_id or deps_editadas_ids:
+        # afetados = as editadas (em cascata ou em dependências) + todas as
+        # sucessoras delas (diretas e indiretas) — é só nesse conjunto que
+        # alguma data pode mudar; o resto do cronograma fica intocado, mesmo
+        # que apareça como predecessora de algo afetado.
+        afetados = set(edicoes_por_id.keys()) | deps_editadas_ids
         fronteira = list(afetados)
         while fronteira:
             atual = fronteira.pop()
@@ -466,7 +554,8 @@ def calcular(projeto_id, edicoes, status_familia_concluida, prioridade_validas,
     # nunca a uma sucessora que só apareceu por causa da cascata de datas acima.
     itens_by_id = {i["id"]: i for i in itens}
     for id_, v in validado_por_id.items():
-        tem_extra = v["simples"] or v["progresso"] or v["recursos_adicionar"] or v["recursos_remover"]
+        tem_extra = (v["simples"] or v["progresso"] or v["recursos_adicionar"] or v["recursos_remover"]
+                     or v["dependencias_adicionar"] or v["dependencias_remover"])
         if not tem_extra:
             continue
         item = itens_by_id.get(id_)
@@ -516,6 +605,11 @@ def calcular(projeto_id, edicoes, status_familia_concluida, prioridade_validas,
         if v["recursos_adicionar"] or v["recursos_remover"]:
             item["recursos_adicionar"] = v["recursos_adicionar"]
             item["recursos_remover"] = v["recursos_remover"]
+            item["mudou"] = True
+
+        if v["dependencias_adicionar"] or v["dependencias_remover"]:
+            item["dependencias_adicionar"] = v["dependencias_adicionar"]
+            item["dependencias_remover"] = v["dependencias_remover"]
             item["mudou"] = True
 
     return {"itens": itens}
@@ -576,6 +670,17 @@ def aplicar(projeto_id, edicoes, status_familia_concluida, prioridade_validas,
             stmts.append(
                 "INSERT INTO atividade_recurso (atividade_id, recurso_id) VALUES "
                 f"({db.q(i['id'])}, {db.q(rid)}) ON CONFLICT (atividade_id, recurso_id) DO NOTHING;"
+            )
+
+        for pid in i.get("dependencias_remover") or []:
+            stmts.append(
+                f"DELETE FROM atividade_dependencia WHERE atividade_id={db.q(i['id'])} AND predecessora_id={db.q(pid)};"
+            )
+        for d in i.get("dependencias_adicionar") or []:
+            stmts.append(
+                "INSERT INTO atividade_dependencia (atividade_id, predecessora_id, tipo, lag_horas) VALUES ("
+                f"{db.q(i['id'])}, {db.q(d['predecessora_id'])}, {db.q(d['tipo'])}, {db.q(d['lag_horas'])}) "
+                "ON CONFLICT (atividade_id, predecessora_id) DO UPDATE SET tipo=EXCLUDED.tipo, lag_horas=EXCLUDED.lag_horas;"
             )
 
     stmts.append("COMMIT;")

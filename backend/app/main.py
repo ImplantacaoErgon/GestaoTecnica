@@ -2178,6 +2178,11 @@ def create_app():
             "situacao": request.args.get("situacao") or None,
             "tipo_comparacao": request.args.get("tipo_comparacao") or None,
             "tiporubr": request.args.get("tiporubr") or None,
+            # 65ª rodada: Empresa/TipoVINC/Rubrica Ergon/Verba Consist.
+            "empresa": request.args.get("empresa") or None,
+            "tipovinc": request.args.get("tipovinc") or None,
+            "rubrica_ergon": request.args.get("rubrica_ergon") or None,
+            "verba_consist": request.args.get("verba_consist") or None,
             "busca": request.args.get("busca") or None,
             "so_divergentes": request.args.get("so_divergentes") == "1",
         }
@@ -2205,6 +2210,20 @@ def create_app():
             return jsonify({"erro": "projeto_id é obrigatório"}), 400
         mesano = request.args.get("mesano") or None
         return jsonify(comparacao_folha.resumo(projeto_id=pid, mesano=mesano))
+
+    @app.get("/api/comparacao-folha/dashboard")
+    def dashboard_comparacao_folha():
+        """65ª rodada: aba "Dashboard" dedicada à Comparação Folha — métricas
+        de convergência (% sem divergência geral/por situação, contagem de
+        rubricas Ergon x verbas Consist por empresa, cobertura de mapeamento
+        cruzando com a parametrização de Rubricas). Só projeto_id + mesano
+        (opcional) — as demais colunas da grade não fazem sentido como filtro
+        de um painel agregado."""
+        pid = request.args.get("projeto_id")
+        if not pid:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        mesano = request.args.get("mesano") or None
+        return jsonify(comparacao_folha.dashboard(pid, mesano=mesano))
 
     @app.get("/api/comparacao-folha/export")
     def exportar_comparacao_folha():
