@@ -278,48 +278,86 @@
   .el-relato-box input.el-relato-obrigatorio{border-color:var(--danger, #d33);}
 
   /* ---- gantt ---- */
-  /* Histórico da largura da coluna "Atividade" (47ª rodada, 3 ajustes
-     seguidos): 280px -> 840px (triplicado, achou exagerado) -> 420px (metade,
-     com quebra de linha) -> agora REDIMENSIONÁVEL COM O MOUSE, como numa
-     planilha — pedido final do usuário: "esse bloco não poderia se comportar
-     como uma planilha, onde eu possa ajustar os tamanhos dos campos com o
-     mouse? Mexer na granularidade do período?". 420px continua sendo só o
-     valor inicial (ver GANTT_ESTADO no JS); o usuário arrasta
-     .gantt-resize-handle pra mudar, e o valor escolhido fica salvo no
-     localStorage do navegador (por isso sobrevive a um F5). A quebra de
-     linha em .gantt-label-row continua existindo (pra quando a coluna fica
-     estreita) — e como a altura de cada linha de rótulo pode variar, o JS
-     (renderGantt()/_ganttSincronizarAlturas()) mede a altura real de cada
-     rótulo depois de desenhado (e de novo depois de cada redimensionamento)
-     e aplica a mesma altura na barra correspondente do lado direito, pra não
-     desalinhar rótulo × barra. */
+  /* Histórico da coluna de rótulos (47ª/63ª rodadas): começou como uma única
+     coluna "Atividade" redimensionável à mão (.gantt-resize-handle). Na 64ª
+     rodada o usuário pediu pra UNIFICAR esse bloco com a tabela de
+     atividades que ficava embaixo — "Unifique esses dois quadros. A
+     manutenção deve ser feita diretamente no Grantt, permitir redimensionar
+     os campos, alterar posição dos campos, os efeitos das alterações devem
+     ser aplicados automaticamente. ... Defina a melhor forma técnica
+     seguindo padrão grantt" — escolhendo explicitamente, quando perguntado,
+     só editar pela grade (sem arrastar as barras do Gantt com o mouse:
+     "Só editar campos na grade (Recomendado)"). A coluna única de rótulo
+     virou uma TABELA de verdade (.grid-tabela) dentro de .gantt-labels, com
+     várias colunas (Código, Atividade, Etapa, Frente, Status, datas, %,
+     Horas, Recursos, Crítica) — cada uma redimensionável pela borda
+     (.col-resize) e reordenável arrastando o cabeçalho (drag-and-drop nativo
+     do HTML5). O antigo .gantt-resize-handle único (largura da coluna
+     "Atividade" inteira) foi removido: agora cada coluna tem sua própria
+     alça, o que já cobre (e substitui) aquele redimensionamento único.
+     Largura/ordem de cada coluna ficam no localStorage (cronogramaGridLarguras/
+     cronogramaGridOrdem) — sobrevivem a um F5, mesmo padrão já usado pro
+     zoom/colapso de grupos. Como a altura de cada linha pode variar (nome
+     comprido etc.), o JS (renderGantt()/_ganttSincronizarAlturas()) continua
+     medindo a altura real de cada linha da tabela de rótulos depois de
+     desenhada e aplicando a mesma altura na barra correspondente à direita,
+     pra rótulo × barra não desalinharem. */
   .gantt-wrap{background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);margin-bottom:16px;overflow:hidden;}
   .gantt-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--surface-2);flex-wrap:wrap;}
   .gantt-toolbar .zoom-group{display:flex;gap:4px;}
   .gantt-toolbar .zoom-group button{background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:5px 10px;font-size:12px;font-family:inherit;cursor:pointer;color:var(--text-muted);}
   .gantt-toolbar .zoom-group button.active{background:var(--accent);color:#fff;border-color:var(--accent);}
   .gantt-toolbar .hint{font-size:11px;color:var(--text-faint);}
+  /* Contador de alterações pendentes + Salvar/Descartar (64ª rodada) — fica
+     na própria barra de ferramentas do Gantt, pra reforçar que a edição
+     agora acontece ali mesmo, sem precisar abrir um modal separado. */
+  .gantt-toolbar-edicao{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--text-muted);}
+  .gantt-salvar-painel{padding:12px 14px;border-bottom:1px solid var(--border);background:var(--accent-soft);}
+  .gantt-salvar-resumo{font-size:12.5px;margin-bottom:8px;}
+  .gantt-salvar-relatos{display:flex;flex-direction:column;gap:6px;margin-bottom:10px;max-height:220px;overflow:auto;}
+  .gantt-salvar-acoes{display:flex;justify-content:flex-end;gap:8px;}
   /* a rolagem (25 linhas ~ pedido da rodada anterior) fica só nesta camada
      interna, embaixo da toolbar — que assim nunca some ao rolar. */
   .gantt-scroll{overflow:auto;max-height:750px;}
-  .gantt{display:grid;} /* grid-template-columns é definido inline por render, conforme GANTT_ESTADO.largura */
-  .gantt-labels{border-right:1px solid var(--border);}
-  .gantt-resize-handle{cursor:col-resize;position:relative;background:transparent;}
-  .gantt-resize-handle::after{content:"";position:absolute;left:2px;top:0;bottom:0;width:2px;background:var(--border);}
-  .gantt-resize-handle:hover::after,.gantt-resize-handle.dragging::after{left:1px;width:4px;background:var(--accent);}
-  .gantt-label-row{min-height:30px;display:flex;align-items:center;padding:4px 10px;font-size:12px;border-bottom:1px solid var(--border);gap:6px;line-height:1.3;}
-  .gantt-label-row.linha-par{background:rgba(127,127,127,.05);}
-  .gantt-label-row .wbs{color:var(--text-faint);font-family:'IBM Plex Mono';font-size:11px;flex-shrink:0;}
+  .gantt{display:grid;} /* grid-template-columns (largura da coluna de rótulos + 1fr do gráfico) é definido inline por render, conforme a soma das larguras de coluna */
+  .gantt-labels{border-right:1px solid var(--border);overflow-x:auto;}
+  .grid-tabela{border-collapse:collapse;table-layout:fixed;width:100%;font-size:12px;}
+  .grid-tabela thead th{
+    position:sticky;top:0;z-index:3;background:var(--surface);font-weight:700;text-align:left;
+    padding:6px 10px;border-bottom:2px solid var(--border);white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;user-select:none;cursor:grab;position:relative;
+  }
+  .grid-tabela thead th:active{cursor:grabbing;}
+  .grid-tabela thead th.arrastando{opacity:.35;}
+  .grid-tabela thead th.destino-drop{background:var(--accent-soft);}
+  .grid-tabela thead th .col-resize{position:absolute;right:0;top:0;bottom:0;width:6px;cursor:col-resize;}
+  .grid-tabela thead th .col-resize:hover,.grid-tabela thead th .col-resize.dragging{background:var(--accent);}
+  .grid-tabela tbody td{padding:3px 8px;border-bottom:1px solid var(--border);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;vertical-align:middle;height:30px;}
+  .grid-tabela tbody tr.grid-row-atividade:nth-child(even){background:rgba(127,127,127,.05);}
   /* Linha de grupo (Etapa/Frente — "atividade macro", 63ª rodada): resumo
      clicável que expande/recolhe as atividades daquele grupo, com contagem
      de concluídas. Visualmente destacada (fundo/negrito) pra separar do
      resto da grade, igual a uma ferramenta de cronograma "de verdade"
      (ProjectLibre/MS Project) — foi o modelo pedido pelo usuário. */
-  .gantt-label-row.grupo{cursor:pointer;font-weight:700;background:var(--surface-2);user-select:none;}
-  .gantt-label-row.grupo:hover{background:var(--border);}
-  .gantt-label-row.grupo .toggle{flex-shrink:0;width:14px;text-align:center;color:var(--text-muted);font-weight:400;}
-  .gantt-label-row.grupo .nome-grupo{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .gantt-label-row.grupo .badge-progresso{margin-left:auto;flex-shrink:0;font-size:10px;font-weight:400;color:var(--text-muted);font-family:'IBM Plex Mono';}
+  .grid-tabela tbody tr.grid-row-grupo{cursor:pointer;font-weight:700;background:var(--surface-2);user-select:none;}
+  .grid-tabela tbody tr.grid-row-grupo:hover{background:var(--border);}
+  .grid-tabela tbody tr.grid-row-grupo .toggle{display:inline-block;width:14px;text-align:center;color:var(--text-muted);font-weight:400;}
+  /* Sinal visual de edição pendente (ainda não salva) — diferencia a linha
+     que o usuário digitou (accent, sólido) da que só mudou por efeito de
+     cascata de dependência (warn, tracejado/tom de aviso), tanto na grade
+     quanto na barra do Gantt correspondente (ver .gantt-row.linha-editada/
+     .linha-cascata mais abaixo). */
+  .grid-tabela tbody tr.linha-editada{background:var(--accent-soft) !important;}
+  .grid-tabela tbody tr.linha-editada td:first-child{box-shadow:inset 3px 0 0 var(--accent);}
+  .grid-tabela tbody tr.linha-cascata{background:var(--warn-soft) !important;}
+  .grid-tabela tbody tr.linha-cascata td:first-child{box-shadow:inset 3px 0 0 var(--warn);}
+  .grid-tabela td input,.grid-tabela td select{
+    width:100%;background:transparent;border:1px solid transparent;border-radius:5px;
+    padding:2px 5px;font-size:12px;font-family:inherit;color:var(--text);
+  }
+  .grid-tabela td input:hover,.grid-tabela td select:hover{border-color:var(--border);}
+  .grid-tabela td input:focus,.grid-tabela td select:focus{outline:none;border-color:var(--accent);background:var(--surface);}
+  .grid-tabela td input:disabled,.grid-tabela td select:disabled{color:var(--text-faint);background:transparent;}
   .gantt-chart{position:relative;}
   .gantt-header{height:24px;position:sticky;top:0;z-index:3;border-bottom:1px solid var(--border);background:var(--surface-2);}
   .gantt-header span{position:absolute;top:5px;font-size:10px;color:var(--text-faint);font-family:'IBM Plex Mono';white-space:nowrap;}
@@ -343,6 +381,12 @@
   .gantt-bar.macro{background:var(--text);border-radius:3px;}
   .gantt-bar.critica.leaf{border-color:var(--danger);}
   .gantt-bar.critica .fill{outline:1.5px solid var(--danger);outline-offset:-1.5px;}
+  /* Mesmo sinal visual de edição pendente da grade (ver .linha-editada/
+     .linha-cascata acima), espelhado na barra — a barra se move em tempo
+     real conforme o usuário digita (ver _ganttRedesenharBarras no JS), e
+     esse contorno deixa claro que aquela posição ainda não foi salva. */
+  .gantt-row.linha-editada .gantt-bar{outline:2px solid var(--accent);outline-offset:1px;}
+  .gantt-row.linha-cascata .gantt-bar{outline:2px dashed var(--warn);outline-offset:1px;}
   .gantt-today{position:absolute;top:0;bottom:0;width:1px;background:var(--danger);z-index:5;}
   /* Ligações de dependência (63ª rodada — "as atividades devem sofrer
      efeitos das dependências"): linha em cotovelo do fim da predecessora
@@ -356,15 +400,11 @@
   .gantt-dep-link{fill:none;stroke:var(--text-faint);stroke-width:1.25;opacity:.8;}
   .gantt-dep-link.violada{stroke:var(--danger);stroke-width:1.5;stroke-dasharray:3,2;opacity:.9;}
 
-  /* Tabela abaixo do Gantt, na página de Cronograma: limitada a ~25 linhas
-     visíveis com rolagem própria pro resto — pedido do usuário, 47ª rodada:
-     "colocar uma barra de rolagem nesses dois blocos para que a página não
-     fique tão extensa. Deixe 25 linhas em cada bloco." Valor em px medido na
-     renderização real (cabeçalho + 25 linhas de dados), não é um chute — ver
-     renderAtividadesTable() no JS. Escopado só à página de Cronograma
-     (#view-cronograma) pra não afetar o .table-wrap genérico usado em todas
-     as outras telas do sistema. */
-  #view-cronograma .table-wrap{max-height:1072px;}
+  /* A antiga tabela separada abaixo do Gantt (limitada a ~25 linhas, 47ª
+     rodada) foi incorporada na própria grade do Gantt na 64ª rodada — a
+     rolagem de altura limitada agora é só .gantt-scroll{max-height:750px}
+     (ver bloco "---- gantt ----" acima); não existe mais um .table-wrap
+     nesta página. */
 
   /* ---- modal ---- */
   .overlay{position:fixed;inset:0;background:rgba(10,14,17,.5);display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto;z-index:50;}
@@ -707,18 +747,22 @@
           <button data-zoom="mes">Mês</button>
           <button data-zoom="trimestre">Trimestre</button>
         </div>
-        <span class="hint">arraste a borda entre "Atividade" e o gráfico para redimensionar</span>
+        <div class="gantt-toolbar-edicao" id="gantt-toolbar-edicao">
+          <span class="muted" id="grid-pendentes-info"></span>
+          <button class="btn ghost small" id="btn-grid-descartar" hidden>Descartar alterações</button>
+          <button class="btn small" id="btn-grid-salvar" hidden>💾 Salvar alterações</button>
+        </div>
+        <span class="hint">edite os campos direto na grade — arraste a borda de uma coluna pra redimensionar, o cabeçalho pra reordenar</span>
+      </div>
+      <div class="gantt-salvar-painel" id="gantt-salvar-painel" hidden>
+        <div class="gantt-salvar-resumo" id="gantt-salvar-resumo"></div>
+        <div class="gantt-salvar-relatos" id="gantt-salvar-relatos"></div>
+        <div class="gantt-salvar-acoes">
+          <button class="btn ghost small" id="btn-grid-salvar-cancelar">Cancelar</button>
+          <button class="btn small" id="btn-grid-salvar-confirmar">Confirmar e salvar</button>
+        </div>
       </div>
       <div class="gantt-scroll"><div id="gantt"></div></div>
-    </div>
-
-    <div class="table-wrap">
-      <table>
-        <thead><tr>
-          <th>Código</th><th style="min-width:350px;">Atividade</th><th>Etapa/Frente</th><th>Status</th><th>Início prev.</th><th>Fim prev.</th><th>%</th><th>Horas (prev./real.)</th><th>Recursos</th><th>Crítica</th>
-        </tr></thead>
-        <tbody id="atividades-tbody"></tbody>
-      </table>
     </div>
   </section>
 
@@ -3113,8 +3157,11 @@ function _construirLinhasCronograma(list){
     const concluidas = g.itens.filter(a=>STATUS_FAMILIA_CONCLUIDA.includes(a.status)).length;
     const colapsado = GANTT_GRUPOS_COLAPSADOS.has(g.chave);
     linhas.push({
+      // `itens` (64ª rodada) guarda as atividades do grupo — usado por
+      // _rollupEfetivo() pra recalcular a barra-resumo (macro) em tempo real
+      // conforme o usuário edita datas na grade, sem esperar salvar.
       tipo: "grupo", chave: g.chave, nome: g.frente_nome, etapa_nome: g.etapa_nome,
-      dtini_prev, dtfim_prev, total: g.itens.length, concluidas, colapsado,
+      dtini_prev, dtfim_prev, total: g.itens.length, concluidas, colapsado, itens: g.itens,
     });
     if(!colapsado) g.itens.forEach(a => linhas.push({tipo:"atividade", a}));
   });
@@ -3131,14 +3178,18 @@ function _ganttToggleGrupo(chave){
 function renderCronograma(){
   const list = applyFilters(ATIVIDADES).sort((a,b)=>(a.dtini_prev||"9999").localeCompare(b.dtini_prev||"9999"));
   const linhas = _construirLinhasCronograma(list);
-  renderAtividadesTable(linhas, list.length);
+  // 64ª rodada — "Unifique esses dois quadros": a antiga tabela separada
+  // (renderAtividadesTable/#atividades-tbody) foi incorporada na própria
+  // grade de rótulos do Gantt (ver renderGantt) — não existe mais uma
+  // chamada separada aqui.
+  //
   // A escala de datas do Gantt (minDate/maxDate) é calculada sobre TODAS as
   // atividades filtradas, não só as visíveis em `linhas` — se calculasse só
   // sobre `linhas`, recolher um grupo removeria suas atividades da conta e
   // encolheria o intervalo, deixando a própria barra-resumo (preta, com as
   // datas ORIGINAIS do grupo inteiro) fora da escala — nascendo com left
   // negativo e vazando visualmente por cima da coluna de rótulos à esquerda
-  // (bug visto no teste E2E desta rodada antes deste ajuste).
+  // (bug visto no teste E2E da 63ª rodada antes deste ajuste).
   renderGantt(linhas, list.filter(a=>a.dtini_prev && a.dtfim_prev));
 }
 
@@ -3165,64 +3216,478 @@ function responsaveisCell(a){
   return `<span title="${esc(nomes.join(", "))}">${esc(visiveis)}${resto}</span>`;
 }
 
-// Coluna "Status" com white-space:nowrap (47ª rodada): a coluna "Atividade"
-// ficou 3x mais larga (ver th "min-width:350px" no HTML) e isso deixou menos
-// espaço pras outras colunas — sem o nowrap, uma atividade "Atrasada" (2
-// selos, Status + Atrasada) quebrava em 2 linhas e deixava aquela linha
-// mais alta que as demais, desalinhando as ~25 linhas visíveis do bloco
-// (ver #view-cronograma .table-wrap{max-height} no CSS). Com nowrap a linha
-// toda vez que precisar de mais espaço estoura a largura da tabela (que já
-// tem rolagem horizontal própria), não a altura da linha.
-function _linhaGrupoTableHtml(l){
+// ================= 64ª rodada — grade unificada (rótulo + tabela) =================
+// "Unifique esses dois quadros. A manutenção deve ser feita diretamente no
+// Grantt, permitir redimensionar os campos, alterar posição dos campos, os
+// efeitos das alterações devem ser aplicados automaticamente. ... Defina a
+// melhor forma técnica seguindo padrão grantt" — com o usuário escolhendo
+// explicitamente, quando perguntado, editar só pela grade (sem arrastar as
+// barras do Gantt): "Só editar campos na grade (Recomendado)".
+//
+// Decisão técnica (avaliada e não revertida durante a implementação): reusa
+// o MESMO motor de simulação/gravação já existente e testado da tela
+// "Editar em massa" (backend/app/cronograma_edicao_lote.py, rotas
+// /api/cronograma/edicao-lote/preview e /confirmar) — mesma semântica de
+// edição esparsa por linha, cascata de datas pelas sucessoras, e regra de
+// relato obrigatório/opcional em retrocesso de progresso. NÃO foi criada
+// nenhuma tabela nova no banco pra isso (o usuário ofereceu como opção,
+// "se quiser pode ter uma tabela") — as edições pendentes vivem só na
+// memória do navegador (PENDENTES) até o usuário confirmar, exatamente como
+// já funcionava na "Editar em massa"; não há necessidade de persistir um
+// rascunho no servidor pra esse fluxo. O modal "Editar em massa" continua
+// existindo à parte para o que a grade não cobre nesta rodada (Recursos e
+// Dependências, que precisam de um popup de múltipla escolha — fora do
+// escopo confirmado "só editar campos na grade").
+//
+// Colunas: cada uma redimensionável arrastando a borda (.col-resize) e
+// reordenável arrastando o cabeçalho (drag-and-drop nativo do HTML5) — ordem
+// e largura persistidas no localStorage (mesmo padrão do zoom/colapso de
+// grupos, sobrevive a F5).
+const GANTT_COLUNAS_BASE = [
+  { key:"codigo_wbs",           label:"Código",               largura:80  },
+  { key:"nome",                 label:"Atividade",            largura:260 },
+  { key:"etapa_id",             label:"Etapa",                 largura:150 },
+  { key:"frente_trabalho_id",   label:"Frente",                largura:150 },
+  { key:"status",               label:"Status",                largura:130 },
+  { key:"dtini_prev",           label:"Início prev.",          largura:106 },
+  { key:"dtfim_prev",           label:"Fim prev.",             largura:106 },
+  { key:"percentual_concluido", label:"%",                     largura:56  },
+  { key:"horas",                label:"Horas (prev./real.)",   largura:120 },
+  { key:"recursos",             label:"Recursos",              largura:150 },
+  { key:"critica",              label:"Crítica",               largura:70  },
+];
+function _gridColunasOrdemLer(){
+  const chavesValidas = GANTT_COLUNAS_BASE.map(c=>c.key);
+  let ordem;
+  try{ ordem = JSON.parse(localStorage.getItem("cronogramaGridOrdem")||"null"); }catch(e){ ordem=null; }
+  if(!Array.isArray(ordem)) ordem = chavesValidas.slice();
+  ordem = ordem.filter(k=>chavesValidas.includes(k));
+  chavesValidas.forEach(k=>{ if(!ordem.includes(k)) ordem.push(k); }); // coluna nova de uma versão futura entra no fim
+  return ordem;
+}
+function _gridColunasSalvarOrdem(ordem){
+  try{ localStorage.setItem("cronogramaGridOrdem", JSON.stringify(ordem)); }catch(e){}
+}
+function _gridColunasLargurasLer(){
+  try{ return JSON.parse(localStorage.getItem("cronogramaGridLarguras")||"{}") || {}; }catch(e){ return {}; }
+}
+function _gridColunasLargurasSalvar(mapa){
+  try{ localStorage.setItem("cronogramaGridLarguras", JSON.stringify(mapa)); }catch(e){}
+}
+let GRID_COL_ORDEM = _gridColunasOrdemLer();
+let GRID_COL_LARGURAS = _gridColunasLargurasLer();
+function _gridColunasAtuais(){
+  const byKey = {}; GANTT_COLUNAS_BASE.forEach(c=>byKey[c.key]=c);
+  return GRID_COL_ORDEM.map(k=>({...byKey[k], largura: GRID_COL_LARGURAS[k]||byKey[k].largura}));
+}
+
+// ---- Edição pendente (ainda não salva) ----
+// PENDENTES: só o que o usuário digitou/mudou nesta sessão de edição —
+// {atividadeId: {campo: valor}}. Uma edição direta SEMPRE vence sobre
+// qualquer efeito de cascata (mesma regra do motor em
+// cronograma_edicao_lote.py: "o valor digitado sempre vale").
+// CASCATA_PREVIA: último resultado conhecido de /edicao-lote/preview
+// (simulação, nada gravado) — usado só pra MOSTRAR o efeito automático nas
+// sucessoras não editadas diretamente (datas/esforço) em tempo real,
+// conforme pedido: "os efeitos das alterações devem ser aplicados
+// automaticamente". Nunca grava nada sozinho — só o botão Salvar grava.
+let PENDENTES = {};
+let CASCATA_PREVIA = {};
+let GANTT_ULTIMAS_LINHAS = [];
+let GANTT_ULTIMAS_ATIV_COM_DATA = [];
+
+function _gridBloqueada(a){ return STATUS_FAMILIA_CONCLUIDA.includes(a.status) || a.status==="Cancelada"; }
+
+// Valor "efetivo" de um campo pra exibir na tela: prioriza o que o próprio
+// usuário digitou (PENDENTES); na falta disso, se for um campo que cascata
+// (datas/esforço) e essa atividade foi afetada só por cascata (não editada
+// diretamente), usa o resultado do último preview; senão, o valor original.
+function _efetivo(a, campo){
+  const pend = PENDENTES[a.id];
+  if(pend && campo in pend) return pend[campo];
+  if(campo==="dtini_prev" || campo==="dtfim_prev" || campo==="prazo_horas"){
+    const prev = CASCATA_PREVIA[a.id];
+    if(prev && !prev.editado){
+      const chaveNova = campo+"_novo";
+      if(prev[chaveNova] !== undefined && prev[chaveNova] !== null) return prev[chaveNova];
+    }
+  }
+  return a[campo];
+}
+function _efIni(a){ return _efetivo(a, "dtini_prev"); }
+function _efFim(a){ return _efetivo(a, "dtfim_prev"); }
+// Rollup (menor início/maior fim) de um grupo usando datas EFETIVAS — é o
+// que faz a barra-resumo (macro) do Gantt se mover em tempo real conforme o
+// usuário edita uma atividade do grupo, antes mesmo de salvar.
+function _rollupEfetivo(itens){
+  const comData = itens.filter(a => _efIni(a) && _efFim(a));
+  if(!comData.length) return {ini:null, fim:null};
+  let ini = _efIni(comData[0]), fim = _efFim(comData[0]);
+  comData.forEach(a=>{ const ai=_efIni(a), af=_efFim(a); if(ai<ini) ini=ai; if(af>fim) fim=af; });
+  return {ini, fim};
+}
+
+// Conteúdo de uma célula da grade — campos editáveis viram <input>/<select>
+// com data-campo (mesma convenção da "Editar em massa", ver linhaEdicaoLote);
+// os demais reusam os mesmos helpers de exibição da tabela antiga.
+function _gridCelulaHtml(a, col){
+  const dis = _gridBloqueada(a) ? "disabled" : "";
+  switch(col.key){
+    case "codigo_wbs":
+      return `<span class="mono">${esc(a.codigo_wbs||"—")}</span>`;
+    case "nome": {
+      const v = _efetivo(a, "nome");
+      const marcas = `${a.eh_atividade_master?`<span title="Atividade master (entregável mestre do projeto)">★</span> `:""}${a.eh_entregavel?`<span title="Entregável (atrelado a faturamento)">💰</span> `:""}${a.data_execucao_fixada?`<span title="Data de execução fixada — Início/Fim previsto só mudam manualmente">📌</span> `:""}`;
+      return `${marcas}<input type="text" data-campo="nome" value="${esc(v||"")}" ${dis}>`;
+    }
+    case "etapa_id": {
+      const v = _efetivo(a, "etapa_id");
+      const opts = `<option value="">— sem etapa —</option>` + ETAPAS.map(e=>`<option value="${e.id}" ${String(v||"")===e.id?"selected":""}>${e.numero} — ${esc(e.nome)}</option>`).join("");
+      return `<select data-campo="etapa_id" ${dis}>${opts}</select>`;
+    }
+    case "frente_trabalho_id": {
+      const v = _efetivo(a, "frente_trabalho_id");
+      const opts = `<option value="">— sem frente —</option>` + FRENTES.filter(f=>f.ativo!==false || f.id===a.frente_trabalho_id)
+        .map(f=>`<option value="${f.id}" ${String(v||"")===f.id?"selected":""}>${esc(f.nome)}</option>`).join("");
+      return `<select data-campo="frente_trabalho_id" ${dis}>${opts}</select>`;
+    }
+    case "status":
+      return `${pill(a.status, STATUS_COLOR[a.status]||"faint")}${a.atrasada?" "+pill("Atrasada","danger"):""}`;
+    case "dtini_prev":
+      return `<input type="date" data-campo="dtini_prev" value="${_efetivo(a,"dtini_prev")||""}" ${dis}>`;
+    case "dtfim_prev":
+      return `<input type="date" data-campo="dtfim_prev" value="${_efetivo(a,"dtfim_prev")||""}" ${dis}>`;
+    case "percentual_concluido": {
+      const v = _efetivo(a, "percentual_concluido");
+      return `<input type="number" min="0" max="100" step="1" data-campo="percentual_concluido" value="${v==null?0:v}" ${dis}>`;
+    }
+    case "horas":
+      return horasCell(a);
+    case "recursos":
+      return responsaveisCell(a);
+    case "critica":
+      return a.cpm_critica ? pill("Crítica","danger") : "";
+    default:
+      return "";
+  }
+}
+
+function _gridTheadHtml(colunas){
+  const ths = colunas.map(c => `<th data-col="${c.key}" draggable="true" title="Arraste para reordenar" style="width:${c.largura}px;">
+    <span class="col-label">${esc(c.label)}</span><span class="col-resize" data-col-resize="${c.key}" draggable="false" title="Arraste para redimensionar"></span>
+  </th>`).join("");
+  return `<tr>${ths}</tr>`;
+}
+function _linhaGrupoGridHtml(l, ncols){
   const pct = l.total ? Math.round(100*l.concluidas/l.total) : 0;
-  return `<tr class="grupo-row clickable" data-grupo="${esc(l.chave)}">
-    <td colspan="10">
-      <span class="toggle" style="display:inline-block;width:14px;">${l.colapsado?"▸":"▾"}</span>
+  return `<tr class="grid-row-grupo" data-grupo="${esc(l.chave)}">
+    <td colspan="${ncols}">
+      <span class="toggle">${l.colapsado?"▸":"▾"}</span>
       <strong>${esc(l.nome)}</strong>
       <span class="muted" style="margin-left:6px;">${l.total} atividade(s) · ${fmtDate(l.dtini_prev)} → ${fmtDate(l.dtfim_prev)}</span>
       <span class="mono muted" style="float:right;">${l.concluidas}/${l.total} concluídas (${pct}%)</span>
     </td>
   </tr>`;
 }
-function _linhaAtividadeTableHtml(a){
-  return `<tr class="clickable" data-id="${a.id}">
-      <td class="mono">${esc(a.codigo_wbs||"—")}</td>
-      <td>${a.eh_atividade_master?`<span title="Atividade master (entregável mestre do projeto)">★</span> `:""}${a.eh_entregavel?`<span title="Entregável (atrelado a faturamento)">💰</span> `:""}${a.data_execucao_fixada?`<span title="Data de execução fixada — Início/Fim previsto só mudam manualmente">📌</span> `:""}${esc(a.nome)}${a.requisito_tr_codigo?`<div class="muted" style="font-size:11px;">TR: ${esc(a.requisito_tr_codigo)}</div>`:""}</td>
-      <td>${a.etapa_numero!=null?a.etapa_numero+".":""}${esc(a.frente_nome||"—")}</td>
-      <td style="white-space:nowrap;">${pill(a.status, STATUS_COLOR[a.status]||"faint")}${a.atrasada?" "+pill("Atrasada","danger"):""}${a.esforco_estourado?" "+pill("Esforço acima do previsto","warn"):""}</td>
-      <td class="mono">${fmtDate(a.dtini_prev)}</td>
-      <td class="mono">${fmtDate(a.dtfim_prev)}</td>
-      <td class="mono">${a.percentual_concluido}%</td>
-      <td>${horasCell(a)}</td>
-      <td>${responsaveisCell(a)}</td>
-      <td>${a.cpm_critica? pill("Crítica","danger") : ""}</td>
-    </tr>`;
+function _linhaAtividadeGridHtml(a, colunas){
+  const pend = PENDENTES[a.id];
+  const cascataItem = CASCATA_PREVIA[a.id];
+  let cls = "grid-row-atividade";
+  if(pend && Object.keys(pend).length) cls += " linha-editada";
+  else if(cascataItem && !cascataItem.editado && cascataItem.mudou) cls += " linha-cascata";
+  const tds = colunas.map(c=>`<td>${_gridCelulaHtml(a,c)}</td>`).join("");
+  return `<tr class="${cls}" data-id="${a.id}">${tds}</tr>`;
 }
-// 63ª rodada: `linhas` já vem agrupada (ver _construirLinhasCronograma) —
-// `totalAtividades` é a contagem ANTES do agrupamento, só pra decidir a
-// mensagem de "nenhuma atividade" (uma lista com filtro que não bate com
-// nada não tem nem grupo nem folha).
-function renderAtividadesTable(linhas, totalAtividades){
-  if(!totalAtividades){
-    $("atividades-tbody").innerHTML = `<tr class="empty-row"><td colspan="10">Nenhuma atividade encontrada para os filtros atuais.</td></tr>`;
-    return;
-  }
-  $("atividades-tbody").innerHTML = linhas.map(l => l.tipo==="grupo" ? _linhaGrupoTableHtml(l) : _linhaAtividadeTableHtml(l.a)).join("");
-  $("atividades-tbody").querySelectorAll("tr.grupo-row").forEach(tr=>{
-    tr.addEventListener("click", ()=> _ganttToggleGrupo(tr.dataset.grupo));
-  });
-  $("atividades-tbody").querySelectorAll("tr[data-id]").forEach(tr=>{
-    tr.addEventListener("click", ()=>openAtividadeModal(byId(ATIVIDADES, tr.dataset.id)));
+
+// Redimensionamento por coluna — cada <th> tem sua própria alça
+// (.col-resize), substituindo a antiga alça única da coluna "Atividade".
+function _gridWireResize(){
+  const el = $("gantt"); if(!el) return;
+  el.querySelectorAll(".col-resize").forEach(handle=>{
+    handle.addEventListener("mousedown", (e)=>{
+      e.preventDefault(); e.stopPropagation(); // não deixa o mousedown iniciar um drag de reordenação
+      const key = handle.dataset.colResize;
+      const th = handle.closest("th");
+      const idx = [...th.parentElement.children].indexOf(th);
+      const startX = e.clientX;
+      const startW = th.getBoundingClientRect().width;
+      handle.classList.add("dragging");
+      document.body.style.userSelect = "none";
+      const gridEl = el.querySelector(".gantt");
+      const col = el.querySelectorAll(".gantt-labels colgroup col")[idx];
+      function onMove(ev){
+        const w = Math.max(50, Math.min(500, Math.round(startW + (ev.clientX - startX))));
+        GRID_COL_LARGURAS[key] = w;
+        if(col) col.style.width = w+"px";
+        th.style.width = w+"px";
+        const soma = _gridColunasAtuais().reduce((s,c)=>s+c.largura,0);
+        if(gridEl) gridEl.style.gridTemplateColumns = `${soma}px 1fr`;
+      }
+      function onUp(){
+        handle.classList.remove("dragging");
+        document.body.style.userSelect = "";
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        _gridColunasLargurasSalvar(GRID_COL_LARGURAS);
+        _ganttSincronizarAlturas();
+      }
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    });
   });
 }
 
-// ---- Gantt: zoom (granularidade do período) e largura da coluna
-// "Atividade" — ambos ajustáveis pelo usuário com o mouse, tipo planilha, e
-// persistidos no localStorage do navegador (sobrevivem a F5). 47ª rodada,
-// 3º ajuste, pedido verbatim depois de ver a versão com largura fixa (3x, e
-// depois metade): "esse bloco não poderia se comportar como uma planilha,
-// onde eu possa ajustar os tamanhos dos campos com o mouse? Mexer na
-// granularidade do período?"
+// Reordenação de colunas — arrastar um <th> e soltar sobre outro troca as
+// duas posições na ordem persistida. Re-renderiza a grade INTEIRA (mais
+// simples e barato o bastante — não é uma ação por tecla digitada), mas a
+// partir das mesmas `linhas` já calculadas (não refiltra/reagrupa do zero),
+// preservando o estado de colapso/edições pendentes na tela.
+function _gridWireReorder(){
+  const el = $("gantt"); if(!el) return;
+  el.querySelectorAll(".gantt-labels th").forEach(th=>{
+    th.addEventListener("dragstart", (e)=>{
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", th.dataset.col);
+      th.classList.add("arrastando");
+    });
+    th.addEventListener("dragend", ()=> th.classList.remove("arrastando"));
+    th.addEventListener("dragover", (e)=>{ e.preventDefault(); th.classList.add("destino-drop"); });
+    th.addEventListener("dragleave", ()=> th.classList.remove("destino-drop"));
+    th.addEventListener("drop", (e)=>{
+      e.preventDefault();
+      th.classList.remove("destino-drop");
+      const origemKey = e.dataTransfer.getData("text/plain");
+      const destinoKey = th.dataset.col;
+      if(!origemKey || origemKey===destinoKey) return;
+      const ordem = GRID_COL_ORDEM.slice();
+      const oi = ordem.indexOf(origemKey), di = ordem.indexOf(destinoKey);
+      if(oi<0 || di<0) return;
+      ordem.splice(oi,1);
+      ordem.splice(di,0,origemKey);
+      GRID_COL_ORDEM = ordem;
+      _gridColunasSalvarOrdem(ordem);
+      renderGantt(GANTT_ULTIMAS_LINHAS, GANTT_ULTIMAS_ATIV_COM_DATA);
+    });
+  });
+}
+
+// Wire dos campos editáveis — cada input/select dispara um diff contra
+// ATIVIDADES (snapshot da última carga) e atualiza PENDENTES.
+function _gridWireEdicao(){
+  const el = $("gantt"); if(!el) return;
+  el.querySelectorAll(".gantt-labels tbody tr.grid-row-atividade [data-campo]").forEach(campoEl=>{
+    const tr = campoEl.closest("tr[data-id]");
+    if(!tr) return;
+    const campo = campoEl.dataset.campo;
+    const disparar = ()=> _gridOnEdicaoCampo(tr.dataset.id, campo, campoEl);
+    campoEl.addEventListener("input", disparar);
+    campoEl.addEventListener("change", disparar);
+  });
+  // Clique na linha (fora de um campo editável) abre o modal completo —
+  // continua sendo o caminho pra tudo que a grade não cobre (Recursos,
+  // Dependências, Observações, Descrição, Objetivo etc.).
+  el.querySelectorAll(".gantt-labels tbody tr.grid-row-atividade").forEach(tr=>{
+    tr.addEventListener("click", (e)=>{
+      if(e.target.closest("input,select,button,.col-resize")) return;
+      openAtividadeModal(byId(ATIVIDADES, tr.dataset.id));
+    });
+  });
+}
+
+function _gridOnEdicaoCampo(id, campo, el){
+  const original = byId(ATIVIDADES, id);
+  if(!original) return;
+  let valor = el.value, mudou;
+  if(campo==="percentual_concluido"){
+    valor = valor===""? null : Number(valor);
+    const valorOriginal = original.percentual_concluido==null?0:Number(original.percentual_concluido);
+    mudou = valor!==null && valor!==valorOriginal;
+  } else if(campo==="dtini_prev" || campo==="dtfim_prev"){
+    mudou = !!valor && valor !== (original[campo]||"");
+  } else if(campo==="etapa_id" || campo==="frente_trabalho_id"){
+    valor = valor || "";
+    mudou = valor !== (original[campo]||"");
+  } else { // nome
+    mudou = !!valor.trim() && valor !== (original[campo]||"");
+  }
+  if(!PENDENTES[id]) PENDENTES[id] = {};
+  if(mudou) PENDENTES[id][campo] = valor;
+  else delete PENDENTES[id][campo];
+  if(!Object.keys(PENDENTES[id]).length) delete PENDENTES[id];
+  const tr = el.closest("tr[data-id]");
+  if(tr){
+    tr.classList.remove("linha-cascata");
+    tr.classList.toggle("linha-editada", !!PENDENTES[id]);
+  }
+  _gridAtualizarToolbar();
+  _gridPreviewDebounced();
+}
+
+// Preview automático (debounced) — chama o MESMO endpoint de simulação da
+// "Editar em massa" (/edicao-lote/preview, nada é gravado) a cada pausa na
+// digitação, e aplica o resultado na tela: linhas afetadas só por cascata
+// (não editadas diretamente) têm seus campos de data atualizados sozinhos —
+// "os efeitos das alterações devem ser aplicados automaticamente" — e a
+// barra do Gantt correspondente se move junto.
+let _gridPreviewTimer = null;
+let GRID_PREVIEW_TOKEN = 0;
+function _gridPreviewDebounced(){
+  clearTimeout(_gridPreviewTimer);
+  _gridPreviewTimer = setTimeout(_gridExecutarPreview, 450);
+}
+async function _gridExecutarPreview(){
+  const ids = Object.keys(PENDENTES);
+  const meuToken = ++GRID_PREVIEW_TOKEN;
+  if(!ids.length){
+    CASCATA_PREVIA = {};
+    _gridAplicarPreviewNaTela();
+    return;
+  }
+  const edicoes = ids.map(id=>({id, ...PENDENTES[id]}));
+  let itens;
+  try{
+    const r = await api("/cronograma/edicao-lote/preview", { method:"POST", body: JSON.stringify({projeto_id: PROJETO.id, edicoes}) });
+    itens = r.itens;
+  }catch(e){ return; } // api() já mostrou o toast do erro; mantém o preview anterior na tela
+  if(meuToken !== GRID_PREVIEW_TOKEN) return; // uma edição mais nova já disparou outra chamada — descarta esta resposta desatualizada
+  const mapa = {}; itens.forEach(i=> mapa[i.id]=i);
+  CASCATA_PREVIA = mapa;
+  _gridAplicarPreviewNaTela();
+}
+function _gridAplicarPreviewNaTela(){
+  _gridAtualizarToolbar();
+  const el = $("gantt"); if(!el) return;
+  el.querySelectorAll(".gantt-labels tbody tr.grid-row-atividade[data-id]").forEach(tr=>{
+    const id = tr.dataset.id;
+    if(PENDENTES[id]) return; // edição direta sempre vale — nunca sobrescrita por cascata
+    const item = CASCATA_PREVIA[id];
+    const emCascata = !!(item && !item.editado && item.mudou);
+    tr.classList.toggle("linha-cascata", emCascata);
+    if(emCascata){
+      const iniInput = tr.querySelector('[data-campo="dtini_prev"]');
+      const fimInput = tr.querySelector('[data-campo="dtfim_prev"]');
+      // não sobrescreve o campo que o próprio usuário está digitando agora
+      // (foco atual) — só as sucessoras, que nunca têm foco nesse momento.
+      if(iniInput && document.activeElement!==iniInput) iniInput.value = item.dtini_prev_novo || "";
+      if(fimInput && document.activeElement!==fimInput) fimInput.value = item.dtfim_prev_novo || "";
+    }
+  });
+  _ganttRedesenharBarras();
+}
+
+// ---- Toolbar de edição (contador + Salvar/Descartar) ----
+function _gridAtualizarToolbar(){
+  const info = $("grid-pendentes-info");
+  const btnSalvar = $("btn-grid-salvar"), btnDescartar = $("btn-grid-descartar");
+  if(!info || !btnSalvar || !btnDescartar) return;
+  const n = Object.keys(PENDENTES).length;
+  if(n>0){
+    const cascataN = Object.values(CASCATA_PREVIA).filter(i=>!i.editado && i.mudou).length;
+    info.textContent = `${n} atividade(s) alterada(s)${cascataN?` · +${cascataN} em cascata`:""} — não salvo`;
+    btnSalvar.hidden = false; btnDescartar.hidden = false;
+  } else {
+    info.textContent = "";
+    btnSalvar.hidden = true; btnDescartar.hidden = true;
+    const painel = $("gantt-salvar-painel"); if(painel) painel.hidden = true;
+  }
+}
+function _gridDescartar(){
+  if(!Object.keys(PENDENTES).length) return;
+  PENDENTES = {}; CASCATA_PREVIA = {}; GRID_ULTIMA_ANALISE_JSON = null;
+  clearTimeout(_gridPreviewTimer);
+  $("gantt-salvar-painel").hidden = true;
+  renderCronograma();
+  toast("Alterações descartadas.");
+}
+
+// ---- Painel de Salvar (inline, substitui o antigo modal de preview pra
+// esse fluxo simples — mesma lógica de dois passos: analisar, depois
+// confirmar, com relato obrigatório/opcional quando há retrocesso). ----
+let GRID_ULTIMA_ANALISE_JSON = null, gridSalvando = false;
+async function _gridAbrirPainelSalvar(){
+  const ids = Object.keys(PENDENTES);
+  if(!ids.length){ toast("Nada para salvar.", true); return; }
+  const edicoes = ids.map(id=>({id, ...PENDENTES[id]}));
+  let r;
+  try{
+    r = await api("/cronograma/edicao-lote/preview", { method:"POST", body: JSON.stringify({projeto_id: PROJETO.id, edicoes}) });
+  }catch(e){ return; }
+  CASCATA_PREVIA = {}; r.itens.forEach(i=> CASCATA_PREVIA[i.id]=i);
+  GRID_ULTIMA_ANALISE_JSON = JSON.stringify(edicoes);
+  _gridRenderPainelSalvar(r);
+  $("gantt-salvar-painel").hidden = false;
+  _gridAplicarPreviewNaTela();
+  $("gantt-salvar-painel").scrollIntoView({behavior:"smooth", block:"nearest"});
+}
+function _gridRenderPainelSalvar(r){
+  const editadas = r.itens.filter(i=>i.editado).length;
+  const cascata = r.itens.length - editadas;
+  $("gantt-salvar-resumo").textContent = r.itens.length
+    ? `${editadas} atividade(s) editada(s) diretamente, com efeito em cascata em mais ${cascata} atividade(s) dependente(s).`
+    : "Nenhuma mudança efetiva a aplicar — os valores informados já resultam no mesmo cronograma/cadastro atual.";
+  const precisamRelato = r.itens.filter(i=>i.progresso && Object.keys(i.progresso).length);
+  $("gantt-salvar-relatos").innerHTML = precisamRelato.map(i=>{
+    const obrigatorio = i.relato_necessario === "obrigatorio";
+    return `<div class="el-relato-box">
+      <span class="muted" style="font-size:11px;">${esc(i.codigo_wbs||"")} ${esc(i.nome)} — ${obrigatorio?"Relato (obrigatório):":"Relato (opcional):"}</span>
+      <input type="text" data-relato-id="${i.id}" data-relato-obrigatorio="${obrigatorio?"1":"0"}"
+             class="${obrigatorio?"el-relato-obrigatorio":""}"
+             placeholder="${obrigatorio?"Explique o motivo do retrocesso…":"Texto do relato…"}"
+             value="${esc(i.relato_texto_sugerido||"")}">
+    </div>`;
+  }).join("");
+  $("gantt-salvar-relatos").querySelectorAll('input[data-relato-id]').forEach(inp=>{
+    inp.addEventListener("input", _gridAtualizarBotaoConfirmarSalvar);
+  });
+  _gridAtualizarBotaoConfirmarSalvar();
+}
+function _gridAtualizarBotaoConfirmarSalvar(){
+  const pendenteRelato = [...document.querySelectorAll('#gantt-salvar-relatos input[data-relato-obrigatorio="1"]')].some(i=>!i.value.trim());
+  const btn = $("btn-grid-salvar-confirmar");
+  if(btn) btn.disabled = pendenteRelato;
+}
+function _gridCancelarPainelSalvar(){
+  $("gantt-salvar-painel").hidden = true;
+}
+async function _gridConfirmarSalvar(){
+  if(gridSalvando) return;
+  const ids = Object.keys(PENDENTES);
+  const edicoes = ids.map(id=>({id, ...PENDENTES[id]}));
+  if(!edicoes.length || JSON.stringify(edicoes) !== GRID_ULTIMA_ANALISE_JSON){
+    toast("A grade mudou desde a última análise — abra o painel de salvar novamente.", true);
+    return;
+  }
+  const relatoInputs = [...document.querySelectorAll('#gantt-salvar-relatos input[data-relato-id]')];
+  const faltando = relatoInputs.find(inp=>inp.dataset.relatoObrigatorio==="1" && !inp.value.trim());
+  if(faltando){ toast("Preencha o relato obrigatório antes de confirmar.", true); faltando.focus(); return; }
+  const relatosPorId = {};
+  relatoInputs.forEach(inp=>{ if(inp.value.trim()) relatosPorId[inp.dataset.relatoId] = inp.value.trim(); });
+  edicoes.forEach(e=>{ if(relatosPorId[e.id]) e.relato_texto = relatosPorId[e.id]; });
+
+  gridSalvando = true;
+  const btn = $("btn-grid-salvar-confirmar");
+  btn.disabled = true; btn.textContent = "Salvando…";
+  try{
+    const r = await api("/cronograma/edicao-lote/confirmar", { method:"POST", body: JSON.stringify({projeto_id: PROJETO.id, edicoes}) });
+    toast(`Cronograma atualizado: ${r.atividades_editadas} atividade(s) editada(s), ${r.atividades_cascata} em cascata`
+      + (r.relatos_criados ? `, ${r.relatos_criados} relato(s) registrado(s)` : "") + ".");
+    PENDENTES = {}; CASCATA_PREVIA = {}; GRID_ULTIMA_ANALISE_JSON = null;
+    $("gantt-salvar-painel").hidden = true;
+    await loadAtividades();
+    renderDashboard(); renderCronograma();
+  }catch(e){}
+  gridSalvando = false;
+  btn.textContent = "Confirmar e salvar";
+  btn.disabled = false;
+}
+
+// ---- Gantt: zoom (granularidade do período), ajustável pelo usuário e
+// persistido no localStorage (sobrevive a F5). 47ª rodada, pedido verbatim:
+// "esse bloco não poderia se comportar como uma planilha, onde eu possa
+// ajustar os tamanhos dos campos com o mouse? Mexer na granularidade do
+// período?" — a largura da coluna "Atividade" que existia aqui virou, na 64ª
+// rodada, largura POR COLUNA da grade unificada (ver GANTT_COLUNAS_BASE/
+// GRID_COL_LARGURAS acima), então só o zoom continua aqui.
 const GANTT_ZOOMS = {
   dia:       { label: "Dia",       pxPerDay: 30  },
   semana:    { label: "Semana",    pxPerDay: 12  },
@@ -3230,20 +3695,15 @@ const GANTT_ZOOMS = {
   trimestre: { label: "Trimestre", pxPerDay: 1.8 },
 };
 function _ganttLerEstado(){
-  let zoom = "mes", largura = 420;
+  let zoom = "mes";
   try{
     const z = localStorage.getItem("cronogramaGanttZoom");
     if(z && GANTT_ZOOMS[z]) zoom = z;
-    const l = parseInt(localStorage.getItem("cronogramaGanttLargura"), 10);
-    if(!isNaN(l) && l>=160 && l<=900) largura = l;
   }catch(e){ /* localStorage indisponível (aba anônima etc.) — segue com o padrão */ }
-  return { zoom, largura };
+  return { zoom };
 }
 function _ganttSalvarEstado(){
-  try{
-    localStorage.setItem("cronogramaGanttZoom", GANTT_ESTADO.zoom);
-    localStorage.setItem("cronogramaGanttLargura", String(GANTT_ESTADO.largura));
-  }catch(e){}
+  try{ localStorage.setItem("cronogramaGanttZoom", GANTT_ESTADO.zoom); }catch(e){}
 }
 let GANTT_ESTADO = _ganttLerEstado();
 
@@ -3257,6 +3717,17 @@ function wireGanttToolbar(){
     document.querySelectorAll("#gantt-zoom-group button").forEach(b=>b.classList.toggle("active", b===btn));
     _ganttSalvarEstado();
     renderCronograma();
+  });
+  // 64ª rodada — grade unificada: Salvar/Descartar alterações pendentes.
+  $("btn-grid-salvar").addEventListener("click", _gridAbrirPainelSalvar);
+  $("btn-grid-descartar").addEventListener("click", _gridDescartar);
+  $("btn-grid-salvar-cancelar").addEventListener("click", _gridCancelarPainelSalvar);
+  $("btn-grid-salvar-confirmar").addEventListener("click", _gridConfirmarSalvar);
+  // Trava de segurança: cronograma de produção — perder uma edição em lote
+  // sem avisar custaria bem mais caro que um alerta do navegador ao tentar
+  // fechar/recarregar a aba com alterações pendentes não salvas.
+  window.addEventListener("beforeunload", (e)=>{
+    if(Object.keys(PENDENTES).length){ e.preventDefault(); e.returnValue = ""; }
   });
 }
 
@@ -3293,10 +3764,10 @@ function _ganttMarcacoes(minDate, maxDate, zoom){
   return marcacoes;
 }
 
-// Rótulo (coluna esquerda) e barra (coluna direita) são duas árvores DOM
-// separadas lado a lado. Desde o ajuste anterior da 47ª rodada, o nome da
-// atividade pode quebrar em 2+ linhas (ver .gantt-label-row sem altura fixa
-// no CSS) — e agora a largura da coluna também muda com o arrasto do mouse,
+// Rótulo (grade de colunas à esquerda) e barra (coluna direita) são duas
+// árvores DOM separadas lado a lado. O nome da atividade pode quebrar em 2+
+// linhas dentro da célula (célula de <table> sem altura fixa no CSS), e a
+// largura de cada coluna também muda com o arrasto do mouse (64ª rodada),
 // o que muda onde o texto quebra. Sem sincronizar, rótulo e barra
 // desalinhariam a partir da primeira atividade com nome comprido. Chamada
 // depois de desenhar o Gantt E depois de cada redimensionamento — e também
@@ -3309,10 +3780,14 @@ function _ganttMarcacoes(minDate, maxDate, zoom){
 function _ganttSincronizarAlturas(){
   const el = $("gantt");
   if(!el) return;
-  const labelRows = el.querySelectorAll(".gantt-labels .gantt-label-row");
+  // 64ª rodada: a coluna de rótulos virou uma <table> de verdade — o
+  // <thead> fica fora do <tbody>, então (diferente da versão anterior, que
+  // tinha uma div de cabeçalho fake DENTRO da lista de linhas) as linhas de
+  // `tbody tr` já mapeiam 1:1 com `linhas`, sem precisar pular índice 0.
+  const labelRows = el.querySelectorAll(".gantt-labels tbody tr");
   const chartRows = el.querySelectorAll(".gantt-chart .gantt-row");
   chartRows.forEach((row, i)=>{
-    const labelRow = labelRows[i+1]; // +1 pula o cabeçalho "Atividade"
+    const labelRow = labelRows[i];
     if(!labelRow) return;
     const h = Math.max(30, labelRow.offsetHeight);
     row.style.height = h+"px";
@@ -3371,15 +3846,72 @@ function _ganttDesenharDependencias(){
 }
 
 // `linhas`: lista já agrupada (ver _construirLinhasCronograma) — cada item
-// é {tipo:"grupo", ...} ou {tipo:"atividade", a}. Tabela e Gantt desenham a
-// MESMA lista, na mesma ordem, pra rótulo × barra continuarem alinhados
-// linha a linha (ver _ganttSincronizarAlturas).
+// é {tipo:"grupo", ...} ou {tipo:"atividade", a}. Desenha a grade de rótulos
+// (agora uma tabela multi-coluna editável, 64ª rodada) e o gráfico à
+// direita a partir da MESMA lista, na mesma ordem, pra rótulo × barra
+// continuarem alinhados linha a linha (ver _ganttSincronizarAlturas).
 function renderGantt(linhas, atividadesComData){
+  GANTT_ULTIMAS_LINHAS = linhas;
+  GANTT_ULTIMAS_ATIV_COM_DATA = atividadesComData;
   const el = $("gantt");
-  if(!atividadesComData.length){ el.innerHTML = `<div style="padding:30px;color:var(--text-faint);font-size:13px;">Sem datas suficientes para desenhar o gráfico.</div>`; return; }
+  if(!el) return;
+  if(!linhas.length){
+    el.innerHTML = `<div style="padding:30px;color:var(--text-faint);font-size:13px;">Nenhuma atividade encontrada para os filtros atuais.</div>`;
+    return;
+  }
 
-  const minDate = new Date(Math.min(...atividadesComData.map(a=>new Date(a.dtini_prev+"T00:00:00"))));
-  const maxDate = new Date(Math.max(...atividadesComData.map(a=>new Date(a.dtfim_prev+"T00:00:00"))));
+  const colunas = _gridColunasAtuais();
+  const colgroupHtml = colunas.map(c=>`<col style="width:${c.largura}px;">`).join("");
+  const theadHtml = _gridTheadHtml(colunas);
+  const bodyHtml = linhas.map(l => l.tipo==="grupo" ? _linhaGrupoGridHtml(l, colunas.length) : _linhaAtividadeGridHtml(l.a, colunas)).join("");
+  const somaLarguras = colunas.reduce((s,c)=>s+c.largura, 0);
+
+  el.innerHTML = `<div class="gantt" style="grid-template-columns:${somaLarguras}px 1fr;">
+    <div class="gantt-labels"><table class="grid-tabela">
+      <colgroup>${colgroupHtml}</colgroup>
+      <thead>${theadHtml}</thead>
+      <tbody>${bodyHtml}</tbody>
+    </table></div>
+    <div class="gantt-chart"></div>
+  </div>`;
+
+  el.querySelectorAll(".grid-row-grupo").forEach(tr=>{
+    tr.addEventListener("click", ()=> _ganttToggleGrupo(tr.dataset.grupo));
+  });
+  _gridWireEdicao();
+  _gridWireResize();
+  _gridWireReorder();
+
+  // O gráfico (cabeçalho + barras + ligações) é desenhado à parte, em
+  // _ganttRedesenharBarras() — é a mesma função chamada depois, a cada
+  // preview automático de cascata, sem precisar reconstruir a grade de
+  // rótulos inteira (o que perderia o foco de quem está digitando).
+  _ganttRedesenharBarras();
+  if(document.fonts && document.fonts.ready){
+    document.fonts.ready.then(_ganttSincronizarAlturas).catch(()=>{});
+  }
+  _gridAtualizarToolbar();
+}
+
+// Desenha só o lado direito (cabeçalho + linhas + barras + ligações de
+// dependência) a partir de GANTT_ULTIMAS_LINHAS/GANTT_ULTIMAS_ATIV_COM_DATA
+// e dos valores EFETIVOS (_efIni/_efFim/_efetivo — que já refletem edição
+// pendente + cascata em preview). Chamada tanto pelo render completo
+// (renderGantt) quanto, sozinha, a cada preview automático — pra mover as
+// barras em tempo real sem tocar na grade de rótulos (preserva o foco de
+// quem está editando outra linha).
+function _ganttRedesenharBarras(){
+  const chartEl = document.querySelector("#gantt .gantt-chart");
+  if(!chartEl) return;
+  const atividadesComData = GANTT_ULTIMAS_ATIV_COM_DATA;
+  if(!atividadesComData.length){
+    chartEl.innerHTML = `<div style="padding:30px;color:var(--text-faint);font-size:13px;">Sem datas suficientes para desenhar o gráfico.</div>`;
+    return;
+  }
+  const linhas = GANTT_ULTIMAS_LINHAS;
+
+  const minDate = new Date(Math.min(...atividadesComData.map(a=>new Date(_efIni(a)+"T00:00:00"))));
+  const maxDate = new Date(Math.max(...atividadesComData.map(a=>new Date(_efFim(a)+"T00:00:00"))));
   const totalDays = Math.max(1, Math.round((maxDate-minDate)/86400000)+7);
   const pxPerDay = (GANTT_ZOOMS[GANTT_ESTADO.zoom] || GANTT_ZOOMS.mes).pxPerDay;
   const chartWidth = totalDays*pxPerDay;
@@ -3401,83 +3933,39 @@ function renderGantt(linhas, atividadesComData){
     return {left, width};
   };
 
-  const labelsHtml = linhas.map((l,i)=>{
-    if(l.tipo==="grupo"){
-      const pct = l.total ? Math.round(100*l.concluidas/l.total) : 0;
-      return `<div class="gantt-label-row grupo" data-grupo="${esc(l.chave)}" title="${esc(l.nome)}">
-        <span class="toggle">${l.colapsado?"▸":"▾"}</span>
-        <span class="nome-grupo">${esc(l.nome)}</span>
-        <span class="badge-progresso">${l.concluidas}/${l.total} (${pct}%)</span>
-      </div>`;
-    }
-    const a = l.a;
-    return `<div class="gantt-label-row ${i%2?'linha-par':''}" title="${esc(a.nome)}"><span class="wbs">${esc(a.codigo_wbs||"")}</span> ${esc(a.nome)}</div>`;
-  }).join("");
-
   const rowsHtml = linhas.map((l,i)=>{
     if(l.tipo==="grupo"){
-      if(!(l.dtini_prev && l.dtfim_prev)) return `<div class="gantt-row grupo" data-grupo="${esc(l.chave)}"></div>`;
-      const {left, width} = barraPos(l.dtini_prev, l.dtfim_prev);
+      const {ini, fim} = _rollupEfetivo(l.itens||[]);
+      if(!(ini && fim)) return `<div class="gantt-row grupo" data-grupo="${esc(l.chave)}"></div>`;
+      const {left, width} = barraPos(ini, fim);
       const pct = l.total ? Math.round(100*l.concluidas/l.total) : 0;
-      return `<div class="gantt-row grupo" data-grupo="${esc(l.chave)}"><div class="gantt-bar macro" style="left:${left}px;width:${width}px;" title="${esc(l.nome)} — ${l.concluidas}/${l.total} concluídas (${pct}%), ${fmtDate(l.dtini_prev)} a ${fmtDate(l.dtfim_prev)}"></div></div>`;
+      return `<div class="gantt-row grupo" data-grupo="${esc(l.chave)}"><div class="gantt-bar macro" style="left:${left}px;width:${width}px;" title="${esc(l.nome)} — ${l.concluidas}/${l.total} concluídas (${pct}%), ${fmtDate(ini)} a ${fmtDate(fim)}"></div></div>`;
     }
     const a = l.a;
     const parClass = i%2?'linha-par':'';
-    if(!(a.dtini_prev && a.dtfim_prev)) return `<div class="gantt-row ${parClass}" data-atividade-id="${a.id}"></div>`;
-    const {left, width} = barraPos(a.dtini_prev, a.dtfim_prev);
-    const pctWidth = Math.max(0, Math.min(100, a.percentual_concluido||0));
-    return `<div class="gantt-row ${parClass}" data-atividade-id="${a.id}"><div class="gantt-bar leaf ${a.cpm_critica?'critica':''}" style="left:${left}px;width:${width}px;" title="${esc(a.nome)} (${a.percentual_concluido}%)">
+    const pend = PENDENTES[a.id];
+    const cascataItem = CASCATA_PREVIA[a.id];
+    let extraClass = "";
+    if(pend && Object.keys(pend).length) extraClass = " linha-editada";
+    else if(cascataItem && !cascataItem.editado && cascataItem.mudou) extraClass = " linha-cascata";
+    const ini = _efIni(a), fim = _efFim(a);
+    if(!(ini && fim)) return `<div class="gantt-row ${parClass}${extraClass}" data-atividade-id="${a.id}"></div>`;
+    const {left, width} = barraPos(ini, fim);
+    const pctWidth = Math.max(0, Math.min(100, _efetivo(a,"percentual_concluido")||0));
+    return `<div class="gantt-row ${parClass}${extraClass}" data-atividade-id="${a.id}"><div class="gantt-bar leaf ${a.cpm_critica?'critica':''}" style="left:${left}px;width:${width}px;" title="${esc(a.nome)} (${pctWidth}%)">
       <div class="fill" style="width:${pctWidth}%;"></div>
     </div></div>`;
   }).join("");
 
-  const largura = GANTT_ESTADO.largura;
-  el.innerHTML = `<div class="gantt" style="grid-template-columns:${largura}px 6px 1fr;">
-    <div class="gantt-labels"><div class="gantt-label-row" style="font-weight:700;border-bottom:2px solid var(--border);position:sticky;top:0;z-index:3;background:var(--surface);">Atividade</div>${labelsHtml}</div>
-    <div class="gantt-resize-handle" id="gantt-resize-handle" title="Arraste para redimensionar"></div>
-    <div class="gantt-chart" style="min-width:${chartWidth}px;">
-      <div class="gantt-header" style="width:${chartWidth}px;">${headerHtml}${todayLeft>=0&&todayLeft<=chartWidth?`<div class="gantt-today" style="left:${todayLeft}px;" title="Hoje"></div>`:""}</div>
-      <div class="gantt-rows-wrap" style="position:relative;">${gridLinesHtml}${todayLeft>=0&&todayLeft<=chartWidth?`<div class="gantt-today" style="left:${todayLeft}px;height:100%;"></div>`:""}${rowsHtml}<svg class="gantt-deps"></svg></div>
-    </div>
-  </div>`;
+  chartEl.style.minWidth = chartWidth+"px";
+  chartEl.innerHTML = `<div class="gantt-header" style="width:${chartWidth}px;">${headerHtml}${todayLeft>=0&&todayLeft<=chartWidth?`<div class="gantt-today" style="left:${todayLeft}px;" title="Hoje"></div>`:""}</div>
+    <div class="gantt-rows-wrap" style="position:relative;">${gridLinesHtml}${todayLeft>=0&&todayLeft<=chartWidth?`<div class="gantt-today" style="left:${todayLeft}px;height:100%;"></div>`:""}${rowsHtml}<svg class="gantt-deps"></svg></div>`;
 
-  el.querySelectorAll(".gantt-label-row.grupo, .gantt-row.grupo").forEach(node=>{
+  chartEl.querySelectorAll(".gantt-row.grupo").forEach(node=>{
     node.addEventListener("click", ()=> _ganttToggleGrupo(node.dataset.grupo));
   });
 
-  // Redimensionamento da coluna "Atividade" arrastando o mouse. Os
-  // listeners de mousemove/mouseup em document só existem DURANTE o
-  // arrasto — adicionados no mousedown, removidos no mouseup — pra não
-  // acumular um listener novo em document a cada nova chamada de
-  // renderGantt() (toda troca de filtro re-renderiza o Gantt do zero).
-  const handle = $("gantt-resize-handle");
-  const gridEl = el.querySelector(".gantt");
-  handle.addEventListener("mousedown", (e)=>{
-    const startX = e.clientX, startW = GANTT_ESTADO.largura;
-    handle.classList.add("dragging");
-    document.body.style.userSelect = "none";
-    e.preventDefault();
-    function onMove(ev){
-      const w = Math.max(160, Math.min(900, startW + (ev.clientX - startX)));
-      GANTT_ESTADO.largura = w;
-      gridEl.style.gridTemplateColumns = `${w}px 6px 1fr`;
-    }
-    function onUp(){
-      handle.classList.remove("dragging");
-      document.body.style.userSelect = "";
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
-      _ganttSalvarEstado();
-      _ganttSincronizarAlturas(); // a largura mudou, o texto pode ter quebrado diferente
-    }
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
-  });
-
   _ganttSincronizarAlturas();
-  if(document.fonts && document.fonts.ready){
-    document.fonts.ready.then(_ganttSincronizarAlturas).catch(()=>{});
-  }
 }
 
 // ================= DASHBOARD =================
