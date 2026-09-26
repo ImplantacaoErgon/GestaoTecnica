@@ -8,7 +8,7 @@ from datetime import datetime, date, timedelta
 
 from flask import Flask, request, jsonify, send_from_directory, send_file, abort, session
 
-from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_anomalias, cronograma_export, cronograma_comparacao, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, drive_rubricas, comparacao_folha, comparacao_folha_import, google_drive
+from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_renumeracao, cronograma_anomalias, cronograma_export, cronograma_comparacao, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, drive_rubricas, comparacao_folha, comparacao_folha_import, google_drive
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 FRONTEND_DIR = os.environ.get(
@@ -1096,7 +1096,11 @@ def create_app():
         sql = ATIVIDADE_SELECT
         if where:
             sql += " WHERE " + " AND ".join(where)
-        sql += " ORDER BY a.dtini_prev NULLS LAST, a.codigo_wbs"
+        # 68ª rodada — "o cronograma sempre deve ser apresentado ordenado pelo
+        # campo código": era por data prevista (dtini_prev). codigo_wbs_chave_ordenacao
+        # (migração 032) ordena numericamente por segmento, não como texto puro
+        # (senão "1.2.10" viria antes de "1.2.2").
+        sql += " ORDER BY codigo_wbs_chave_ordenacao(a.codigo_wbs) NULLS LAST, a.nome"
         return jsonify(db.fetch_all(sql))
 
     @app.post("/api/atividades")
@@ -2449,7 +2453,10 @@ def create_app():
                 f"a.dtini_prev <= {db.q(request.args['periodo_fim'])} "
                 f"AND a.dtfim_prev >= {db.q(request.args['periodo_inicio'])}"
             )
-        sql = ATIVIDADE_SELECT + " WHERE " + " AND ".join(where) + " ORDER BY a.dtini_prev NULLS LAST, a.codigo_wbs"
+        # 68ª rodada — mesma ordenação da grade do Cronograma (por Código, não
+        # por data), ver comentário em list_atividades() acima.
+        sql = (ATIVIDADE_SELECT + " WHERE " + " AND ".join(where)
+               + " ORDER BY codigo_wbs_chave_ordenacao(a.codigo_wbs) NULLS LAST, a.nome")
         atividades = db.fetch_all(sql)
         # Dependências do projeto inteiro (45ª rodada, coluna "Depende de" da
         # planilha) — uma única consulta pra todo mundo, mesmo padrão de
@@ -2769,6 +2776,61 @@ def create_app():
                 "atividades_cascata": resultado["atividades_cascata"],
                 "ids_alterados": resultado["ids_alterados"],
                 "relatos_criados": resultado.get("relatos_criados", 0),
+            },
+        )
+        return jsonify(resultado)
+
+    # ------------------------------------------------ renumeração do cronograma
+    # "Renumerar" (67ª rodada): recalcula o Código WBS de todas as atividades
+    # do projeto por Etapa → Frente → sequencial (e sub-hierarquia real via
+    # atividade_pai_id, quando existir) — ver cronograma_renumeracao.py para
+    # o diagnóstico completo e o esquema de numeração escolhido. Mesmo padrão
+    # preview/confirmar das outras operações em lote do cronograma acima.
+    @app.post("/api/cronograma/renumerar/preview")
+    def cronograma_renumerar_preview():
+        data = request.get_json(force=True) or {}
+        projeto_id = data.get("projeto_id")
+        if not projeto_id:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        try:
+            resultado = cronograma_renumeracao.calcular(projeto_id)
+        except ValueError as e:
+            return jsonify({"erro": str(e)}), 400
+        itens = resultado["itens"]
+        alterados = [i for i in itens if i["mudou"]]
+        return jsonify({
+            "total_atividades": len(itens),
+            "total_alteradas": len(alterados),
+            "total_ignoradas": len(resultado["ignoradas"]),
+            "itens": itens,
+            "ignoradas": resultado["ignoradas"],
+        })
+
+    @app.post("/api/cronograma/renumerar/confirmar")
+    def cronograma_renumerar_confirmar():
+        data = request.get_json(force=True) or {}
+        projeto_id = data.get("projeto_id")
+        if not projeto_id:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        projeto = db.fetch_one(f"SELECT nome FROM projetos WHERE id = {db.q(projeto_id)}")
+        if not projeto:
+            abort(404)
+        try:
+            resultado = cronograma_renumeracao.aplicar(projeto_id)
+        except ValueError as e:
+            return jsonify({"erro": str(e)}), 400
+        auditoria.registrar_evento_manual(
+            "edicao",
+            f'Renumerou o Código WBS de {resultado["atividades_renumeradas"]} atividade(s) do cronograma do '
+            f'projeto "{projeto["nome"]}"'
+            + (f' ({resultado["total_ignoradas"]} sem Etapa/Frente definidas, não renumerada(s))'
+               if resultado["total_ignoradas"] else '') + '.',
+            entidade="cronograma", entidade_id=str(projeto_id), entidade_rotulo=projeto["nome"],
+            projeto_id=projeto_id, sensivel=True,
+            detalhes={
+                "atividades_renumeradas": resultado["atividades_renumeradas"],
+                "ids_alterados": resultado["ids_alterados"],
+                "total_ignoradas": resultado["total_ignoradas"],
             },
         )
         return jsonify(resultado)

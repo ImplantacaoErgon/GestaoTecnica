@@ -27,7 +27,8 @@ def montar_snapshot(projeto_id, atividade_select_sql):
     estourado, responsáveis etc. — que o resto do sistema usa)."""
     atividades = db.fetch_all(
         atividade_select_sql
-        + f" WHERE a.projeto_id = {db.q(projeto_id)} ORDER BY a.codigo_wbs NULLS LAST, a.nome"
+        + f" WHERE a.projeto_id = {db.q(projeto_id)} "
+          "ORDER BY codigo_wbs_chave_ordenacao(a.codigo_wbs) NULLS LAST, a.nome"
     )
     marcos = db.fetch_all(f"""
         SELECT m.*, e.numero AS etapa_numero, e.nome AS etapa_nome
@@ -44,7 +45,7 @@ def montar_snapshot(projeto_id, atividade_select_sql):
         JOIN atividades a ON a.id = d.atividade_id
         JOIN atividades p ON p.id = d.predecessora_id
         WHERE a.projeto_id = {db.q(projeto_id)}
-        ORDER BY a.codigo_wbs NULLS LAST
+        ORDER BY codigo_wbs_chave_ordenacao(a.codigo_wbs) NULLS LAST
     """)
     return {"atividades": atividades, "marcos": marcos, "dependencias": dependencias}
 

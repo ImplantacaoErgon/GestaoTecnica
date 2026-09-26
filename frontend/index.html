@@ -778,6 +778,7 @@
         <button class="btn secondary small" id="btn-versoes-cronograma" title="Gera e consulta fotos completas do cronograma ao longo do tempo">🕘 Versões do cronograma</button>
         <button class="btn secondary small" id="btn-replanejar-cronograma" title="Recalcula as datas previstas das atividades incompletas, respeitando as dependências">🔄 Replanejar cronograma</button>
         <button class="btn secondary small" id="btn-edicao-lote-cronograma" title="Edita várias atividades de uma vez, tipo planilha, propagando o efeito em datas/esforço pelas dependentes">📝 Editar em massa</button>
+        <button class="btn secondary small" id="btn-renumerar-cronograma" title="Recalcula o Código WBS de todas as atividades por Etapa → Frente → sequencial">🔢 Renumerar</button>
         <button class="btn danger small" id="btn-remover-cronograma" title="Apaga todas as atividades e marcos deste projeto">Remover cronograma inteiro</button>
         <button class="btn small" id="btn-new-atividade">+ Nova atividade</button>
       </div>
@@ -2164,6 +2165,45 @@
   </div>
 </div>
 
+<!-- ================= MODAL: RENUMERAR CRONOGRAMA (67ª rodada) ================= -->
+<div class="overlay" id="overlay-renumerar-cronograma" hidden>
+  <div class="modal" style="max-width:980px;">
+    <div class="modal-head"><h2>🔢 Renumerar cronograma</h2><button class="btn ghost" id="rn-close">✕</button></div>
+    <div class="modal-body single-col">
+      <p class="muted" style="margin-bottom:10px;">Recalcula o <strong>Código WBS</strong> de todas as atividades do
+      projeto, agrupando por <strong>Etapa → Frente de trabalho → sequencial</strong> (subatividades reais, quando
+      existirem, ficam aninhadas sob o código do pai). A ordem relativa dentro de cada grupo é preservada — só o
+      prefixo do código muda. Não afeta dependências, relatos, nem nenhum outro dado — o Código WBS é só um campo de
+      organização.</p>
+      <div class="field full" style="margin-bottom:10px;">
+        <button class="btn secondary" id="rn-analisar">Analisar</button>
+      </div>
+      <div id="rn-resultado" hidden>
+        <div id="rn-resumo" class="muted" style="margin-bottom:10px;"></div>
+        <div id="rn-vazio" class="muted" hidden>Nenhuma atividade precisa de código novo — a numeração já está de acordo com o esquema Etapa → Frente → sequencial.</div>
+        <div id="rn-ignoradas-wrap" hidden style="margin-bottom:14px;">
+          <h3 style="margin:0 0 8px;">Sem Etapa e/ou Frente definidas — não renumeradas</h3>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Código atual</th><th>Atividade</th><th>Pendência</th></tr></thead>
+            <tbody id="rn-ignoradas-tbody"></tbody>
+          </table></div>
+        </div>
+        <div class="table-wrap" id="rn-tabela-wrap"><table>
+          <thead><tr><th>Etapa</th><th>Frente</th><th>Atividade</th><th>Código (atual → novo)</th></tr></thead>
+          <tbody id="rn-atividades-tbody"></tbody>
+        </table></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <span></span>
+      <div style="display:flex;gap:8px;">
+        <button class="btn secondary" id="rn-cancelar">Cancelar</button>
+        <button class="btn" id="rn-confirmar" disabled>Confirmar renumeração</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ================= MODAL: EDIÇÃO EM MASSA DO CRONOGRAMA ================= -->
 <div class="overlay" id="overlay-edicao-lote-cronograma" hidden style="align-items:stretch;padding:14px;">
   <div class="modal" style="max-width:none;width:98vw;display:flex;flex-direction:column;">
@@ -2805,7 +2845,7 @@ async function afterProjetoReady(){
   ]);
   aplicarMarcaNoTopo();
   fillStaticSelects();
-  wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireGanttToolbar(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireExportarCronograma(); wireRemoverCronograma(); wireRemoverRequisitos(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma();
+  wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireGanttToolbar(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireExportarCronograma(); wireRemoverCronograma(); wireRemoverRequisitos(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma(); wireRenumerarCronograma();
   wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros(); wireRubricaModal(); wireRubricasFiltros(); wireImportRubricas(); wireComparacaoFolhaPane(); wireComparacaoFolhaDashboard();
   setupCsvTemplateLink();
   await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias(), loadItensMigracao(), loadRubricas()]);
@@ -3262,6 +3302,38 @@ function wireFilters(){
 // diferentes (nomes de Etapa/Frente não são únicos globalmente).
 function _chaveGrupoAtividade(a){ return `${a.etapa_id||""}|${a.frente_trabalho_id||""}`; }
 
+// 68ª rodada — "o cronograma sempre deve ser apresentado ordenado pelo
+// campo código": tabela e Gantt eram ordenados por data prevista (dtini_prev),
+// tanto dentro de cada grupo quanto a ordem dos próprios grupos — trocado
+// por ordenação NATURAL do Código WBS (mesma lógica de
+// cronograma_renumeracao.py::_chave_natural e da função SQL
+// codigo_wbs_chave_ordenacao, migração 032): compara segmento a segmento
+// como número quando possível ("1.2.10" depois de "1.2.2", não antes, como
+// daria a comparação de texto pura), e um código que é prefixo de outro
+// (ex. "1.2" antes de "1.2.1") vem primeiro — o pai antes dos filhos.
+// Código vazio/nulo sempre por último.
+function _codigoWbsChave(codigo){
+  if(!codigo) return null;
+  return String(codigo).split(/[.\-]/).filter(s=>s!=="")
+    .map(seg => /^\d+$/.test(seg) ? [0, parseInt(seg,10)] : [1, seg]);
+}
+function _compareCodigoWbs(a, b){
+  const ca = _codigoWbsChave(a), cb = _codigoWbsChave(b);
+  if(ca===null && cb===null) return 0;
+  if(ca===null) return 1;
+  if(cb===null) return -1;
+  const len = Math.max(ca.length, cb.length);
+  for(let i=0;i<len;i++){
+    const xa = ca[i], xb = cb[i];
+    if(xa===undefined) return -1;
+    if(xb===undefined) return 1;
+    if(xa[0]!==xb[0]) return xa[0]-xb[0];
+    if(xa[0]===0){ if(xa[1]!==xb[1]) return xa[1]-xb[1]; }
+    else { const c = String(xa[1]).localeCompare(String(xb[1])); if(c!==0) return c; }
+  }
+  return 0;
+}
+
 function _agruparParaGantt(list){
   const grupos = new Map();
   list.forEach(a=>{
@@ -3273,12 +3345,11 @@ function _agruparParaGantt(list){
     grupos.get(chave).itens.push(a);
   });
   const arr = [...grupos.values()];
-  arr.forEach(g => g.itens.sort((a,b)=>(a.dtini_prev||"9999").localeCompare(b.dtini_prev||"9999")));
-  arr.sort((ga,gb)=>{
-    const da = ga.itens.find(a=>a.dtini_prev)?.dtini_prev || "9999";
-    const db = gb.itens.find(a=>a.dtini_prev)?.dtini_prev || "9999";
-    return da.localeCompare(db) || ga.frente_nome.localeCompare(gb.frente_nome);
-  });
+  arr.forEach(g => g.itens.sort((a,b)=>_compareCodigoWbs(a.codigo_wbs, b.codigo_wbs)));
+  arr.sort((ga,gb)=>
+    _compareCodigoWbs(ga.itens[0]?.codigo_wbs, gb.itens[0]?.codigo_wbs)
+    || ga.frente_nome.localeCompare(gb.frente_nome)
+  );
   return arr;
 }
 
@@ -3327,7 +3398,10 @@ function _ganttToggleGrupo(chave){
 }
 
 function renderCronograma(){
-  const list = applyFilters(ATIVIDADES).sort((a,b)=>(a.dtini_prev||"9999").localeCompare(b.dtini_prev||"9999"));
+  // 68ª rodada: ordenado por Código WBS (natural), não mais por data — ver
+  // _compareCodigoWbs()/_agruparParaGantt() logo abaixo, que é quem de fato
+  // decide a ordem final de exibição (grupo + itens dentro do grupo).
+  const list = applyFilters(ATIVIDADES).sort((a,b)=>_compareCodigoWbs(a.codigo_wbs, b.codigo_wbs));
   const linhas = _construirLinhasCronograma(list);
   // 64ª rodada — "Unifique esses dois quadros": a antiga tabela separada
   // (renderAtividadesTable/#atividades-tbody) foi incorporada na própria
@@ -7049,6 +7123,92 @@ async function confirmarReplanejamento(){
   rpConfirmando = false;
   $("rp-confirmar").textContent = "Confirmar replanejamento";
   $("rp-confirmar").disabled = false;
+}
+
+// ================= RENUMERAR CRONOGRAMA (67ª rodada) =================
+// Recalcula o Código WBS de todas as atividades por Etapa → Frente →
+// sequencial (ver backend/app/cronograma_renumeracao.py para o esquema
+// completo). Mesmo padrão preview/confirmar do Replanejamento acima.
+let rnAnalisando = false, rnConfirmando = false, rnJaAnalisado = false;
+
+function wireRenumerarCronograma(){
+  $("btn-renumerar-cronograma").addEventListener("click", abrirRenumerarModal);
+  $("rn-close").addEventListener("click", fecharRenumerarModal);
+  $("rn-cancelar").addEventListener("click", fecharRenumerarModal);
+  $("overlay-renumerar-cronograma").addEventListener("click", e=>{ if(e.target.id==="overlay-renumerar-cronograma") fecharRenumerarModal(); });
+  $("rn-analisar").addEventListener("click", analisarRenumeracao);
+  $("rn-confirmar").addEventListener("click", confirmarRenumeracao);
+}
+
+function abrirRenumerarModal(){
+  $("rn-resultado").hidden = true;
+  $("rn-confirmar").disabled = true;
+  rnJaAnalisado = false;
+  $("overlay-renumerar-cronograma").hidden = false;
+}
+function fecharRenumerarModal(){ $("overlay-renumerar-cronograma").hidden = true; }
+
+async function analisarRenumeracao(){
+  if(rnAnalisando) return;
+  rnAnalisando = true;
+  $("rn-analisar").disabled = true; $("rn-analisar").textContent = "Analisando…";
+  try{
+    const r = await api("/cronograma/renumerar/preview", {
+      method: "POST",
+      body: JSON.stringify({ projeto_id: PROJETO.id }),
+    });
+    renderRenumerarPreview(r);
+    rnJaAnalisado = true;
+    $("rn-confirmar").disabled = r.total_alteradas === 0;
+  }catch(e){ rnJaAnalisado = false; }
+  rnAnalisando = false;
+  $("rn-analisar").disabled = false; $("rn-analisar").textContent = "Analisar";
+}
+
+function renderRenumerarPreview(r){
+  $("rn-resultado").hidden = false;
+  $("rn-vazio").hidden = r.total_alteradas !== 0;
+  $("rn-tabela-wrap").hidden = r.total_alteradas === 0;
+  $("rn-resumo").textContent = `${r.total_alteradas} de ${r.total_atividades} atividade(s) vão receber um Código WBS novo`
+    + (r.total_ignoradas ? `. ${r.total_ignoradas} atividade(s) sem Etapa e/ou Frente definidas ficam de fora (veja abaixo).` : ".");
+  const alteradas = r.itens.filter(i=>i.mudou);
+  $("rn-atividades-tbody").innerHTML = alteradas.map(i=>`
+    <tr>
+      <td>${esc(i.etapa_nome||"—")}</td>
+      <td>${esc(i.frente_nome||"—")}</td>
+      <td>${i.eh_subatividade ? "&nbsp;&nbsp;↳ " : ""}${esc(i.nome)}</td>
+      <td class="mono">${esc(i.codigo_atual||"—")} → <strong>${esc(i.codigo_novo)}</strong></td>
+    </tr>`).join("");
+  $("rn-ignoradas-wrap").hidden = (r.ignoradas||[]).length === 0;
+  $("rn-ignoradas-tbody").innerHTML = (r.ignoradas||[]).map(i=>`
+    <tr>
+      <td class="mono">${esc(i.codigo_atual||"—")}</td>
+      <td>${esc(i.nome)}</td>
+      <td>${[i.sem_etapa?"sem Etapa":null, i.sem_frente?"sem Frente":null].filter(Boolean).join(" e ")}</td>
+    </tr>`).join("");
+}
+
+async function confirmarRenumeracao(){
+  if(rnConfirmando) return;
+  if(!rnJaAnalisado){
+    toast("Analise antes de confirmar.", true);
+    return;
+  }
+  rnConfirmando = true;
+  $("rn-confirmar").disabled = true; $("rn-confirmar").textContent = "Aplicando…";
+  try{
+    const r = await api("/cronograma/renumerar/confirmar", {
+      method: "POST",
+      body: JSON.stringify({ projeto_id: PROJETO.id }),
+    });
+    toast(`Cronograma renumerado: ${r.atividades_renumeradas} atividade(s) com Código WBS novo.`);
+    await loadAtividades();
+    renderDashboard(); renderCronograma();
+    fecharRenumerarModal();
+  }catch(e){}
+  rnConfirmando = false;
+  $("rn-confirmar").textContent = "Confirmar renumeração";
+  $("rn-confirmar").disabled = false;
 }
 
 // ================= EDIÇÃO EM MASSA DO CRONOGRAMA (39ª rodada) =================
