@@ -310,18 +310,51 @@
   .gantt-label-row{min-height:30px;display:flex;align-items:center;padding:4px 10px;font-size:12px;border-bottom:1px solid var(--border);gap:6px;line-height:1.3;}
   .gantt-label-row.linha-par{background:rgba(127,127,127,.05);}
   .gantt-label-row .wbs{color:var(--text-faint);font-family:'IBM Plex Mono';font-size:11px;flex-shrink:0;}
+  /* Linha de grupo (Etapa/Frente — "atividade macro", 63ª rodada): resumo
+     clicável que expande/recolhe as atividades daquele grupo, com contagem
+     de concluídas. Visualmente destacada (fundo/negrito) pra separar do
+     resto da grade, igual a uma ferramenta de cronograma "de verdade"
+     (ProjectLibre/MS Project) — foi o modelo pedido pelo usuário. */
+  .gantt-label-row.grupo{cursor:pointer;font-weight:700;background:var(--surface-2);user-select:none;}
+  .gantt-label-row.grupo:hover{background:var(--border);}
+  .gantt-label-row.grupo .toggle{flex-shrink:0;width:14px;text-align:center;color:var(--text-muted);font-weight:400;}
+  .gantt-label-row.grupo .nome-grupo{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .gantt-label-row.grupo .badge-progresso{margin-left:auto;flex-shrink:0;font-size:10px;font-weight:400;color:var(--text-muted);font-family:'IBM Plex Mono';}
   .gantt-chart{position:relative;}
-  .gantt-header{height:24px;position:sticky;top:0;z-index:2;border-bottom:1px solid var(--border);background:var(--surface-2);}
+  .gantt-header{height:24px;position:sticky;top:0;z-index:3;border-bottom:1px solid var(--border);background:var(--surface-2);}
   .gantt-header span{position:absolute;top:5px;font-size:10px;color:var(--text-faint);font-family:'IBM Plex Mono';white-space:nowrap;}
   .gantt-header span.major{color:var(--text-muted);font-weight:600;}
   .gantt-grid-line{position:absolute;top:0;bottom:0;width:1px;background:var(--border);opacity:.5;}
   .gantt-grid-line.major{opacity:1;}
   .gantt-row{height:30px;position:relative;border-bottom:1px solid var(--border);}
   .gantt-row.linha-par{background:rgba(127,127,127,.05);}
-  .gantt-bar{position:absolute;top:6px;height:18px;border-radius:5px;opacity:.85;z-index:1;}
-  .gantt-bar .fill{position:absolute;left:0;top:0;bottom:0;background:rgba(255,255,255,.35);border-radius:5px 0 0 5px;}
-  .gantt-bar.critica{outline:2px solid var(--danger);outline-offset:1px;}
+  .gantt-row.grupo{cursor:pointer;background:var(--surface-2);}
+  .gantt-row.grupo:hover{background:var(--border);}
+  /* Barra de atividade (folha): contorno claro pela duração prevista
+     inteira + preenchimento em var(--text) (preto no tema claro) só na
+     fração correspondente ao % concluído — modelo clássico de Gantt
+     "profissional" (pedido explícito do usuário), em vez da cor por Frente
+     usada até a 62ª rodada. var(--text) em vez de #000 fixo: no tema escuro
+     --text já é claro, então o preenchimento continua com contraste alto
+     contra o fundo escuro (preto puro sumiria). */
+  .gantt-bar{position:absolute;top:6px;height:18px;border-radius:4px;z-index:1;}
+  .gantt-bar.leaf{background:var(--surface);border:1.5px solid var(--border);}
+  .gantt-bar.leaf .fill{position:absolute;left:0;top:-1.5px;bottom:-1.5px;background:var(--text);border-radius:4px;max-width:100%;}
+  .gantt-bar.macro{background:var(--text);border-radius:3px;}
+  .gantt-bar.critica.leaf{border-color:var(--danger);}
+  .gantt-bar.critica .fill{outline:1.5px solid var(--danger);outline-offset:-1.5px;}
   .gantt-today{position:absolute;top:0;bottom:0;width:1px;background:var(--danger);z-index:5;}
+  /* Ligações de dependência (63ª rodada — "as atividades devem sofrer
+     efeitos das dependências"): linha em cotovelo do fim da predecessora
+     até o início da sucessora, desenhada por cima das barras depois que a
+     sincronização de alturas roda (ver _ganttDesenharDependencias). Fica
+     vermelha/tracejada quando a sucessora começa ANTES do fim da
+     predecessora — sinal visual de que o prazo não respeita a dependência
+     (sem mover data nenhuma sozinha: o sistema já trata isso deliberadamente
+     como decisão manual do usuário, ver cronograma_anomalias.py). */
+  .gantt-deps{position:absolute;top:0;left:0;z-index:2;pointer-events:none;overflow:visible;}
+  .gantt-dep-link{fill:none;stroke:var(--text-faint);stroke-width:1.25;opacity:.8;}
+  .gantt-dep-link.violada{stroke:var(--danger);stroke-width:1.5;stroke-dasharray:3,2;opacity:.9;}
 
   /* Tabela abaixo do Gantt, na página de Cronograma: limitada a ~25 linhas
      visíveis com rolagem própria pro resto — pedido do usuário, 47ª rodada:
@@ -2314,6 +2347,10 @@ async function chamarAuthApi(path, body){
 let USUARIO_LOGADO = null;
 let PARAMETROS = null; // logo + nome da empresa (Configurações > Parâmetros) — ver carregarParametros()
 let PROJETO=null, PROJETOS=[], ETAPAS=[], FRENTES=[], TIPOS=[], RECURSOS=[], USUARIOS=[], ATIVIDADES=[], REQUISITOS=[], RISCOS=[], MARCOS=[], CALENDARIO=[], MANUAIS=[], FATURAS=[], PENDENCIAS=[], ITENS_MIGRACAO=[], RUBRICAS=[];
+// Todas as dependências do projeto (63ª rodada) — carregada junto com
+// ATIVIDADES (ver loadAtividades()) pra desenhar as ligações no Gantt sem
+// precisar de uma chamada extra por atividade.
+let DEPENDENCIAS_PROJETO = [];
 const PENDENCIA_STATUS_COR = {"Aberta":"warn", "Em andamento":"accent", "Resolvida":"ok", "Cancelada":"faint"};
 let editingAtividadeId=null, editingRequisitoId=null, editingRiscoId=null, editingMarcoId=null, editingPendenciaId=null;
 let atDepCandidatas = []; // candidatas a predecessora no modal de atividade (57ª rodada — busca + ordenação por Código WBS)
@@ -2943,7 +2980,10 @@ function goToView(view){
 
 // ================= ATIVIDADES: carregar/filtrar =================
 async function loadAtividades(){
-  ATIVIDADES = await api(`/atividades?projeto_id=${PROJETO.id}`);
+  [ATIVIDADES, DEPENDENCIAS_PROJETO] = await Promise.all([
+    api(`/atividades?projeto_id=${PROJETO.id}`),
+    api(`/projetos/${PROJETO.id}/dependencias`),
+  ]);
 }
 
 function currentFilters(){
@@ -3013,10 +3053,93 @@ function wireFilters(){
 }
 
 // ================= CRONOGRAMA: tabela + gantt =================
+// 63ª rodada — "a visualização e a manutenção do cronograma deve ser mais
+// profissional": tabela e Gantt passam a ser agrupados por Etapa/Frente
+// ("atividade macro"), com a linha de grupo expansível/recolhível, barra
+// preta cobrindo do início da 1ª atividade ao fim da última, e as barras de
+// atividade com preenchimento preto proporcional ao % concluído. Tabela e
+// Gantt são desenhados a partir da MESMA lista de linhas (grupo + folhas),
+// na mesma ordem — é o que mantém rótulo (tabela/coluna esquerda do Gantt)
+// e barra alinhados linha a linha (ver _ganttSincronizarAlturas()).
+
+// Chave de agrupamento: (etapa_id, frente_trabalho_id) — por id, não por
+// nome, pra não juntar por engano duas frentes com o mesmo nome em etapas
+// diferentes (nomes de Etapa/Frente não são únicos globalmente).
+function _chaveGrupoAtividade(a){ return `${a.etapa_id||""}|${a.frente_trabalho_id||""}`; }
+
+function _agruparParaGantt(list){
+  const grupos = new Map();
+  list.forEach(a=>{
+    const chave = _chaveGrupoAtividade(a);
+    if(!grupos.has(chave)) grupos.set(chave, {
+      chave, etapa_nome: a.etapa_nome, frente_nome: a.frente_nome || "Sem frente/etapa",
+      frente_cor: a.frente_cor, itens: [],
+    });
+    grupos.get(chave).itens.push(a);
+  });
+  const arr = [...grupos.values()];
+  arr.forEach(g => g.itens.sort((a,b)=>(a.dtini_prev||"9999").localeCompare(b.dtini_prev||"9999")));
+  arr.sort((ga,gb)=>{
+    const da = ga.itens.find(a=>a.dtini_prev)?.dtini_prev || "9999";
+    const db = gb.itens.find(a=>a.dtini_prev)?.dtini_prev || "9999";
+    return da.localeCompare(db) || ga.frente_nome.localeCompare(gb.frente_nome);
+  });
+  return arr;
+}
+
+// Estado de grupos recolhidos — persistido (mesmo padrão de GANTT_ESTADO,
+// ver _ganttLerEstado), assim como zoom/largura sobrevive a um F5.
+function _ganttLerColapsados(){
+  try{ return new Set(JSON.parse(localStorage.getItem("cronogramaGanttColapsados")||"[]")); }
+  catch(e){ return new Set(); }
+}
+function _ganttSalvarColapsados(){
+  try{ localStorage.setItem("cronogramaGanttColapsados", JSON.stringify([...GANTT_GRUPOS_COLAPSADOS])); }catch(e){}
+}
+let GANTT_GRUPOS_COLAPSADOS = _ganttLerColapsados();
+
+// Monta a lista flat de linhas (grupo + folhas visíveis, respeitando
+// recolhimento) que tabela e Gantt desenham em paralelo. A linha de grupo
+// carrega datas de início/fim calculadas como ROLLUP dos filhos (menor
+// início previsto, maior fim previsto — pedido explícito do usuário) e
+// contagem de concluídas, pra dar uma noção de progresso sem abrir o grupo.
+function _construirLinhasCronograma(list){
+  const grupos = _agruparParaGantt(list);
+  const linhas = [];
+  grupos.forEach(g=>{
+    const comData = g.itens.filter(a=>a.dtini_prev && a.dtfim_prev);
+    const dtini_prev = comData.length ? comData.reduce((m,a)=>a.dtini_prev<m?a.dtini_prev:m, comData[0].dtini_prev) : null;
+    const dtfim_prev = comData.length ? comData.reduce((m,a)=>a.dtfim_prev>m?a.dtfim_prev:m, comData[0].dtfim_prev) : null;
+    const concluidas = g.itens.filter(a=>STATUS_FAMILIA_CONCLUIDA.includes(a.status)).length;
+    const colapsado = GANTT_GRUPOS_COLAPSADOS.has(g.chave);
+    linhas.push({
+      tipo: "grupo", chave: g.chave, nome: g.frente_nome, etapa_nome: g.etapa_nome,
+      dtini_prev, dtfim_prev, total: g.itens.length, concluidas, colapsado,
+    });
+    if(!colapsado) g.itens.forEach(a => linhas.push({tipo:"atividade", a}));
+  });
+  return linhas;
+}
+
+function _ganttToggleGrupo(chave){
+  if(GANTT_GRUPOS_COLAPSADOS.has(chave)) GANTT_GRUPOS_COLAPSADOS.delete(chave);
+  else GANTT_GRUPOS_COLAPSADOS.add(chave);
+  _ganttSalvarColapsados();
+  renderCronograma();
+}
+
 function renderCronograma(){
   const list = applyFilters(ATIVIDADES).sort((a,b)=>(a.dtini_prev||"9999").localeCompare(b.dtini_prev||"9999"));
-  renderAtividadesTable(list);
-  renderGantt(list);
+  const linhas = _construirLinhasCronograma(list);
+  renderAtividadesTable(linhas, list.length);
+  // A escala de datas do Gantt (minDate/maxDate) é calculada sobre TODAS as
+  // atividades filtradas, não só as visíveis em `linhas` — se calculasse só
+  // sobre `linhas`, recolher um grupo removeria suas atividades da conta e
+  // encolheria o intervalo, deixando a própria barra-resumo (preta, com as
+  // datas ORIGINAIS do grupo inteiro) fora da escala — nascendo com left
+  // negativo e vazando visualmente por cima da coluna de rótulos à esquerda
+  // (bug visto no teste E2E desta rodada antes deste ajuste).
+  renderGantt(linhas, list.filter(a=>a.dtini_prev && a.dtfim_prev));
 }
 
 function horasCell(a){
@@ -3050,13 +3173,19 @@ function responsaveisCell(a){
 // (ver #view-cronograma .table-wrap{max-height} no CSS). Com nowrap a linha
 // toda vez que precisar de mais espaço estoura a largura da tabela (que já
 // tem rolagem horizontal própria), não a altura da linha.
-function renderAtividadesTable(list){
-  if(!list.length){
-    $("atividades-tbody").innerHTML = `<tr class="empty-row"><td colspan="10">Nenhuma atividade encontrada para os filtros atuais.</td></tr>`;
-    return;
-  }
-  $("atividades-tbody").innerHTML = list.map(a=>`
-    <tr class="clickable" data-id="${a.id}">
+function _linhaGrupoTableHtml(l){
+  const pct = l.total ? Math.round(100*l.concluidas/l.total) : 0;
+  return `<tr class="grupo-row clickable" data-grupo="${esc(l.chave)}">
+    <td colspan="10">
+      <span class="toggle" style="display:inline-block;width:14px;">${l.colapsado?"▸":"▾"}</span>
+      <strong>${esc(l.nome)}</strong>
+      <span class="muted" style="margin-left:6px;">${l.total} atividade(s) · ${fmtDate(l.dtini_prev)} → ${fmtDate(l.dtfim_prev)}</span>
+      <span class="mono muted" style="float:right;">${l.concluidas}/${l.total} concluídas (${pct}%)</span>
+    </td>
+  </tr>`;
+}
+function _linhaAtividadeTableHtml(a){
+  return `<tr class="clickable" data-id="${a.id}">
       <td class="mono">${esc(a.codigo_wbs||"—")}</td>
       <td>${a.eh_atividade_master?`<span title="Atividade master (entregável mestre do projeto)">★</span> `:""}${a.eh_entregavel?`<span title="Entregável (atrelado a faturamento)">💰</span> `:""}${a.data_execucao_fixada?`<span title="Data de execução fixada — Início/Fim previsto só mudam manualmente">📌</span> `:""}${esc(a.nome)}${a.requisito_tr_codigo?`<div class="muted" style="font-size:11px;">TR: ${esc(a.requisito_tr_codigo)}</div>`:""}</td>
       <td>${a.etapa_numero!=null?a.etapa_numero+".":""}${esc(a.frente_nome||"—")}</td>
@@ -3067,7 +3196,21 @@ function renderAtividadesTable(list){
       <td>${horasCell(a)}</td>
       <td>${responsaveisCell(a)}</td>
       <td>${a.cpm_critica? pill("Crítica","danger") : ""}</td>
-    </tr>`).join("");
+    </tr>`;
+}
+// 63ª rodada: `linhas` já vem agrupada (ver _construirLinhasCronograma) —
+// `totalAtividades` é a contagem ANTES do agrupamento, só pra decidir a
+// mensagem de "nenhuma atividade" (uma lista com filtro que não bate com
+// nada não tem nem grupo nem folha).
+function renderAtividadesTable(linhas, totalAtividades){
+  if(!totalAtividades){
+    $("atividades-tbody").innerHTML = `<tr class="empty-row"><td colspan="10">Nenhuma atividade encontrada para os filtros atuais.</td></tr>`;
+    return;
+  }
+  $("atividades-tbody").innerHTML = linhas.map(l => l.tipo==="grupo" ? _linhaGrupoTableHtml(l) : _linhaAtividadeTableHtml(l.a)).join("");
+  $("atividades-tbody").querySelectorAll("tr.grupo-row").forEach(tr=>{
+    tr.addEventListener("click", ()=> _ganttToggleGrupo(tr.dataset.grupo));
+  });
   $("atividades-tbody").querySelectorAll("tr[data-id]").forEach(tr=>{
     tr.addEventListener("click", ()=>openAtividadeModal(byId(ATIVIDADES, tr.dataset.id)));
   });
@@ -3176,15 +3319,67 @@ function _ganttSincronizarAlturas(){
     const bar = row.querySelector(".gantt-bar");
     if(bar) bar.style.top = Math.round((h-18)/2)+"px";
   });
+  _ganttDesenharDependencias();
 }
 
-function renderGantt(list){
-  const withDates = list.filter(a=>a.dtini_prev && a.dtfim_prev);
+// 63ª rodada — "as atividades devem sofrer efeitos das dependências":
+// desenha uma ligação (linha em cotovelo, com seta) do fim de cada
+// predecessora até o início de cada sucessora, usando a posição REAL de
+// cada barra já desenhada (lida depois de _ganttSincronizarAlturas ajustar
+// a altura de cada linha ao texto do rótulo). Só desenha quando as duas
+// pontas estão visíveis no momento (não escondidas por um grupo recolhido
+// ou por um filtro) — procura a barra pelo atributo data-atividade-id.
+// Fica vermelha/tracejada quando a sucessora começa antes do fim da
+// predecessora mais o lag (não cobre SS/FF/SF com precisão total, só FS —
+// a maioria esmagadora dos casos reais, ver cpm.py — mas nunca marca uma
+// dependência como violada por engano nesses tipos: só avisa quando dá pra
+// ter certeza).
+function _ganttDesenharDependencias(){
   const el = $("gantt");
-  if(!withDates.length){ el.innerHTML = `<div style="padding:30px;color:var(--text-faint);font-size:13px;">Sem datas suficientes para desenhar o gráfico.</div>`; return; }
+  if(!el) return;
+  const svg = el.querySelector(".gantt-deps");
+  const wrap = el.querySelector(".gantt-rows-wrap");
+  if(!svg || !wrap) return;
+  const posPorId = {};
+  wrap.querySelectorAll(".gantt-row[data-atividade-id]").forEach(row=>{
+    const bar = row.querySelector(".gantt-bar");
+    if(!bar) return;
+    posPorId[row.dataset.atividadeId] = {
+      top: row.offsetTop, height: row.offsetHeight,
+      left: parseFloat(bar.style.left)||0, width: parseFloat(bar.style.width)||0,
+    };
+  });
+  let pathsHtml = "";
+  DEPENDENCIAS_PROJETO.forEach(d=>{
+    const p = posPorId[d.predecessora_id], s = posPorId[d.atividade_id];
+    if(!p || !s) return; // uma das pontas não está visível agora (grupo recolhido/filtro)
+    const px = p.left + p.width, py = p.top + p.height/2;
+    const sx = s.left, sy = s.top + s.height/2;
+    const violada = (d.tipo==="FS" || !d.tipo) && sx < px - 0.5;
+    const midX = px + Math.max(8, (sx-px)/2);
+    const dAttr = Math.abs(py-sy) < 0.5
+      ? `M ${px} ${py} L ${sx} ${sy}`
+      : `M ${px} ${py} L ${midX} ${py} L ${midX} ${sy} L ${sx} ${sy}`;
+    pathsHtml += `<path d="${dAttr}" class="gantt-dep-link${violada?' violada':''}" marker-end="url(#gantt-arrow${violada?'-danger':''})"/>`;
+  });
+  svg.innerHTML = `<defs>
+    <marker id="gantt-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--text-faint)"/></marker>
+    <marker id="gantt-arrow-danger" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--danger)"/></marker>
+  </defs>${pathsHtml}`;
+  svg.setAttribute("width", wrap.scrollWidth);
+  svg.setAttribute("height", wrap.scrollHeight);
+}
 
-  const minDate = new Date(Math.min(...withDates.map(a=>new Date(a.dtini_prev+"T00:00:00"))));
-  const maxDate = new Date(Math.max(...withDates.map(a=>new Date(a.dtfim_prev+"T00:00:00"))));
+// `linhas`: lista já agrupada (ver _construirLinhasCronograma) — cada item
+// é {tipo:"grupo", ...} ou {tipo:"atividade", a}. Tabela e Gantt desenham a
+// MESMA lista, na mesma ordem, pra rótulo × barra continuarem alinhados
+// linha a linha (ver _ganttSincronizarAlturas).
+function renderGantt(linhas, atividadesComData){
+  const el = $("gantt");
+  if(!atividadesComData.length){ el.innerHTML = `<div style="padding:30px;color:var(--text-faint);font-size:13px;">Sem datas suficientes para desenhar o gráfico.</div>`; return; }
+
+  const minDate = new Date(Math.min(...atividadesComData.map(a=>new Date(a.dtini_prev+"T00:00:00"))));
+  const maxDate = new Date(Math.max(...atividadesComData.map(a=>new Date(a.dtfim_prev+"T00:00:00"))));
   const totalDays = Math.max(1, Math.round((maxDate-minDate)/86400000)+7);
   const pxPerDay = (GANTT_ZOOMS[GANTT_ESTADO.zoom] || GANTT_ZOOMS.mes).pxPerDay;
   const chartWidth = totalDays*pxPerDay;
@@ -3200,15 +3395,39 @@ function renderGantt(list){
   const today = new Date(new Date().toDateString());
   const todayLeft = Math.round((today-minDate)/86400000)*pxPerDay;
 
-  const labelsHtml = list.map((a,i)=>`<div class="gantt-label-row ${i%2?'linha-par':''}" title="${esc(a.nome)}"><span class="wbs">${esc(a.codigo_wbs||"")}</span> ${esc(a.nome)}</div>`).join("");
-  const rowsHtml = list.map((a,i)=>{
+  const barraPos = (dtini_prev, dtfim_prev) => {
+    const left = Math.round((new Date(dtini_prev+"T00:00:00")-minDate)/86400000)*pxPerDay;
+    const width = Math.max(pxPerDay, (Math.round((new Date(dtfim_prev+"T00:00:00")-new Date(dtini_prev+"T00:00:00"))/86400000)+1)*pxPerDay);
+    return {left, width};
+  };
+
+  const labelsHtml = linhas.map((l,i)=>{
+    if(l.tipo==="grupo"){
+      const pct = l.total ? Math.round(100*l.concluidas/l.total) : 0;
+      return `<div class="gantt-label-row grupo" data-grupo="${esc(l.chave)}" title="${esc(l.nome)}">
+        <span class="toggle">${l.colapsado?"▸":"▾"}</span>
+        <span class="nome-grupo">${esc(l.nome)}</span>
+        <span class="badge-progresso">${l.concluidas}/${l.total} (${pct}%)</span>
+      </div>`;
+    }
+    const a = l.a;
+    return `<div class="gantt-label-row ${i%2?'linha-par':''}" title="${esc(a.nome)}"><span class="wbs">${esc(a.codigo_wbs||"")}</span> ${esc(a.nome)}</div>`;
+  }).join("");
+
+  const rowsHtml = linhas.map((l,i)=>{
+    if(l.tipo==="grupo"){
+      if(!(l.dtini_prev && l.dtfim_prev)) return `<div class="gantt-row grupo" data-grupo="${esc(l.chave)}"></div>`;
+      const {left, width} = barraPos(l.dtini_prev, l.dtfim_prev);
+      const pct = l.total ? Math.round(100*l.concluidas/l.total) : 0;
+      return `<div class="gantt-row grupo" data-grupo="${esc(l.chave)}"><div class="gantt-bar macro" style="left:${left}px;width:${width}px;" title="${esc(l.nome)} — ${l.concluidas}/${l.total} concluídas (${pct}%), ${fmtDate(l.dtini_prev)} a ${fmtDate(l.dtfim_prev)}"></div></div>`;
+    }
+    const a = l.a;
     const parClass = i%2?'linha-par':'';
-    if(!(a.dtini_prev && a.dtfim_prev)) return `<div class="gantt-row ${parClass}"></div>`;
-    const left = Math.round((new Date(a.dtini_prev+"T00:00:00")-minDate)/86400000)*pxPerDay;
-    const width = Math.max(pxPerDay, (Math.round((new Date(a.dtfim_prev+"T00:00:00")-new Date(a.dtini_prev+"T00:00:00"))/86400000)+1)*pxPerDay);
-    const cor = a.frente_cor || "var(--accent)";
-    return `<div class="gantt-row ${parClass}"><div class="gantt-bar ${a.cpm_critica?'critica':''}" style="left:${left}px;width:${width}px;background:${cor};" title="${esc(a.nome)} (${a.percentual_concluido}%)">
-      <div class="fill" style="width:${100-a.percentual_concluido}%;right:0;left:auto;"></div>
+    if(!(a.dtini_prev && a.dtfim_prev)) return `<div class="gantt-row ${parClass}" data-atividade-id="${a.id}"></div>`;
+    const {left, width} = barraPos(a.dtini_prev, a.dtfim_prev);
+    const pctWidth = Math.max(0, Math.min(100, a.percentual_concluido||0));
+    return `<div class="gantt-row ${parClass}" data-atividade-id="${a.id}"><div class="gantt-bar leaf ${a.cpm_critica?'critica':''}" style="left:${left}px;width:${width}px;" title="${esc(a.nome)} (${a.percentual_concluido}%)">
+      <div class="fill" style="width:${pctWidth}%;"></div>
     </div></div>`;
   }).join("");
 
@@ -3218,9 +3437,13 @@ function renderGantt(list){
     <div class="gantt-resize-handle" id="gantt-resize-handle" title="Arraste para redimensionar"></div>
     <div class="gantt-chart" style="min-width:${chartWidth}px;">
       <div class="gantt-header" style="width:${chartWidth}px;">${headerHtml}${todayLeft>=0&&todayLeft<=chartWidth?`<div class="gantt-today" style="left:${todayLeft}px;" title="Hoje"></div>`:""}</div>
-      <div style="position:relative;">${gridLinesHtml}${todayLeft>=0&&todayLeft<=chartWidth?`<div class="gantt-today" style="left:${todayLeft}px;height:100%;"></div>`:""}${rowsHtml}</div>
+      <div class="gantt-rows-wrap" style="position:relative;">${gridLinesHtml}${todayLeft>=0&&todayLeft<=chartWidth?`<div class="gantt-today" style="left:${todayLeft}px;height:100%;"></div>`:""}${rowsHtml}<svg class="gantt-deps"></svg></div>
     </div>
   </div>`;
+
+  el.querySelectorAll(".gantt-label-row.grupo, .gantt-row.grupo").forEach(node=>{
+    node.addEventListener("click", ()=> _ganttToggleGrupo(node.dataset.grupo));
+  });
 
   // Redimensionamento da coluna "Atividade" arrastando o mouse. Os
   // listeners de mousemove/mouseup em document só existem DURANTE o
