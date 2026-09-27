@@ -187,7 +187,13 @@ def dashboard(projeto_id, mesano=None):
         FROM comparacao_folha{where}
     """) or {"total": 0, "total_nao_divergentes": 0}
     total_geral = geral.get("total") or 0
+    # total_divergentes/pct_divergente calculados aqui (não como "100 - pct_nao_divergente"
+    # no front) pra bater exatamente com a contagem real de linhas divergentes, sem
+    # arredondamento em cascata — 69ª/70ª rodada, pedido do usuário pro Dashboard de
+    # Comparação de Folha mostrar também o % COM divergência, não só o % sem.
+    geral["total_divergentes"] = total_geral - (geral.get("total_nao_divergentes") or 0)
     geral["pct_nao_divergente"] = round(100 * (geral.get("total_nao_divergentes") or 0) / total_geral, 1) if total_geral else None
+    geral["pct_divergente"] = round(100 * geral["total_divergentes"] / total_geral, 1) if total_geral else None
 
     por_situacao = db.fetch_all(f"""
         SELECT

@@ -1106,8 +1106,8 @@
     <div class="kpis" id="cfd-kpis"></div>
     <div class="grid-2">
       <div class="card">
-        <h3>% sem divergência por situação</h3>
-        <div class="view-sub" style="margin-top:-6px;">De tudo que foi comparado, quanto já bate certo entre os dois sistemas — quebrado por situação, pra mostrar onde focar primeiro.</div>
+        <h3>% de comparação por Situação</h3>
+        <div class="view-sub" style="margin-top:-6px;">Tudo que foi comparado entre os dois sistemas — quebrado por situação, pra mostrar onde focar primeiro.</div>
         <div id="cfd-situacao"></div>
       </div>
       <div class="card">
@@ -8754,6 +8754,7 @@ async function cfdCarregarDados(){
     ["Linhas comparadas", (g.total||0).toLocaleString('pt-BR')],
     ["Sem divergência", (g.total_nao_divergentes||0).toLocaleString('pt-BR')],
     ["% sem divergência (geral)", g.pct_nao_divergente==null ? "—" : `${g.pct_nao_divergente}%`],
+    ["% com divergência (geral)", g.pct_divergente==null ? "—" : `${g.pct_divergente}%`],
   ].map(([l,v])=>`<div><div style="font-size:20px;font-weight:600;">${v}</div><div class="muted" style="font-size:11.5px;">${esc(l)}</div></div>`).join("");
 
   const porSituacao = r.por_situacao || [];
