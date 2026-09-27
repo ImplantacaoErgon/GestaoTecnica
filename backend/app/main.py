@@ -8,7 +8,7 @@ from datetime import datetime, date, timedelta
 
 from flask import Flask, request, jsonify, send_from_directory, send_file, abort, session
 
-from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_renumeracao, cronograma_anomalias, cronograma_export, cronograma_comparacao, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, drive_rubricas, comparacao_folha, comparacao_folha_import, google_drive
+from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_renumeracao, cronograma_anomalias, cronograma_export, cronograma_export_xml, cronograma_comparacao, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, drive_rubricas, comparacao_folha, comparacao_folha_import, google_drive
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 FRONTEND_DIR = os.environ.get(
@@ -2487,6 +2487,55 @@ def create_app():
         return send_file(
             io.BytesIO(xlsx_bytes),
             mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True, download_name=nome_arquivo,
+        )
+
+    @app.get("/api/cronograma/exportar-xml")
+    def cronograma_exportar_xml():
+        """Exporta o cronograma do projeto INTEIRO (sem filtros — ver
+        justificativa no docstring de app/cronograma_export_xml.py) num XML
+        MSPDI, para abrir no ProjectLibre. Botão "Exportar XML (ProjectLibre)"
+        na tela de Cronograma, 69ª rodada. Pedido explícito do cliente:
+        incluir dependências e % de conclusão."""
+        projeto_id = request.args.get("projeto_id")
+        if not projeto_id:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        projeto = db.fetch_one(f"SELECT * FROM projetos WHERE id = {db.q(projeto_id)}")
+        if not projeto:
+            abort(404)
+        # mesma ordenação por Código (natural, não textual) usada na grade —
+        # ver docstring do módulo: é o que garante a sequência DFS correta
+        # (pai antes dos filhos, filhos antes do próximo irmão) que o MSPDI
+        # espera pela combinação OutlineLevel + ordem de aparição no arquivo.
+        sql = (ATIVIDADE_SELECT + f" WHERE a.projeto_id = {db.q(projeto_id)} "
+               "ORDER BY codigo_wbs_chave_ordenacao(a.codigo_wbs) NULLS LAST, a.nome")
+        atividades = db.fetch_all(sql)
+        marcos = db.fetch_all(
+            f"SELECT * FROM marcos WHERE projeto_id = {db.q(projeto_id)} ORDER BY data_prevista"
+        )
+        deps_rows = db.fetch_all(
+            "SELECT ad.atividade_id, ad.predecessora_id, ad.tipo, ad.lag_horas "
+            "FROM atividade_dependencia ad "
+            "JOIN atividades s ON s.id = ad.atividade_id "
+            "JOIN atividades p ON p.id = ad.predecessora_id "
+            f"WHERE s.projeto_id = {db.q(projeto_id)} AND p.projeto_id = {db.q(projeto_id)}"
+        )
+        deps_por_atividade = {}
+        for r in deps_rows:
+            deps_por_atividade.setdefault(r["atividade_id"], []).append(r)
+        try:
+            xml_bytes = cronograma_export_xml.gerar_xml_bytes(projeto, atividades, marcos, deps_por_atividade)
+        except Exception as e:
+            print(f"[cronograma_export_xml] erro ao gerar XML: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            return jsonify({"erro": f"Falha ao gerar o XML: {e}"}), 500
+        base = (projeto.get("sigla") or projeto.get("nome") or "projeto").strip()
+        base = "".join(c if c.isalnum() or c in "-_" else "-" for c in base).strip("-") or "projeto"
+        nome_arquivo = f"cronograma-{base}-{date.today().isoformat()}.xml"
+        return send_file(
+            io.BytesIO(xml_bytes),
+            mimetype="application/xml",
             as_attachment=True, download_name=nome_arquivo,
         )
 

@@ -775,6 +775,7 @@
       <div style="display:flex;gap:10px;flex-wrap:wrap;">
         <button class="btn secondary small" id="btn-import-cronograma">Importar Cronograma (Excel/CSV)</button>
         <button class="btn secondary small" id="btn-exportar-cronograma" title="Exporta as atividades numa planilha Excel — com filtros opcionais de Etapa, Frente e período">📤 Exportar Cronograma (Excel)</button>
+        <button class="btn secondary small" id="btn-exportar-cronograma-xml" title="Exporta o cronograma inteiro (com dependências e % concluído) num XML para abrir no ProjectLibre">📤 Exportar XML (ProjectLibre)</button>
         <button class="btn secondary small" id="btn-versoes-cronograma" title="Gera e consulta fotos completas do cronograma ao longo do tempo">🕘 Versões do cronograma</button>
         <button class="btn secondary small" id="btn-replanejar-cronograma" title="Recalcula as datas previstas das atividades incompletas, respeitando as dependências">🔄 Replanejar cronograma</button>
         <button class="btn secondary small" id="btn-edicao-lote-cronograma" title="Edita várias atividades de uma vez, tipo planilha, propagando o efeito em datas/esforço pelas dependentes">📝 Editar em massa</button>
@@ -2845,7 +2846,7 @@ async function afterProjetoReady(){
   ]);
   aplicarMarcaNoTopo();
   fillStaticSelects();
-  wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireGanttToolbar(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireExportarCronograma(); wireRemoverCronograma(); wireRemoverRequisitos(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma(); wireRenumerarCronograma();
+  wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireGanttToolbar(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireExportarCronograma(); wireExportarCronogramaXml(); wireRemoverCronograma(); wireRemoverRequisitos(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma(); wireRenumerarCronograma();
   wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros(); wireRubricaModal(); wireRubricasFiltros(); wireImportRubricas(); wireComparacaoFolhaPane(); wireComparacaoFolhaDashboard();
   setupCsvTemplateLink();
   await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias(), loadItensMigracao(), loadRubricas()]);
@@ -6637,6 +6638,21 @@ function exportarCronograma(){
   if(ini && fim){ params.set("periodo_inicio", ini); params.set("periodo_fim", fim); }
   window.open(`${API}/cronograma/exportar?${params.toString()}`, "_blank");
   $("overlay-exportar-cronograma").hidden = true;
+}
+
+// 69ª rodada — "crie em Cronograma um botão para geração de xml para o
+// project libre, não esqueça de incluir as dependências e o % de
+// conclusão". Sem modal de filtro (diferente do Excel): sempre exporta o
+// cronograma INTEIRO do projeto, porque um recorte parcial quebraria as
+// referências de PredecessorLink de atividades que ficassem de fora do
+// arquivo. Mesmo padrão de download das outras exportações: monta a URL e
+// abre em nova aba, sem fetch/api() — o backend cuida do Content-Disposition
+// (ver app/cronograma_export_xml.py).
+function wireExportarCronogramaXml(){
+  $("btn-exportar-cronograma-xml").addEventListener("click", ()=>{
+    const params = new URLSearchParams({ projeto_id: PROJETO.id });
+    window.open(`${API}/cronograma/exportar-xml?${params.toString()}`, "_blank");
+  });
 }
 
 async function analisarCronograma(){
