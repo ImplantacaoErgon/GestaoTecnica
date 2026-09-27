@@ -5798,9 +5798,17 @@ function wireAtividadeModal(){
   });
   $("at-dep-add").addEventListener("click", async ()=>{
     const predecessora_id = $("at-dep-predecessora").value; if(!predecessora_id) return;
-    await api(`/atividades/${editingAtividadeId}/dependencias`, {method:"POST", body: JSON.stringify({
+    const resp = await api(`/atividades/${editingAtividadeId}/dependencias`, {method:"POST", body: JSON.stringify({
       predecessora_id, tipo: $("at-dep-tipo").value, lag_horas: Number($("at-dep-lag").value||0)})});
     await refreshDeps();
+    // 71ª rodada — adicionar uma predecessora pode reposicionar em cascata a
+    // própria atividade e as sucessoras dela (ver _cascatear_edicao_individual
+    // em main.py) — recarrega a base e sincroniza os campos de data/esforço
+    // do próprio modal, caso a atividade aberta tenha sido uma das afetadas.
+    await loadAtividades(); renderCronograma(); renderDashboard();
+    _sincronizarCamposDataSeAfetado(resp && resp._cascata);
+    const msg = mensagemCascata(resp && resp._cascata);
+    if(msg) toast("Dependência adicionada." + msg);
   });
   $("at-dep-busca").addEventListener("input", e=>{ renderAtDepPredecessoraOptions(e.target.value); });
   $("at-req-add").addEventListener("click", async ()=>{
@@ -5893,6 +5901,32 @@ function openAtividadeModal(atividade){
 }
 function closeAtividadeModal(){ $("overlay-atividade").hidden = true; editingAtividadeId=null; }
 
+// 71ª rodada — cascata automática de datas/esforço pras sucessoras, plugada
+// no modal individual e nas rotas de dependência avulsa (ver main.py,
+// update_atividade/create_dependencia/delete_dependencia e
+// _cascatear_edicao_individual). As respostas dessas chamadas passam a vir
+// com um campo opcional `_cascata: {atividades_afetadas, itens:[{id,
+// codigo_wbs, nome}]}` quando alguma atividade dependente foi reagendada.
+function mensagemCascata(cascata){
+  if(!cascata || !cascata.atividades_afetadas) return "";
+  const n = cascata.atividades_afetadas;
+  return ` — ${n} atividade${n>1?"s":""} dependente${n>1?"s":""} ${n>1?"foram reagendadas":"foi reagendada"} em cascata.`;
+}
+// Só relevante pra adicionar/remover dependência (a edição direta de
+// esforço/datas exclui a própria atividade da cascata — ver excluir_id em
+// _cascatear_edicao_individual, ela já foi salva com o valor exato digitado):
+// se a atividade que está ABERTA no modal foi uma das reposicionadas,
+// atualiza os campos de Início/Fim/Esforço na tela sem fechar o modal nem
+// mexer nas outras abas/campos que o usuário possa estar editando.
+function _sincronizarCamposDataSeAfetado(cascata){
+  if(!cascata || !editingAtividadeId) return;
+  if(!(cascata.itens||[]).some(i=>i.id===editingAtividadeId)) return;
+  const a = byId(ATIVIDADES, editingAtividadeId);
+  if(!a) return;
+  $("at-prazo").value = a.prazo_horas ?? "";
+  $("at-dtini-prev").value = a.dtini_prev || "";
+  $("at-dtfim-prev").value = a.dtfim_prev || "";
+}
 async function saveAtividade(){
   const data = {
     codigo_wbs: $("at-codigo").value.trim(), nome: $("at-nome").value.trim(), descricao: $("at-descricao").value.trim(),
@@ -5911,10 +5945,11 @@ async function saveAtividade(){
   if(!data.nome){ toast("Informe o nome da atividade.", true); return; }
   if(!editingAtividadeId) data.projeto_id = PROJETO.id;
   try{
-    if(editingAtividadeId) await api(`/atividades/${editingAtividadeId}`, {method:"PUT", body: JSON.stringify(data)});
-    else await api("/atividades", {method:"POST", body: JSON.stringify(data)});
+    let resp;
+    if(editingAtividadeId) resp = await api(`/atividades/${editingAtividadeId}`, {method:"PUT", body: JSON.stringify(data)});
+    else resp = await api("/atividades", {method:"POST", body: JSON.stringify(data)});
     await loadAtividades(); renderCronograma(); renderDashboard(); closeAtividadeModal();
-    toast("Atividade salva.");
+    toast("Atividade salva." + mensagemCascata(resp && resp._cascata));
   }catch(e){
     // Erro mais comum aqui: status exige relato e ainda não há nenhum registrado.
     // Leva o usuário direto pra aba certa em vez de deixá-lo caçar o problema.
@@ -5953,7 +5988,14 @@ async function refreshDeps(){
     <li><span>${esc(d.predecessora_nome)} <span class="muted">(${d.tipo}${d.lag_horas?`, lag ${d.lag_horas}h`:''})</span></span>
     <button class="btn ghost" data-dep="${d.id}">Remover</button></li>`).join("") : `<li class="muted">Nenhuma dependência.</li>`;
   $("at-deps-list").querySelectorAll("button[data-dep]").forEach(b=>b.addEventListener("click", async ()=>{
-    await api(`/dependencias/${b.dataset.dep}`, {method:"DELETE"}); refreshDeps();
+    const resp = await api(`/dependencias/${b.dataset.dep}`, {method:"DELETE"});
+    await refreshDeps();
+    // 71ª rodada — remover uma predecessora também pode reposicionar em
+    // cascata (ver comentário equivalente em at-dep-add acima).
+    await loadAtividades(); renderCronograma(); renderDashboard();
+    _sincronizarCamposDataSeAfetado(resp && resp._cascata);
+    const msg = mensagemCascata(resp && resp._cascata);
+    if(msg) toast("Dependência removida." + msg);
   }));
   // Candidatas a predecessora, ordenadas por Código WBS crescente (ordem natural,
   // ex. "2.10" depois de "2.9") — mesmo critério já usado no popup de dependências

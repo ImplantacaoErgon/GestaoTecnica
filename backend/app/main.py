@@ -3,6 +3,7 @@ import csv
 import io
 import json
 import os
+import traceback
 import uuid
 from datetime import datetime, date, timedelta
 
@@ -569,6 +570,84 @@ def delete_row(table, row_id):
     db.execute(f"DELETE FROM {table} WHERE id = {db.q(row_id)}")
     auditoria.registrar_exclusao(table, antes)
     return "", 204
+
+
+def _normaliza_data(v):
+    if v in (None, ""):
+        return None
+    return v.isoformat() if hasattr(v, "isoformat") else v
+
+
+def _cascatear_edicao_individual(projeto_id, edicao, excluir_id=None, origem_rotulo=None):
+    """71ª rodada — cascata automática de datas pras SUCESSORAS (diretas e
+    indiretas) de uma atividade editada FORA da tela "Editar em massa": pelo
+    modal individual (esforço/datas previstas) ou por uma dependência
+    avulsa adicionada/removida ali mesmo. Até aqui só a Edição em Lote e o
+    Replanejamento propagavam esse efeito — o modal individual, que é o
+    jeito mais comum de mexer numa atividade, fazia um UPDATE cego, sem
+    tocar em nada além da própria linha. Ver análise completa na 71ª
+    rodada (gestao-tecnica-plano-16b-continuacao-45.md).
+
+    Reaproveita o MESMO motor de grafo de dependências da Edição em Lote
+    (`cronograma_edicao_lote.calcular`), só que com uma lista de edição de
+    UM item só — `edicao` é literalmente uma linha do payload daquela tela
+    (`{"id":..., "dtini_prev":..., "dtfim_prev":..., "dependencias_adicionar":...}`
+    etc.), o motor já sabe calcular a cascata a partir disso sem precisar
+    de nenhuma lógica nova. `excluir_id`, quando informado, tira a própria
+    atividade editada do que é gravado aqui — usada pelo modal individual,
+    onde a linha em si já foi salva segundos antes com o valor exato que o
+    usuário digitou (inclusive esforço, que a Edição em Lote recalcularia
+    sozinha a partir da data se os dois fossem gravados juntos); a
+    dependência avulsa NÃO usa essa exclusão, porque ali a própria
+    atividade editada pode ter sua posição deslocada pela predecessora
+    nova/removida, e isso também precisa ser gravado.
+
+    Nunca bloqueia quem chamou: qualquer impedimento (atividade concluída/
+    cancelada, ainda sem Início previsto, ciclo no grafo etc.) é engolido
+    em silêncio — o que disparou esta chamada já foi salvo com sucesso
+    antes dela ser chamada; a cascata é sempre "melhor esforço", nunca uma
+    condição para o salvamento principal ter sucedido."""
+    try:
+        resultado = cronograma_edicao_lote.calcular(
+            projeto_id, [edicao], STATUS_FAMILIA_CONCLUIDA, PRIORIDADE_VALIDAS,
+        )
+    except ValueError:
+        return None
+    afetadas = [i for i in resultado["itens"] if i["mudou"] and i["id"] != excluir_id]
+    if not afetadas:
+        return None
+    stmts = ["BEGIN;"]
+    for i in afetadas:
+        stmts.append(
+            f"UPDATE atividades SET dtini_prev={db.q(i['dtini_prev_novo'])}, "
+            f"dtfim_prev={db.q(i['dtfim_prev_novo'])}, prazo_horas={db.q(i['prazo_horas_novo'])} "
+            f"WHERE id={db.q(i['id'])};"
+        )
+    stmts.append("COMMIT;")
+    db.execute("\n".join(stmts))
+    itens_afetados = [{"id": i["id"], "codigo_wbs": i.get("codigo_wbs"), "nome": i.get("nome")} for i in afetadas]
+    # Mesmo padrão de log da Edição em Lote/Replanejamento (registrar_evento_manual) —
+    # aqui best-effort feito à mão (sem passar por patch_row) porque o gatilho é este
+    # UPDATE em lote das sucessoras, não a linha que o usuário editou (essa já foi
+    # logada normalmente por patch_row/insert_row/delete_row, no chamador).
+    try:
+        nomes = ", ".join(f'{i["codigo_wbs"]} "{i["nome"]}"' for i in itens_afetados[:5])
+        if len(itens_afetados) > 5:
+            nomes += f" e mais {len(itens_afetados) - 5}"
+        auditoria.registrar_evento_manual(
+            "edicao",
+            f'Cascata automática do cronograma ({origem_rotulo or "edição de atividade"}): '
+            f'{len(itens_afetados)} sucessora(s) reagendada(s) — {nomes}',
+            entidade="cronograma", entidade_id=str(projeto_id),
+            projeto_id=projeto_id, sensivel=False,
+            detalhes={"origem": origem_rotulo, "atividades_afetadas": itens_afetados},
+        )
+    except Exception:
+        traceback.print_exc()
+    return {
+        "atividades_afetadas": len(afetadas),
+        "itens": itens_afetados,
+    }
 
 
 def _valor_mesclado(atual, data, campo):
@@ -1169,9 +1248,45 @@ def create_app():
         aplicar_percentual_inicial(atual, data)
         usuario = request.headers.get("X-Usuario", "")
         prelude = f"SET LOCAL app.usuario_atual = {db.q(usuario)};" if usuario else ""
+        # 71ª rodada — dispara a cascata pras sucessoras quando o que muda é
+        # esforço ou data prevista (os únicos campos que entram no grafo de
+        # dependências) — ver _cascatear_edicao_individual acima.
+        dispara_cascata = bool({"prazo_horas", "dtini_prev", "dtfim_prev"} & set(data.keys()))
+        # O form do modal individual sempre manda os três campos juntos
+        # (dtini_prev/dtfim_prev/prazo_horas), tenha o usuário mexido ou não —
+        # diferente da Edição em Lote, que só recebe o que foi de fato
+        # editado. Por isso, pra decidir se a cascata usa a DATA ou o
+        # ESFORÇO como âncora de duração, comparamos com o valor QUE JÁ
+        # ESTAVA GRAVADO antes deste PUT: só um Fim previsto que realmente
+        # mudou nesta edição manda sobre o esforço — senão (ex.: o usuário só
+        # mexeu no Esforço e o campo Fim previsto na tela ficou com o valor
+        # antigo, porque o auto-cálculo do form só preenche data QUE ESTAVA
+        # em branco) a duração continua vindo do esforço, como sempre foi.
+        # Mesma regra de "o que foi tocado de verdade vence" que a Edição em
+        # Lote já usa (ver cronograma_edicao_lote.py).
+        dtfim_foi_editado = (
+            "dtfim_prev" in data and _normaliza_data(data.get("dtfim_prev")) != _normaliza_data(atual.get("dtfim_prev"))
+        )
         row = patch_row("atividades", id, data, ATIVIDADE_FIELDS, prelude=prelude)
         if not row:
             abort(404)
+        if dispara_cascata and row.get("dtini_prev"):
+            # Ecoa o Início JÁ GRAVADO (não o que veio em `data`) como o
+            # "edit" que o motor espera — assim a cascata reflete fielmente o
+            # estado atual da atividade não importa qual dos três campos foi
+            # de fato alterado. `excluir_id` evita regravar a própria linha,
+            # que já foi salva do jeito exato que o usuário digitou, um
+            # passo acima.
+            edicao = {"id": id, "dtini_prev": row["dtini_prev"]}
+            if dtfim_foi_editado and row.get("dtfim_prev"):
+                edicao["dtfim_prev"] = row["dtfim_prev"]
+            cascata = _cascatear_edicao_individual(
+                row["projeto_id"], edicao, excluir_id=id,
+                origem_rotulo=f'edição de "{row.get("nome") or row.get("codigo_wbs") or id}"',
+            )
+            if cascata:
+                row = dict(row)
+                row["_cascata"] = cascata
         return jsonify(row)
 
     @app.delete("/api/atividades/<id>")
@@ -1282,12 +1397,49 @@ def create_app():
         data = request.get_json(force=True)
         data["atividade_id"] = id
         row = insert_row("atividade_dependencia", data, ["atividade_id", "predecessora_id", "tipo", "lag_horas"])
-        return jsonify(row), 201
+        # 71ª rodada — adicionar uma predecessora pode empurrar a própria
+        # atividade (e a cadeia de sucessoras dela) — ver
+        # _cascatear_edicao_individual acima. Diferente do modal
+        # individual, aqui NÃO exclui a própria atividade do que é
+        # regravado: ela pode genuinamente mudar de posição.
+        resposta = dict(row)
+        atividade = db.fetch_one(f"SELECT projeto_id, nome, codigo_wbs FROM atividades WHERE id = {db.q(id)}")
+        if atividade:
+            cascata = _cascatear_edicao_individual(
+                atividade["projeto_id"], {
+                    "id": id,
+                    "dependencias_adicionar": [{
+                        "predecessora_id": data["predecessora_id"],
+                        "tipo": data.get("tipo") or "FS",
+                        "lag_horas": data.get("lag_horas") or 0,
+                    }],
+                },
+                origem_rotulo=f'nova dependência em "{atividade.get("nome") or atividade.get("codigo_wbs") or id}"',
+            )
+            if cascata:
+                resposta["_cascata"] = cascata
+        return jsonify(resposta), 201
 
     @app.delete("/api/dependencias/<dep_id>")
     def delete_dependencia(dep_id):
+        dep = db.fetch_one(f"SELECT atividade_id, predecessora_id FROM atividade_dependencia WHERE id = {db.q(dep_id)}")
         db.execute(f"DELETE FROM atividade_dependencia WHERE id = {db.q(dep_id)}")
-        return "", 204
+        # 71ª rodada — remover uma predecessora também pode reposicionar a
+        # atividade e a cadeia dela (ver create_dependencia acima). Resposta
+        # deixa de ser 204 vazio pra poder carregar o resumo da cascata; o
+        # front-end (api()) já trata normalmente qualquer 2xx com corpo JSON.
+        cascata = None
+        if dep:
+            atividade = db.fetch_one(f"SELECT projeto_id, nome, codigo_wbs FROM atividades WHERE id = {db.q(dep['atividade_id'])}")
+            if atividade:
+                cascata = _cascatear_edicao_individual(
+                    atividade["projeto_id"], {
+                        "id": dep["atividade_id"],
+                        "dependencias_remover": [dep["predecessora_id"]],
+                    },
+                    origem_rotulo=f'remoção de dependência em "{atividade.get("nome") or atividade.get("codigo_wbs") or dep["atividade_id"]}"',
+                )
+        return jsonify({"_cascata": cascata}), 200
 
     # -------------------------------------------------------- recursos ativ.
     @app.get("/api/atividades/<id>/recursos")
