@@ -3403,6 +3403,11 @@ function renderCronograma(){
   // _compareCodigoWbs()/_agruparParaGantt() logo abaixo, que é quem de fato
   // decide a ordem final de exibição (grupo + itens dentro do grupo).
   const list = applyFilters(ATIVIDADES).sort((a,b)=>_compareCodigoWbs(a.codigo_wbs, b.codigo_wbs));
+  // Numeração de linha sobre TODAS as atividades do projeto (não `list`
+  // filtrada) — ver comentário de NUM_LINHA_POR_ID acima.
+  NUM_LINHA_POR_ID = {};
+  ATIVIDADES.slice().sort((a,b)=>_compareCodigoWbs(a.codigo_wbs, b.codigo_wbs))
+    .forEach((a,i)=>{ NUM_LINHA_POR_ID[a.id] = i+1; });
   const linhas = _construirLinhasCronograma(list);
   // 64ª rodada — "Unifique esses dois quadros": a antiga tabela separada
   // (renderAtividadesTable/#atividades-tbody) foi incorporada na própria
@@ -3487,6 +3492,11 @@ const GANTT_COLUNAS_BASE = [
   { key:"horas",                label:"Horas (prev./real.)",   largura:120 },
   { key:"recursos",             label:"Recursos",              largura:150 },
   { key:"critica",              label:"Crítica",               largura:70  },
+  // 72ª rodada — numeração sequencial de linha (1,2,3...), sem relação com
+  // o Código WBS (pedido do usuário, pra referência estável ao integrar
+  // com outro software). Fica no fim, como qualquer coluna nova (ver
+  // _gridColunasOrdemLer) — quem quiser em outra posição arrasta pra lá.
+  { key:"num_linha",            label:"Nº",                    largura:44  },
 ];
 function _gridColunasOrdemLer(){
   const chavesValidas = GANTT_COLUNAS_BASE.map(c=>c.key);
@@ -3525,6 +3535,16 @@ function _gridColunasAtuais(){
 // automaticamente". Nunca grava nada sozinho — só o botão Salvar grava.
 let PENDENTES = {};
 let CASCATA_PREVIA = {};
+// NUM_LINHA_POR_ID (71ª/72ª rodada — coluna "Nº" da grade): numeração
+// sequencial simples (1, 2, 3...) SEM relação nenhuma com o Código WBS —
+// pedido do usuário pra ter uma referência de linha estável na hora de
+// integrar com outro software. Recalculada a cada renderCronograma() a
+// partir de TODAS as atividades do projeto (não só as filtradas/visíveis
+// em `linhas`), na mesma ordenação natural por Código já usada em toda a
+// grade (_compareCodigoWbs) — assim o número de uma atividade não muda só
+// porque um grupo foi recolhido ou um filtro foi aplicado, só quando a
+// ordem "de verdade" (por código) muda.
+let NUM_LINHA_POR_ID = {};
 let GANTT_ULTIMAS_LINHAS = [];
 let GANTT_ULTIMAS_ATIV_COM_DATA = [];
 
@@ -3650,6 +3670,8 @@ function _rollupEfetivo(itens){
 function _gridCelulaHtml(a, col){
   const dis = _gridBloqueada(a) ? "disabled" : "";
   switch(col.key){
+    case "num_linha":
+      return `<span class="mono muted">${NUM_LINHA_POR_ID[a.id] ?? "—"}</span>`;
     case "codigo_wbs":
       return `<span class="mono">${esc(a.codigo_wbs||"—")}</span>`;
     case "nome": {
