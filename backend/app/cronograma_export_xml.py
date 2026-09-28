@@ -55,26 +55,118 @@ Pesquisado na documentação oficial da Microsoft
   casar `recursos`/`atividade_recurso` com um segundo bloco do XML; fica de
   fora por ora para manter o escopo do pedido.
 
-## Dois botões, dois namespaces (72ª/73ª rodada)
+## Dois botões, dois namespaces (72ª/73ª rodada) — e a correção da 75ª
 
 O mesmo XML MSPDI serve tanto pro ProjectLibre quanto pro Microsoft Project
-de verdade — é o mesmo formato de intercâmbio — mas o NAMESPACE raiz do
-`<Project>` usado por cada um na prática diverge, e por isso agora é
-parametrizável (`namespace=` de `gerar_xml_bytes`), um valor por botão:
+de verdade — é o mesmo formato de intercâmbio — e o NAMESPACE raiz do
+`<Project>` continua parametrizável (`namespace=` de `gerar_xml_bytes`), um
+valor por botão, mas os dois valores hoje são iguais (ver abaixo) — o
+parâmetro fica por precaução/documentação, não porque haja diferença real
+hoje:
 
 - `NAMESPACE_PROJECTLIBRE = "http://schemas.microsoft.com/project"` (SEM
-  versão) — já confirmado funcionando pelo usuário com o ProjectLibre
-  (botão da 69ª rodada). É o que arquivos gerados de fato por "Salvar como
-  XML" de versões mais antigas do MS Project (e a maioria dos leitores
-  MSPDI, via MPXJ) aceitam/ignoram sem reclamar do namespace.
-- `NAMESPACE_MS_PROJECT = "http://schemas.microsoft.com/project/2007"` (COM
-  versão) — é o `targetNamespace` que o XSD OFICIAL hoje publicado pela
-  Microsoft declara (schemas.microsoft.com/project/2007/mspdi_pj12.xsd,
-  confirmado via learn.microsoft.com — "XML Schema for the Project
-  Element"), usado como base pra validação de schema no MS Project de
-  verdade — por isso é o valor mais seguro pro botão "Exportar XML
-  (Microsoft Project)", ainda que não tenha sido possível rodar um teste de
-  importação real neste ambiente (sem acesso ao MS Project instalado).
+  versão) — confirmado funcionando pelo usuário com o ProjectLibre (botão
+  da 69ª rodada).
+- `NAMESPACE_MS_PROJECT`: na 73ª rodada este valor tinha sido fixado como
+  `".../project/2007"` (o `targetNamespace` do XSD oficial publicado pela
+  Microsoft) por não haver, naquele momento, como testar a importação num
+  MS Project de verdade. Na 75ª rodada o usuário testou o botão "Exportar
+  XML (Microsoft Project)" no Project 2010 dele e reportou que o arquivo
+  importava com Início/Duração/Término em branco e as tarefas marcadas
+  como Inativas — testado com Project 2010 real via controle remoto do
+  computador do usuário (ver seção seguinte). Investigando, o próprio
+  Project 2010, ao SALVAR um arquivo de teste como "Formato XML (*.xml)",
+  grava `xmlns="http://schemas.microsoft.com/project"` — o mesmo valor SEM
+  versão do botão ProjectLibre, não o versionado "/2007" do XSD de
+  referência da Microsoft Learn. Ou seja: o XSD oficial publicado é a
+  documentação do FORMATO, mas o namespace que o Project de verdade usa nos
+  arquivos que ele mesmo gera é o antigo, sem versão. `NAMESPACE_MS_PROJECT`
+  foi corrigido para o mesmo valor de `NAMESPACE_PROJECTLIBRE`.
+
+## O bug real (75ª rodada): não era o namespace, eram os campos da tarefa
+
+O namespace por si só NÃO era a causa do Início/Duração/Término em branco
+(testado: o mesmo problema acontecia com os dois namespaces, antes da
+correção abaixo). A causa real, descoberta comparando byte a byte um XML
+gerado por este exportador com um XML de verdade salvo pelo MS Project
+2010 (usando o "Salvar como > Formato XML" do próprio Project, com uma
+tarefa simples, como cobaia):
+
+- Uma `<Task>` sem os elementos `<Active>` e `<Manual>` é importada pelo
+  Project como INATIVA (`Active` ausente ⇒ tratada como inativa, daí o
+  texto riscado na grade) e como Agendada Manualmente (`Manual` ausente ⇒
+  cai no padrão "Agendada Manualmente" do Project, que ignora os valores de
+  `<Start>`/`<Finish>`/`<Duration>` — uma tarefa Agendada Manualmente só usa
+  `<ManualStart>`/`<ManualFinish>`/`<ManualDuration>`).
+- O Project real sempre grava `<Active>1</Active>` e `<Manual>0/1</Manual>`
+  em toda tarefa, e quando `Manual=0` (Agendamento Automático — o que este
+  sistema sempre exporta, já que não tem o conceito de "tarefa manual")
+  grava OS DOIS conjuntos de campos: `<Start>/<Finish>/<Duration>` E
+  `<ManualStart>/<ManualFinish>/<ManualDuration>` com os MESMOS valores.
+- A ORDEM dos elementos dentro de `<Task>` também importa — o leitor do
+  Project parece ser sensível à sequência declarada no schema (não é uma
+  leitura tolerante por nome, na posição em que o elemento aparecer). A
+  ordem usada agora replica a de um arquivo real do Project 2010, reduzida
+  aos campos que este sistema de fato precisa gravar (removendo dezenas de
+  campos só de SAÍDA/cálculo do próprio Project — EarlyStart, LateStart,
+  TotalSlack, BCWS/BCWP, custos, etc. — que o Project recalcula sozinho ao
+  abrir uma tarefa Agendada Automaticamente, e que portanto não precisam
+  vir do exportador).
+- Também foi adicionado `<NewTasksAreManual>0</NewTasksAreManual>` no nível
+  do `<Project>` (mesmo valor que o Project real grava quando o padrão de
+  novas tarefas do arquivo é Agendamento Automático) — reforça, a nível de
+  arquivo, que as tarefas importadas não devem cair no modo manual.
+
+Tudo isso foi confirmado testando de verdade: controlando remotamente o
+computador do usuário (que tem Project 2010 instalado) para abrir os
+arquivos XML gerados neste ambiente, iterando até a importação ficar
+idêntica ao comportamento de um arquivo nativo do Project (datas, duração,
+% concluído e dependências corretos, sem "Inativa", sem "Agendada
+Manualmente").
+
+## Dois acabamentos finais (ainda na 75ª rodada, após o bug acima)
+
+Com o bug principal corrigido, dois problemas menores apareceram testando em
+escala real (16 atividades, com hierarquia/dependências/marco) que não
+existiam no teste mínimo (3 tarefas):
+
+1. **Duração aparecendo como "0 dias" pra tarefas de 1 dia**: `<Start>` e
+   `<Finish>` eram formatados com a MESMA hora default (08:00) sempre que a
+   atividade cobria um único dia — ou seja, uma tarefa de 8h saía com
+   Start=dia X 08:00 e Finish=dia X 08:00 (mesmo timestamp!), duração
+   aparente zero, mesmo com `<Duration>PT8H0M0S</Duration>` presente. O
+   arquivo real do Project (ground truth) grava Start no início do
+   expediente e Finish no FIM do expediente do calendário, mesmo quando é o
+   mesmo dia (ex.: 09:00 e 18:00). Corrigido calculando `fim_expediente` (a
+   partir de `horas_dia_util`) ANTES do laço de tarefas e usando-o como hora
+   de `<Finish>`/`<ManualFinish>`. Também corrigido `<DefaultFinishTime>` a
+   nível de `<Project>`, que estava fixo em "17:00:00" mas precisa bater com
+   o fim de expediente real do calendário "Padrão" (senão o Project
+   considera o "dia de trabalho nominal" maior que o calendário de verdade,
+   afetando o cálculo de duração de tarefas sem predecessora).
+
+2. **Erro de importação "elemento N com UID = X possui dados inválidos"**:
+   apareceu só no teste em escala real, numa tarefa de RESUMO (grupo) que
+   tinha uma predecessora com dependência Término-a-Término (FF) e
+   defasagem. Isolado por eliminação, testando no Project 2010 de verdade
+   com arquivos mínimos construídos à mão: dependências SS isoladas, SF
+   isoladas, SS+SF na mesma tarefa, FS apontando pra tarefa de resumo — todas
+   importaram sem erro; só reproduziu com a combinação exata de
+   Término-a-Término (Type=0) + defasagem (lag≠0) + SUCESSOR sendo uma
+   tarefa de resumo (`Summary=1`). É uma limitação real do importador do
+   Project 2010 (não um problema de formatação corrigível), então a solução
+   foi simplesmente NÃO exportar predecessoras cujo sucessor seja uma tarefa
+   de resumo — evita a classe inteira do problema (não só o caso exato
+   testado) sem perda prática, já que o Project recalcula as datas de uma
+   tarefa de resumo a partir dos filhos dela de qualquer forma (rollup
+   automático), não da dependência direta.
+
+Confirmado com os 16 registros reais (`atividades` + hierarquia +
+dependências + marco) do projeto de teste, nos dois botões
+(ProjectLibre e Microsoft Project): importação sem nenhum diálogo de erro,
+apenas o aviso esperado/benigno sobre a data do marco de teste ("Kickoff
+concluído" anterior ao início do projeto — é o dado de teste, não o
+exportador).
 """
 from datetime import date, datetime
 
@@ -83,7 +175,11 @@ from xml.sax.saxutils import escape as _esc
 from . import cpm
 
 NAMESPACE_PROJECTLIBRE = "http://schemas.microsoft.com/project"
-NAMESPACE_MS_PROJECT = "http://schemas.microsoft.com/project/2007"
+# 75ª rodada: corrigido de ".../project/2007" (o XSD de referência da
+# Microsoft Learn) para o valor SEM versão — é o que o Project 2010 de
+# verdade grava nos arquivos que ele mesmo salva como XML (testado). Ver
+# docstring do módulo, seção "Dois botões, dois namespaces".
+NAMESPACE_MS_PROJECT = "http://schemas.microsoft.com/project"
 
 TIPO_PARA_LINKTYPE = {"FF": 0, "FS": 1, "SF": 2, "SS": 3}
 PRIORIDADE_PARA_MSPROJECT = {"Baixa": 200, "Média": 500, "Alta": 800, "Urgente": 900}
@@ -177,6 +273,25 @@ def gerar_xml_bytes(projeto, atividades, marcos, deps_por_atividade, namespace=N
     uid_por_atividade = {a["id"]: i + 1 for i, a in enumerate(atividades)}
     uid_inicial_marcos = len(atividades) + 1
 
+    # 75ª rodada — achado adicional (grade mostrando "0 dias" pra algumas
+    # tarefas mesmo já com a hora de Finish corrigida — especificamente as
+    # que NÃO tinham predecessora, ex.: primeira tarefa de cada frente):
+    # <DefaultFinishTime> a nível de projeto estava fixo em "17:00:00",
+    # mas o calendário "Padrão" (abaixo) usa como fim de expediente
+    # `fim_expediente`, calculado a partir de horas_dia_util — com o padrão
+    # de 8h/dia isso dá 16:00, não 17:00. Um <Task> cujo Finish cai em
+    # 16:00 (fim de expediente real) mas o projeto "acha" que o expediente
+    # só termina às 17:00 (DefaultFinishTime) faz o Project calcular menos
+    # que 1 dia completo de duração pra ela. Calculado aqui, ANTES do
+    # cabeçalho do projeto, pra <DefaultFinishTime> usar o mesmo valor que
+    # o calendário realmente declara (elimina a inconsistência).
+    fim_h = 8 + int(horas_dia_util)
+    fim_m = round((horas_dia_util - int(horas_dia_util)) * 60)
+    if fim_m == 60:
+        fim_h += 1
+        fim_m = 0
+    fim_expediente = f"{fim_h:02d}:{fim_m:02d}:00"
+
     L = []
     L.append('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>')
     L.append(f'<Project xmlns="{namespace}">')
@@ -191,11 +306,14 @@ def gerar_xml_bytes(projeto, atividades, marcos, deps_por_atividade, namespace=N
     L.append("  <CurrencySymbol>R$</CurrencySymbol>")
     L.append("  <CalendarUID>1</CalendarUID>")
     L.append("  <DefaultStartTime>08:00:00</DefaultStartTime>")
-    L.append("  <DefaultFinishTime>17:00:00</DefaultFinishTime>")
+    L.append(f"  <DefaultFinishTime>{fim_expediente}</DefaultFinishTime>")
     L.append(f"  <MinutesPerDay>{int(round(horas_dia_util * 60))}</MinutesPerDay>")
     L.append(f"  <MinutesPerWeek>{int(round(horas_dia_util * 60 * 5))}</MinutesPerWeek>")
     L.append("  <DaysPerMonth>20</DaysPerMonth>")
     L.append("  <DefaultTaskType>0</DefaultTaskType>")
+    # 75ª rodada — reforça, a nível de arquivo, que tarefas importadas não
+    # devem cair em "Agendada Manualmente" (ver docstring do módulo).
+    L.append("  <NewTasksAreManual>0</NewTasksAreManual>")
     L.append("  <DurationFormat>7</DurationFormat>")
     L.append("  <WeekStartDay>0</WeekStartDay>")
     L.append("  <FiscalYearStart>0</FiscalYearStart>")
@@ -203,12 +321,7 @@ def gerar_xml_bytes(projeto, atividades, marcos, deps_por_atividade, namespace=N
     L.append(f"  <CurrentDate>{_fmt_datetime(hoje)}</CurrentDate>")
 
     # ---- Calendário único "Padrão": seg-sex, 08:00 até 08:00 + jornada do projeto ----
-    fim_h = 8 + int(horas_dia_util)
-    fim_m = round((horas_dia_util - int(horas_dia_util)) * 60)
-    if fim_m == 60:
-        fim_h += 1
-        fim_m = 0
-    fim_expediente = f"{fim_h:02d}:{fim_m:02d}:00"
+    # (`fim_expediente` já calculado acima, antes do cabeçalho do projeto)
     L.append("  <Calendars>")
     L.append("    <Calendar>")
     L.append("      <UID>1</UID>")
@@ -233,6 +346,16 @@ def gerar_xml_bytes(projeto, atividades, marcos, deps_por_atividade, namespace=N
     L.append("  </Calendars>")
 
     # ---- Tarefas (atividades) ----
+    # 75ª rodada: ordem e conjunto de campos de <Task> testados de verdade
+    # contra o MS Project 2010 (ver docstring do módulo) — Active/Manual
+    # presentes (senão a tarefa importa Inativa + Agendada Manualmente, com
+    # Início/Duração/Término em branco), Start/Finish DUPLICADOS em
+    # ManualStart/ManualFinish/ManualDuration (mesmo valor — é o que o
+    # Project real grava pra uma tarefa Agendada Automaticamente), e a
+    # ordem dos elementos seguindo a de um arquivo nativo do Project,
+    # reduzida aos campos que este exportador precisa preencher (os campos
+    # só de SAÍDA do Project — EarlyStart, TotalSlack, custos etc. — foram
+    # deixados de fora; o Project recalcula isso sozinho ao abrir).
     L.append("  <Tasks>")
     for a in atividades:
         uid = uid_por_atividade[a["id"]]
@@ -240,36 +363,99 @@ def gerar_xml_bytes(projeto, atividades, marcos, deps_por_atividade, namespace=N
         eh_resumo = a["id"] in ids_com_filhos
         duracao = _duracao_atividade(a, horas_dia_util)
         pct = int(a.get("percentual_concluido") or 0)
+        # Start/Finish sempre presentes (com fallback pro início do projeto)
+        # pra nunca gravar ManualStart/ManualFinish sem o par Start/Finish
+        # correspondente.
+        #
+        # 75ª rodada — achado adicional (grade do Project mostrando "0 dias"
+        # de duração após importar, mesmo com <Duration> correto): Start e
+        # Finish são datas (sem hora) no nosso banco, e a versão anterior
+        # formatava os DOIS com a hora default de _fmt_datetime (08:00) — daí
+        # uma tarefa de 1 dia útil (dtini_prev == dtfim_prev) saía com Start
+        # e Finish EXATAMENTE IGUAIS (mesma data, mesma hora), duração
+        # aparente zero. O arquivo real do Project (ground truth, ver
+        # docstring do módulo — tarefa de 1 dia: Start 2026-10-05T09:00:00 /
+        # Finish 2026-10-05T18:00:00, MESMO DIA, horas diferentes: início e
+        # fim do expediente) confirma que Finish deve usar a hora de FIM do
+        # expediente (`fim_expediente`, calculado mais acima a partir de
+        # horas_dia_util), não a de início. Start continua no default 08:00
+        # (= início do expediente / DefaultStartTime do calendário).
+        inicio_iso = _fmt_datetime(a["dtini_prev"]) if a.get("dtini_prev") else _fmt_datetime(data_inicio_iso)
+        data_fim_ativ = a.get("dtfim_prev") or a.get("dtini_prev") or data_inicio_iso
+        fim_iso = _fmt_datetime(data_fim_ativ, hora=fim_expediente)
 
         L.append("    <Task>")
         L.append(f"      <UID>{uid}</UID>")
         L.append(f"      <ID>{uid}</ID>")
         L.append(f"      <Name>{_texto(a.get('nome'))}</Name>")
+        L.append("      <Active>1</Active>")
+        L.append("      <Manual>0</Manual>")
+        L.append("      <Type>0</Type>")
+        L.append("      <IsNull>0</IsNull>")
         if codigo:
             L.append(f"      <WBS>{_texto(codigo)}</WBS>")
             L.append(f"      <OutlineNumber>{_texto(codigo)}</OutlineNumber>")
         L.append(f"      <OutlineLevel>{_outline_level(codigo)}</OutlineLevel>")
-        if a.get("dtini_prev"):
-            L.append(f"      <Start>{_fmt_datetime(a['dtini_prev'])}</Start>")
-        if a.get("dtfim_prev"):
-            L.append(f"      <Finish>{_fmt_datetime(a['dtfim_prev'])}</Finish>")
+        L.append(f"      <Priority>{PRIORIDADE_PARA_MSPROJECT.get(a.get('prioridade'), 500)}</Priority>")
+        L.append(f"      <Start>{inicio_iso}</Start>")
+        L.append(f"      <Finish>{fim_iso}</Finish>")
         L.append(f"      <Duration>{duracao}</Duration>")
+        L.append(f"      <ManualStart>{inicio_iso}</ManualStart>")
+        L.append(f"      <ManualFinish>{fim_iso}</ManualFinish>")
+        L.append(f"      <ManualDuration>{duracao}</ManualDuration>")
         L.append("      <DurationFormat>7</DurationFormat>")
         L.append(f"      <Work>{duracao}</Work>")
+        L.append("      <EffortDriven>0</EffortDriven>")
+        L.append("      <Recurring>0</Recurring>")
+        L.append("      <OverAllocated>0</OverAllocated>")
+        L.append("      <Estimated>0</Estimated>")
+        L.append("      <Milestone>0</Milestone>")
+        L.append(f"      <Summary>{1 if eh_resumo else 0}</Summary>")
+        L.append(f"      <Critical>{1 if a.get('cpm_critica') else 0}</Critical>")
         # "Completo por cento" é o rótulo que o PRÓPRIO ProjectLibre usa (localização
         # PT-BR dele) pra coluna do campo padrão PercentComplete do MSPDI — não é
         # nome escolhido por este exportador nem dá pra mudar por aqui (é tradução
         # da interface do ProjectLibre, não do XML).
         L.append(f"      <PercentComplete>{pct}</PercentComplete>")
         L.append(f"      <PercentWorkComplete>{pct}</PercentWorkComplete>")
-        L.append("      <Milestone>0</Milestone>")
-        L.append(f"      <Summary>{1 if eh_resumo else 0}</Summary>")
-        L.append(f"      <Critical>{1 if a.get('cpm_critica') else 0}</Critical>")
-        L.append(f"      <Priority>{PRIORIDADE_PARA_MSPROJECT.get(a.get('prioridade'), 500)}</Priority>")
+        L.append("      <ConstraintType>0</ConstraintType>")
+        L.append("      <CalendarUID>-1</CalendarUID>")
         if a.get("observacoes"):
             L.append(f"      <Notes>{_texto(a['observacoes'])}</Notes>")
 
+        # 75ª rodada — <PredecessorLink> sempre com os mesmos 5 campos
+        # (PredecessorUID, Type, CrossProject, LinkLag, LagFormat), igual ao
+        # arquivo real do Project (ground truth), mesmo quando lag=0 — boa
+        # prática (consistência de campos entre elementos irmãos), mas essa
+        # NÃO era a causa do erro de importação "elemento N com UID = X
+        # possui dados inválidos" visto ao testar em escala real (ver
+        # próximo comentário).
+        #
+        # 75ª rodada — causa REAL do erro acima, isolada por eliminação
+        # testando no Project 2010 de verdade (namespace, tipo de vínculo
+        # SS isolado, SF isolado, SS+SF juntos, vínculo apontando para
+        # tarefa de resumo com FS/lag=0 — todos OK; só reproduziu com a
+        # combinação exata abaixo): o Project 2010 REJEITA um
+        # <PredecessorLink> do tipo Término-a-Término (FF, Type=0) COM
+        # defasagem (lag != 0) quando o SUCESSOR do vínculo é uma tarefa de
+        # RESUMO (Summary=1) — a mesma dependência, mesmo tipo, mesmo lag,
+        # apontando para uma tarefa comum (não-resumo) importa perfeitamente.
+        # É uma limitação real do importador nativo do Project (não é algo
+        # que dê pra "formatar direito" — reproduzido em arquivo mínimo,
+        # gerado à mão, sem nenhum outro campo em comum com o exportador).
+        # Como o Project de qualquer forma recalcula as datas de uma tarefa
+        # de resumo a partir dos filhos dela (rollup automático — não é a
+        # dependência direta que manda), a saída mais segura é simplesmente
+        # NÃO exportar predecessoras cujo SUCESSOR seja uma tarefa de resumo
+        # — evita a classe inteira do problema (não só o caso FF+lag
+        # confirmado) sem perder informação que o Project fosse de fato usar.
         for d in deps_por_atividade.get(a["id"]) or []:
+            if eh_resumo:
+                # a tarefa `a` (sucessora do vínculo) é resumo — pula (ver
+                # comentário acima). As datas dela continuam corretas via
+                # rollup automático dos filhos, que têm suas próprias
+                # dependências exportadas normalmente.
+                continue
             pred_uid = uid_por_atividade.get(d.get("predecessora_id"))
             if not pred_uid:
                 # predecessora fora do projeto ou sem correspondência — não deveria
@@ -277,35 +463,54 @@ def gerar_xml_bytes(projeto, atividades, marcos, deps_por_atividade, namespace=N
                 # a exportação por causa de um dado inconsistente.
                 continue
             tipo = d.get("tipo") or "FS"
+            lag = _lag_decimos_de_minuto(d.get("lag_horas"))
             L.append("      <PredecessorLink>")
             L.append(f"        <PredecessorUID>{pred_uid}</PredecessorUID>")
             L.append(f"        <Type>{TIPO_PARA_LINKTYPE.get(tipo, 1)}</Type>")
-            lag = _lag_decimos_de_minuto(d.get("lag_horas"))
-            if lag:
-                L.append(f"        <LinkLag>{lag}</LinkLag>")
-                L.append("        <LagFormat>7</LagFormat>")
+            L.append("        <CrossProject>0</CrossProject>")
+            L.append(f"        <LinkLag>{lag}</LinkLag>")
+            L.append("        <LagFormat>7</LagFormat>")
             L.append("      </PredecessorLink>")
 
+        L.append("      <IsPublished>1</IsPublished>")
         L.append("    </Task>")
 
     # ---- Marcos (tabela `marcos` — conceito à parte, sem código/dependência) ----
     for i, m in enumerate(marcos):
         uid = uid_inicial_marcos + i
+        data_marco_iso = _fmt_datetime(m["data_prevista"]) if m.get("data_prevista") else _fmt_datetime(data_inicio_iso)
         L.append("    <Task>")
         L.append(f"      <UID>{uid}</UID>")
         L.append(f"      <ID>{uid}</ID>")
         L.append(f"      <Name>{_texto(m.get('nome'))}</Name>")
+        L.append("      <Active>1</Active>")
+        L.append("      <Manual>0</Manual>")
+        L.append("      <Type>0</Type>")
+        L.append("      <IsNull>0</IsNull>")
         L.append("      <OutlineLevel>1</OutlineLevel>")
-        if m.get("data_prevista"):
-            L.append(f"      <Start>{_fmt_datetime(m['data_prevista'])}</Start>")
-            L.append(f"      <Finish>{_fmt_datetime(m['data_prevista'])}</Finish>")
+        L.append("      <Priority>500</Priority>")
+        L.append(f"      <Start>{data_marco_iso}</Start>")
+        L.append(f"      <Finish>{data_marco_iso}</Finish>")
         L.append("      <Duration>PT0H0M0S</Duration>")
+        L.append(f"      <ManualStart>{data_marco_iso}</ManualStart>")
+        L.append(f"      <ManualFinish>{data_marco_iso}</ManualFinish>")
+        L.append("      <ManualDuration>PT0H0M0S</ManualDuration>")
         L.append("      <DurationFormat>7</DurationFormat>")
-        L.append(f"      <PercentComplete>{100 if m.get('data_real') else 0}</PercentComplete>")
+        L.append("      <Work>PT0H0M0S</Work>")
+        L.append("      <EffortDriven>0</EffortDriven>")
+        L.append("      <Recurring>0</Recurring>")
+        L.append("      <OverAllocated>0</OverAllocated>")
+        L.append("      <Estimated>0</Estimated>")
         L.append("      <Milestone>1</Milestone>")
         L.append("      <Summary>0</Summary>")
+        L.append("      <Critical>0</Critical>")
+        L.append(f"      <PercentComplete>{100 if m.get('data_real') else 0}</PercentComplete>")
+        L.append(f"      <PercentWorkComplete>{100 if m.get('data_real') else 0}</PercentWorkComplete>")
+        L.append("      <ConstraintType>0</ConstraintType>")
+        L.append("      <CalendarUID>-1</CalendarUID>")
         if m.get("descricao"):
             L.append(f"      <Notes>{_texto(m['descricao'])}</Notes>")
+        L.append("      <IsPublished>1</IsPublished>")
         L.append("    </Task>")
 
     L.append("  </Tasks>")
