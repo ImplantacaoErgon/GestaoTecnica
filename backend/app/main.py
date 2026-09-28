@@ -2216,6 +2216,62 @@ def create_app():
             "itens_bloqueados": 0, "itens_nao_iniciados": 0, "total_estimado": 0, "total_carregado": 0,
         })
 
+    @app.get("/api/itens-migracao/quadro-ciclo")
+    def quadro_ciclo_migracao():
+        """78ª rodada: "quadro" pedido pelo usuário em Migração de Dados —
+        Destino/Sistema, Número do Ciclo, Total a carregar, Total carregado,
+        Total rejeitados, % carregado, % rejeitado, consolidado por UM ciclo
+        de execução por vez (o "Filtro Ciclo" da tela). Sem numero_ciclo no
+        querystring, usa o maior já registrado em qualquer item do projeto
+        ("sempre o último", como pedido) — ciclos_disponiveis vai junto na
+        resposta pra popular o filtro sem precisar de uma segunda chamada."""
+        pid = request.args.get("projeto_id")
+        if not pid:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+
+        disponiveis = db.fetch_all(f"""
+            SELECT DISTINCT c.numero_ciclo
+            FROM ciclos_migracao c
+            JOIN itens_migracao im ON im.id = c.item_migracao_id
+            WHERE im.projeto_id = {db.q(pid)}
+            ORDER BY c.numero_ciclo DESC
+        """)
+        ciclos_disponiveis = [r["numero_ciclo"] for r in disponiveis]
+
+        numero_ciclo_arg = request.args.get("numero_ciclo")
+        if numero_ciclo_arg not in (None, ""):
+            try:
+                numero_ciclo = int(numero_ciclo_arg)
+            except ValueError:
+                return jsonify({"erro": "numero_ciclo inválido"}), 400
+        else:
+            numero_ciclo = ciclos_disponiveis[0] if ciclos_disponiveis else None
+
+        linhas = []
+        if numero_ciclo is not None:
+            linhas = db.fetch_all(f"""
+                SELECT im.id AS item_migracao_id,
+                       im.nome_tabela_legado, im.nome_tabela_destino, im.sistema_origem,
+                       c.numero_ciclo,
+                       COALESCE(c.qtd_registros_extraidos, 0) AS total_a_carregar,
+                       COALESCE(c.qtd_registros_carregados, 0) AS total_carregado,
+                       COALESCE(c.qtd_rejeicoes, 0) AS total_rejeitados,
+                       CASE WHEN COALESCE(c.qtd_registros_extraidos, 0) > 0
+                            THEN round(100.0 * COALESCE(c.qtd_registros_carregados, 0) / c.qtd_registros_extraidos, 2)
+                            ELSE NULL END AS percentual_carregado,
+                       c.percentual_rejeicao
+                FROM ciclos_migracao c
+                JOIN itens_migracao im ON im.id = c.item_migracao_id
+                WHERE im.projeto_id = {db.q(pid)} AND c.numero_ciclo = {db.q(numero_ciclo)}
+                ORDER BY im.nome_tabela_legado
+            """)
+
+        return jsonify({
+            "numero_ciclo": numero_ciclo,
+            "ciclos_disponiveis": ciclos_disponiveis,
+            "linhas": linhas,
+        })
+
     @app.post("/api/itens-migracao")
     def create_item_migracao():
         return jsonify(insert_row("itens_migracao", request.get_json(force=True), ITEM_MIGRACAO_FIELDS)), 201

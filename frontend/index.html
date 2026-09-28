@@ -995,7 +995,8 @@
     <div class="filters">
       <input type="text" id="mf-search" placeholder="Buscar por tabela, sistema de origem…">
       <select id="mf-status"><option value="">Status (todos)</option><option>Não iniciado</option><option>Em andamento</option><option>Concluído</option><option>Bloqueado</option></select>
-      <button class="btn small" id="btn-new-item-migracao" style="margin-left:auto;">+ Novo item de migração</button>
+      <button class="btn secondary small" id="btn-quadro-ciclo" style="margin-left:auto;">📊 Quadro por ciclo</button>
+      <button class="btn small" id="btn-new-item-migracao">+ Novo item de migração</button>
     </div>
     <div class="table-wrap">
       <table>
@@ -1820,6 +1821,31 @@
       <button class="btn danger ghost" id="mig-delete" hidden>Excluir item</button>
       <div style="display:flex;gap:8px;"><button class="btn secondary" id="mig-cancel">Cancelar</button><button class="btn" id="mig-save">Salvar</button></div>
     </div>
+  </div>
+</div>
+
+<!-- ================= MODAL: QUADRO DE CARGA POR CICLO (78ª rodada) ================= -->
+<div class="overlay" id="overlay-quadro-ciclo" hidden>
+  <div class="modal" style="max-width:960px;">
+    <div class="modal-head"><h2>📊 Quadro de Carga por Ciclo</h2><button class="btn ghost" id="qc-close">✕</button></div>
+    <div class="modal-body single-col">
+      <p class="muted" style="margin-bottom:14px;">Consolida, para um ciclo de execução, quanto havia pra carregar em
+        cada tabela/sistema, quanto foi carregado e quanto foi rejeitado — os mesmos números já registrados na aba
+        "Ciclos de execução" de cada item de migração, um ciclo por vez.</p>
+      <div class="field full" style="display:flex;gap:8px;align-items:flex-end;margin-bottom:14px;max-width:220px;">
+        <div style="flex:1;">
+          <label>Filtro Ciclo</label>
+          <select id="qc-ciclo-filtro"></select>
+        </div>
+      </div>
+      <div id="qc-vazio" class="muted" hidden>Nenhum ciclo de execução registrado ainda para este projeto.</div>
+      <div class="table-wrap" id="qc-tabela-wrap"><table>
+        <thead><tr><th>Destino/Sistema</th><th>Número do Ciclo</th><th>Total a carregar</th><th>Total carregado</th><th>Total rejeitados</th><th>% carregado</th><th>% rejeitado</th></tr></thead>
+        <tbody id="qc-tbody"></tbody>
+        <tfoot id="qc-tfoot"></tfoot>
+      </table></div>
+    </div>
+    <div class="modal-foot"><span></span><button class="btn secondary" id="qc-fechar">Fechar</button></div>
   </div>
 </div>
 
@@ -2903,7 +2929,7 @@ async function afterProjetoReady(){
   aplicarMarcaNoTopo();
   fillStaticSelects();
   wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireGanttToolbar(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireExportarCronograma(); wireExportarCronogramaXml(); wireRemoverCronograma(); wireRemoverRequisitos(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma(); wireRenumerarCronograma();
-  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros(); wireRubricaModal(); wireRubricasFiltros(); wireImportRubricas(); wireComparacaoFolhaPane(); wireComparacaoFolhaDashboard();
+  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros(); wireQuadroCicloModal(); wireRubricaModal(); wireRubricasFiltros(); wireImportRubricas(); wireComparacaoFolhaPane(); wireComparacaoFolhaDashboard();
   setupCsvTemplateLink();
   await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias(), loadItensMigracao(), loadRubricas()]);
   // Reaplica agora que REQUISITOS/ATIVIDADES já estão carregados — os selects
@@ -5569,6 +5595,99 @@ async function addCicloMigracao(){
     await renderCiclosMigracaoModal(editingItemMigracaoId);
     await loadItensMigracao(); renderItensMigracao();
   }catch(e){}
+}
+
+// ---------------- Quadro de Carga por Ciclo (78ª rodada) ----------------
+// Pedido do usuário: um botão em Migração de Dados que gere um quadro
+// consolidado — Destino/Sistema, Número do Ciclo, Total a carregar, Total
+// carregado, Total rejeitados, % carregado, % rejeitado — filtrado por UM
+// ciclo de execução por vez (o "Filtro Ciclo" do modal), sempre abrindo por
+// padrão no último ciclo já registrado em qualquer item do projeto. O
+// backend (GET /itens-migracao/quadro-ciclo) já devolve a lista de ciclos
+// disponíveis pra popular o filtro e as linhas do ciclo selecionado — nada
+// disso é calculado no front, só formatado/exibido.
+async function abrirQuadroCicloModal(){
+  $("overlay-quadro-ciclo").hidden = false;
+  $("qc-ciclo-filtro").innerHTML = `<option>Carregando…</option>`;
+  $("qc-tbody").innerHTML = "";
+  $("qc-tfoot").innerHTML = "";
+  await carregarQuadroCiclo(null);
+}
+function closeQuadroCicloModal(){ $("overlay-quadro-ciclo").hidden = true; }
+
+async function carregarQuadroCiclo(numeroCiclo){
+  const qs = numeroCiclo!=null ? `&numero_ciclo=${encodeURIComponent(numeroCiclo)}` : "";
+  let res;
+  try{ res = await api(`/itens-migracao/quadro-ciclo?projeto_id=${PROJETO.id}${qs}`); }
+  catch(e){ return; }
+  renderQuadroCiclo(res);
+}
+
+function renderQuadroCiclo(res){
+  const numeroCiclo = res.numero_ciclo;
+  const disponiveis = res.ciclos_disponiveis || [];
+  const linhas = res.linhas || [];
+
+  // Preserva a seleção atual do filtro (o ciclo escolhido pelo usuário, ou o
+  // último por padrão na primeira carga) — repopular o <select> a cada troca
+  // é o que permite trocar de ciclo sem fechar/reabrir o modal.
+  $("qc-ciclo-filtro").innerHTML = disponiveis.length
+    ? disponiveis.map(n=>`<option value="${n}" ${n===numeroCiclo?"selected":""}>Ciclo ${n}</option>`).join("")
+    : `<option value="">—</option>`;
+
+  $("qc-vazio").hidden = disponiveis.length > 0;
+  $("qc-tabela-wrap").hidden = disponiveis.length === 0;
+  if(!disponiveis.length) return;
+
+  if(!linhas.length){
+    $("qc-tbody").innerHTML = `<tr class="empty-row"><td colspan="7">Nenhum item de migração tem um ciclo nº ${esc(numeroCiclo)} registrado.</td></tr>`;
+    $("qc-tfoot").innerHTML = "";
+    return;
+  }
+
+  $("qc-tbody").innerHTML = linhas.map(l=>{
+    const pctCarregado = l.percentual_carregado!=null ? Number(l.percentual_carregado).toFixed(2)+"%" : "—";
+    const pctRejeitado = l.percentual_rejeicao!=null ? Number(l.percentual_rejeicao).toFixed(2)+"%" : "—";
+    return `<tr>
+      <td>${esc(l.nome_tabela_destino || l.nome_tabela_legado)}${l.sistema_origem?`<div class="muted">${esc(l.sistema_origem)}</div>`:""}</td>
+      <td class="mono">${l.numero_ciclo}</td>
+      <td class="mono">${Number(l.total_a_carregar||0).toLocaleString('pt-BR')}</td>
+      <td class="mono">${Number(l.total_carregado||0).toLocaleString('pt-BR')}</td>
+      <td class="mono">${Number(l.total_rejeitados||0).toLocaleString('pt-BR')}</td>
+      <td>${pctCarregado}</td>
+      <td>${pctRejeitado}</td>
+    </tr>`;
+  }).join("");
+
+  // Linha de total geral — soma simples das 3 colunas de quantidade, com os
+  // dois percentuais recalculados sobre o total (não é a média dos % de
+  // cada linha, que distorceria o resultado quando as tabelas têm tamanhos
+  // bem diferentes entre si).
+  const totA = linhas.reduce((s,l)=>s+Number(l.total_a_carregar||0), 0);
+  const totC = linhas.reduce((s,l)=>s+Number(l.total_carregado||0), 0);
+  const totR = linhas.reduce((s,l)=>s+Number(l.total_rejeitados||0), 0);
+  const pctCGlobal = totA>0 ? 100*totC/totA : null;
+  const pctRGlobal = totA>0 ? 100*totR/totA : null;
+  $("qc-tfoot").innerHTML = `<tr style="font-weight:700;border-top:2px solid var(--border);">
+    <td>Total geral</td>
+    <td></td>
+    <td class="mono">${totA.toLocaleString('pt-BR')}</td>
+    <td class="mono">${totC.toLocaleString('pt-BR')}</td>
+    <td class="mono">${totR.toLocaleString('pt-BR')}</td>
+    <td>${pctCGlobal===null?"—":pctCGlobal.toFixed(2)+"%"}</td>
+    <td>${pctRGlobal===null?"—":pctRGlobal.toFixed(2)+"%"}</td>
+  </tr>`;
+}
+
+function wireQuadroCicloModal(){
+  $("btn-quadro-ciclo").addEventListener("click", abrirQuadroCicloModal);
+  $("qc-close").addEventListener("click", closeQuadroCicloModal);
+  $("qc-fechar").addEventListener("click", closeQuadroCicloModal);
+  $("overlay-quadro-ciclo").addEventListener("click", e=>{ if(e.target.id==="overlay-quadro-ciclo") closeQuadroCicloModal(); });
+  $("qc-ciclo-filtro").addEventListener("change", ()=>{
+    const v = $("qc-ciclo-filtro").value;
+    carregarQuadroCiclo(v===""?null:Number(v));
+  });
 }
 
 // ================= RUBRICAS (53ª rodada) =================
