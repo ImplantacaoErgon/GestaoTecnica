@@ -1832,11 +1832,12 @@
       <p class="muted" style="margin-bottom:14px;">Consolida, para um ciclo de execução, quanto havia pra carregar em
         cada tabela/sistema, quanto foi carregado e quanto foi rejeitado — os mesmos números já registrados na aba
         "Ciclos de execução" de cada item de migração, um ciclo por vez.</p>
-      <div class="field full" style="display:flex;gap:8px;align-items:flex-end;margin-bottom:14px;max-width:220px;">
-        <div style="flex:1;">
+      <div class="field full" style="display:flex;gap:8px;align-items:flex-end;margin-bottom:14px;">
+        <div style="max-width:220px;">
           <label>Filtro Ciclo</label>
           <select id="qc-ciclo-filtro"></select>
         </div>
+        <button class="btn secondary small" id="qc-exportar-excel" style="margin-left:auto;">⬇ Exportar Excel</button>
       </div>
       <div id="qc-vazio" class="muted" hidden>Nenhum ciclo de execução registrado ainda para este projeto.</div>
       <div class="table-wrap" id="qc-tabela-wrap"><table>
@@ -5611,6 +5612,7 @@ async function abrirQuadroCicloModal(){
   $("qc-ciclo-filtro").innerHTML = `<option>Carregando…</option>`;
   $("qc-tbody").innerHTML = "";
   $("qc-tfoot").innerHTML = "";
+  $("qc-exportar-excel").disabled = true;
   await carregarQuadroCiclo(null);
 }
 function closeQuadroCicloModal(){ $("overlay-quadro-ciclo").hidden = true; }
@@ -5637,6 +5639,10 @@ function renderQuadroCiclo(res){
 
   $("qc-vazio").hidden = disponiveis.length > 0;
   $("qc-tabela-wrap").hidden = disponiveis.length === 0;
+  // Exportar só faz sentido tendo alguma linha na tela — evita gerar/baixar
+  // uma planilha vazia quando não há ciclo nenhum, ou o ciclo escolhido não
+  // tem nenhum item de migração vinculado a ele.
+  $("qc-exportar-excel").disabled = !linhas.length;
   if(!disponiveis.length) return;
 
   if(!linhas.length){
@@ -5687,6 +5693,16 @@ function wireQuadroCicloModal(){
   $("qc-ciclo-filtro").addEventListener("change", ()=>{
     const v = $("qc-ciclo-filtro").value;
     carregarQuadroCiclo(v===""?null:Number(v));
+  });
+  // 79ª rodada — exporta exatamente o ciclo que está na tela no momento
+  // (mesmo filtro selecionado); o backend recalcula os mesmos números com a
+  // mesma consulta usada pelo JSON da tela, então planilha e tela nunca
+  // divergem entre si.
+  $("qc-exportar-excel").addEventListener("click", ()=>{
+    const v = $("qc-ciclo-filtro").value;
+    const params = new URLSearchParams({ projeto_id: PROJETO.id });
+    if(v!=="") params.set("numero_ciclo", v);
+    window.open(`${API}/itens-migracao/quadro-ciclo/exportar?${params.toString()}`, "_blank");
   });
 }
 

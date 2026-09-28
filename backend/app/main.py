@@ -9,7 +9,7 @@ from datetime import datetime, date, timedelta
 
 from flask import Flask, request, jsonify, send_from_directory, send_file, abort, session
 
-from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_renumeracao, cronograma_anomalias, cronograma_export, cronograma_export_xml, cronograma_comparacao, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, drive_rubricas, comparacao_folha, comparacao_folha_import, google_drive
+from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_renumeracao, cronograma_anomalias, cronograma_export, cronograma_export_xml, cronograma_comparacao, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, drive_rubricas, comparacao_folha, comparacao_folha_import, google_drive, migracao_quadro_export
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 FRONTEND_DIR = os.environ.get(
@@ -2216,19 +2216,12 @@ def create_app():
             "itens_bloqueados": 0, "itens_nao_iniciados": 0, "total_estimado": 0, "total_carregado": 0,
         })
 
-    @app.get("/api/itens-migracao/quadro-ciclo")
-    def quadro_ciclo_migracao():
-        """78ª rodada: "quadro" pedido pelo usuário em Migração de Dados —
-        Destino/Sistema, Número do Ciclo, Total a carregar, Total carregado,
-        Total rejeitados, % carregado, % rejeitado, consolidado por UM ciclo
-        de execução por vez (o "Filtro Ciclo" da tela). Sem numero_ciclo no
-        querystring, usa o maior já registrado em qualquer item do projeto
-        ("sempre o último", como pedido) — ciclos_disponiveis vai junto na
-        resposta pra popular o filtro sem precisar de uma segunda chamada."""
-        pid = request.args.get("projeto_id")
-        if not pid:
-            return jsonify({"erro": "projeto_id é obrigatório"}), 400
-
+    def _montar_quadro_ciclo(pid, numero_ciclo_arg):
+        """78ª/79ª rodada: monta o "quadro" de carga por ciclo — usado tanto
+        pelo endpoint JSON (tela) quanto pelo export em Excel, pra nunca
+        calcular os números de um jeito na tela e de outro na planilha.
+        Devolve (numero_ciclo, ciclos_disponiveis, linhas, erro); erro vem
+        preenchido (mensagem, status) só quando numero_ciclo_arg é inválido."""
         disponiveis = db.fetch_all(f"""
             SELECT DISTINCT c.numero_ciclo
             FROM ciclos_migracao c
@@ -2238,12 +2231,11 @@ def create_app():
         """)
         ciclos_disponiveis = [r["numero_ciclo"] for r in disponiveis]
 
-        numero_ciclo_arg = request.args.get("numero_ciclo")
         if numero_ciclo_arg not in (None, ""):
             try:
                 numero_ciclo = int(numero_ciclo_arg)
             except ValueError:
-                return jsonify({"erro": "numero_ciclo inválido"}), 400
+                return None, ciclos_disponiveis, [], ("numero_ciclo inválido", 400)
         else:
             numero_ciclo = ciclos_disponiveis[0] if ciclos_disponiveis else None
 
@@ -2266,11 +2258,77 @@ def create_app():
                 ORDER BY im.nome_tabela_legado
             """)
 
+        return numero_ciclo, ciclos_disponiveis, linhas, None
+
+    def _totais_quadro_ciclo(linhas):
+        """Mesma soma exibida na linha "Total geral" da tela (ver
+        renderQuadroCiclo no frontend) — os dois percentuais são
+        recalculados sobre a soma, não a média dos percentuais de cada
+        linha, senão distorce quando as tabelas têm tamanhos bem diferentes."""
+        total_a_carregar = sum(l["total_a_carregar"] or 0 for l in linhas)
+        total_carregado = sum(l["total_carregado"] or 0 for l in linhas)
+        total_rejeitados = sum(l["total_rejeitados"] or 0 for l in linhas)
+        return {
+            "total_a_carregar": total_a_carregar,
+            "total_carregado": total_carregado,
+            "total_rejeitados": total_rejeitados,
+            "percentual_carregado": round(100.0 * total_carregado / total_a_carregar, 2) if total_a_carregar > 0 else None,
+            "percentual_rejeicao": round(100.0 * total_rejeitados / total_a_carregar, 2) if total_a_carregar > 0 else None,
+        }
+
+    @app.get("/api/itens-migracao/quadro-ciclo")
+    def quadro_ciclo_migracao():
+        """78ª rodada: "quadro" pedido pelo usuário em Migração de Dados —
+        Destino/Sistema, Número do Ciclo, Total a carregar, Total carregado,
+        Total rejeitados, % carregado, % rejeitado, consolidado por UM ciclo
+        de execução por vez (o "Filtro Ciclo" da tela). Sem numero_ciclo no
+        querystring, usa o maior já registrado em qualquer item do projeto
+        ("sempre o último", como pedido) — ciclos_disponiveis vai junto na
+        resposta pra popular o filtro sem precisar de uma segunda chamada."""
+        pid = request.args.get("projeto_id")
+        if not pid:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        numero_ciclo, ciclos_disponiveis, linhas, erro = _montar_quadro_ciclo(pid, request.args.get("numero_ciclo"))
+        if erro:
+            return jsonify({"erro": erro[0]}), erro[1]
         return jsonify({
             "numero_ciclo": numero_ciclo,
             "ciclos_disponiveis": ciclos_disponiveis,
             "linhas": linhas,
         })
+
+    @app.get("/api/itens-migracao/quadro-ciclo/exportar")
+    def quadro_ciclo_migracao_exportar():
+        """79ª rodada: "habilite a exportação para planilha excel" do quadro
+        acima — mesmos dados e mesmo cálculo de _montar_quadro_ciclo/
+        _totais_quadro_ciclo (nada recalculado na planilha), formatados por
+        app/migracao_quadro_export.py numa aba só, com a linha de total
+        geral em negrito igual à da tela."""
+        pid = request.args.get("projeto_id")
+        if not pid:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        projeto = db.fetch_one(f"SELECT nome, sigla FROM projetos WHERE id = {db.q(pid)}")
+        if not projeto:
+            abort(404)
+        numero_ciclo, _ciclos_disponiveis, linhas, erro = _montar_quadro_ciclo(pid, request.args.get("numero_ciclo"))
+        if erro:
+            return jsonify({"erro": erro[0]}), erro[1]
+        totais = _totais_quadro_ciclo(linhas)
+        try:
+            xlsx_bytes = migracao_quadro_export.gerar_planilha_bytes(numero_ciclo, linhas, totais)
+        except Exception as e:
+            print(f"[migracao_quadro_export] erro ao gerar planilha: {e}", flush=True)
+            traceback.print_exc()
+            return jsonify({"erro": f"Falha ao gerar a planilha: {e}"}), 500
+        base = (projeto.get("sigla") or projeto.get("nome") or "projeto").strip()
+        base = "".join(c if c.isalnum() or c in "-_" else "-" for c in base).strip("-") or "projeto"
+        sufixo_ciclo = f"-ciclo{numero_ciclo}" if numero_ciclo is not None else ""
+        nome_arquivo = f"quadro-carga-migracao-{base}{sufixo_ciclo}-{date.today().isoformat()}.xlsx"
+        return send_file(
+            io.BytesIO(xlsx_bytes),
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True, download_name=nome_arquivo,
+        )
 
     @app.post("/api/itens-migracao")
     def create_item_migracao():
