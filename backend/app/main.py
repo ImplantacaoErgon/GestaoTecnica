@@ -2244,7 +2244,7 @@ def create_app():
             linhas = db.fetch_all(f"""
                 SELECT im.id AS item_migracao_id,
                        im.nome_tabela_legado, im.nome_tabela_destino, im.sistema_origem,
-                       c.numero_ciclo,
+                       c.numero_ciclo, c.data_execucao,
                        COALESCE(c.qtd_registros_extraidos, 0) AS total_a_carregar,
                        COALESCE(c.qtd_registros_carregados, 0) AS total_carregado,
                        COALESCE(c.qtd_rejeicoes, 0) AS total_rejeitados,
@@ -2278,10 +2278,11 @@ def create_app():
 
     @app.get("/api/itens-migracao/quadro-ciclo")
     def quadro_ciclo_migracao():
-        """78ª rodada: "quadro" pedido pelo usuário em Migração de Dados —
-        Destino/Sistema, Número do Ciclo, Total a carregar, Total carregado,
-        Total rejeitados, % carregado, % rejeitado, consolidado por UM ciclo
-        de execução por vez (o "Filtro Ciclo" da tela). Sem numero_ciclo no
+        """78ª/80ª rodada: "quadro" pedido pelo usuário em Migração de Dados —
+        Destino/Sistema, Número do Ciclo, Data do ciclo, Total a carregar,
+        Total carregado, Total rejeitados, % carregado, % rejeitado,
+        consolidado por UM ciclo de execução por vez (o "Filtro Ciclo" da
+        tela). Sem numero_ciclo no
         querystring, usa o maior já registrado em qualquer item do projeto
         ("sempre o último", como pedido) — ciclos_disponiveis vai junto na
         resposta pra popular o filtro sem precisar de uma segunda chamada."""

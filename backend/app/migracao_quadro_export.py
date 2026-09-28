@@ -1,6 +1,6 @@
 """
 Exportação em Excel do "Quadro de Carga por Ciclo" — Migração de Dados
-(78ª/79ª rodada).
+(78ª/79ª/80ª rodada).
 
 O quadro em si (filtro de ciclo, linhas por item de migração, total geral)
 já é montado e calculado inteiramente no backend por
@@ -10,6 +10,7 @@ mesmo espírito de app/relatorio_atividades.py: cabeçalho colorido, colunas
 com largura fixada na unha (autofit manual, sem depender de biblioteca
 extra) e uma linha de total geral em negrito ao final.
 """
+from datetime import date
 from io import BytesIO
 
 from openpyxl import Workbook
@@ -20,11 +21,13 @@ COR_CABECALHO_HEX = "1A3D5C"
 COR_TOTAL_HEX = "E8EDF2"
 
 CABECALHO = [
-    "Destino/Sistema", "Sistema de origem", "Número do Ciclo",
+    "Destino/Sistema", "Sistema de origem", "Número do Ciclo", "Data do ciclo",
     "Total a carregar", "Total carregado", "Total rejeitados",
     "% carregado", "% rejeitado",
 ]
-LARGURAS = [28, 22, 14, 16, 16, 16, 13, 13]
+LARGURAS = [28, 22, 14, 14, 16, 16, 16, 13, 13]
+COL_PCT = (8, 9)  # % carregado, % rejeitado — 1-based, ver CABECALHO acima
+COL_DATA = 4
 
 
 def _pct(v):
@@ -35,14 +38,29 @@ def _pct(v):
     return (float(v) / 100.0) if v is not None else None
 
 
+def _data(v):
+    """80ª rodada: `data_execucao` chega do banco como string "AAAA-MM-DD"
+    (serializada em JSON) — converte pra `date` de verdade, não texto, pra
+    célula usar o formato de data nativo do Excel (ordena/filtra como data,
+    não como string)."""
+    if v is None:
+        return None
+    if isinstance(v, date):
+        return v
+    try:
+        return date.fromisoformat(str(v)[:10])
+    except ValueError:
+        return None
+
+
 def gerar_planilha_bytes(numero_ciclo, linhas, totais):
     """`linhas`: mesma lista devolvida por GET /itens-migracao/quadro-ciclo
     (campos nome_tabela_destino/nome_tabela_legado, sistema_origem,
-    numero_ciclo, total_a_carregar, total_carregado, total_rejeitados,
-    percentual_carregado, percentual_rejeicao). `totais`: dict com
-    total_a_carregar/total_carregado/total_rejeitados/percentual_carregado/
-    percentual_rejeicao já somados (mesmo cálculo do total geral exibido na
-    tela — não é recalculado aqui de novo)."""
+    numero_ciclo, data_execucao, total_a_carregar, total_carregado,
+    total_rejeitados, percentual_carregado, percentual_rejeicao). `totais`:
+    dict com total_a_carregar/total_carregado/total_rejeitados/
+    percentual_carregado/percentual_rejeicao já somados (mesmo cálculo do
+    total geral exibido na tela — não é recalculado aqui de novo)."""
     wb = Workbook()
     ws = wb.active
     ws.title = f"Ciclo {numero_ciclo}" if numero_ciclo is not None else "Quadro"
@@ -60,19 +78,21 @@ def gerar_planilha_bytes(numero_ciclo, linhas, totais):
             l.get("nome_tabela_destino") or l.get("nome_tabela_legado") or "",
             l.get("sistema_origem") or "",
             l.get("numero_ciclo"),
+            _data(l.get("data_execucao")),
             l.get("total_a_carregar") or 0,
             l.get("total_carregado") or 0,
             l.get("total_rejeitados") or 0,
             _pct(l.get("percentual_carregado")),
             _pct(l.get("percentual_rejeicao")),
         ])
-        for col in (7, 8):
+        ws.cell(row=linha, column=COL_DATA).number_format = "dd/mm/yyyy"
+        for col in COL_PCT:
             ws.cell(row=linha, column=col).number_format = "0.00%"
         linha += 1
 
     if linhas:
         ws.append([
-            "Total geral", "", "",
+            "Total geral", "", "", "",
             totais.get("total_a_carregar") or 0,
             totais.get("total_carregado") or 0,
             totais.get("total_rejeitados") or 0,
@@ -83,7 +103,7 @@ def gerar_planilha_bytes(numero_ciclo, linhas, totais):
             cel = ws.cell(row=linha, column=col)
             cel.font = Font(bold=True)
             cel.fill = PatternFill(start_color=COR_TOTAL_HEX, end_color=COR_TOTAL_HEX, fill_type="solid")
-        for col in (7, 8):
+        for col in COL_PCT:
             ws.cell(row=linha, column=col).number_format = "0.00%"
 
     for i, largura in enumerate(LARGURAS, start=1):

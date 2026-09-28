@@ -1841,7 +1841,7 @@
       </div>
       <div id="qc-vazio" class="muted" hidden>Nenhum ciclo de execução registrado ainda para este projeto.</div>
       <div class="table-wrap" id="qc-tabela-wrap"><table>
-        <thead><tr><th>Destino/Sistema</th><th>Número do Ciclo</th><th>Total a carregar</th><th>Total carregado</th><th>Total rejeitados</th><th>% carregado</th><th>% rejeitado</th></tr></thead>
+        <thead><tr><th>Destino/Sistema</th><th>Número do Ciclo</th><th>Data do ciclo</th><th>Total a carregar</th><th>Total carregado</th><th>Total rejeitados</th><th>% carregado</th><th>% rejeitado</th></tr></thead>
         <tbody id="qc-tbody"></tbody>
         <tfoot id="qc-tfoot"></tfoot>
       </table></div>
@@ -5646,7 +5646,7 @@ function renderQuadroCiclo(res){
   if(!disponiveis.length) return;
 
   if(!linhas.length){
-    $("qc-tbody").innerHTML = `<tr class="empty-row"><td colspan="7">Nenhum item de migração tem um ciclo nº ${esc(numeroCiclo)} registrado.</td></tr>`;
+    $("qc-tbody").innerHTML = `<tr class="empty-row"><td colspan="8">Nenhum item de migração tem um ciclo nº ${esc(numeroCiclo)} registrado.</td></tr>`;
     $("qc-tfoot").innerHTML = "";
     return;
   }
@@ -5657,6 +5657,7 @@ function renderQuadroCiclo(res){
     return `<tr>
       <td>${esc(l.nome_tabela_destino || l.nome_tabela_legado)}${l.sistema_origem?`<div class="muted">${esc(l.sistema_origem)}</div>`:""}</td>
       <td class="mono">${l.numero_ciclo}</td>
+      <td class="mono">${fmtDate(l.data_execucao)}</td>
       <td class="mono">${Number(l.total_a_carregar||0).toLocaleString('pt-BR')}</td>
       <td class="mono">${Number(l.total_carregado||0).toLocaleString('pt-BR')}</td>
       <td class="mono">${Number(l.total_rejeitados||0).toLocaleString('pt-BR')}</td>
@@ -5668,7 +5669,8 @@ function renderQuadroCiclo(res){
   // Linha de total geral — soma simples das 3 colunas de quantidade, com os
   // dois percentuais recalculados sobre o total (não é a média dos % de
   // cada linha, que distorceria o resultado quando as tabelas têm tamanhos
-  // bem diferentes entre si).
+  // bem diferentes entre si). Data do ciclo não entra na soma — a coluna
+  // fica em branco nessa linha, mesmo padrão da coluna "Número do Ciclo".
   const totA = linhas.reduce((s,l)=>s+Number(l.total_a_carregar||0), 0);
   const totC = linhas.reduce((s,l)=>s+Number(l.total_carregado||0), 0);
   const totR = linhas.reduce((s,l)=>s+Number(l.total_rejeitados||0), 0);
@@ -5676,6 +5678,7 @@ function renderQuadroCiclo(res){
   const pctRGlobal = totA>0 ? 100*totR/totA : null;
   $("qc-tfoot").innerHTML = `<tr style="font-weight:700;border-top:2px solid var(--border);">
     <td>Total geral</td>
+    <td></td>
     <td></td>
     <td class="mono">${totA.toLocaleString('pt-BR')}</td>
     <td class="mono">${totC.toLocaleString('pt-BR')}</td>
