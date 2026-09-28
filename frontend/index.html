@@ -3753,8 +3753,26 @@ function _gridCelulaHtml(a, col){
       return `<span class="mono">${esc(a.codigo_wbs||"—")}</span>`;
     case "nome": {
       const v = _efetivo(a, "nome");
+      // 77ª rodada: o nome sumia (só ficavam os ícones + "...") em qualquer
+      // atividade marcada como ★master/💰entregável/📌data fixada. Causa: os
+      // ícones e o <input> ficavam lado a lado dentro da MESMA célula, que
+      // tem overflow:hidden + white-space:nowrap + text-overflow:ellipsis
+      // (.grid-tabela tbody td); e o <input> já tem width:100% da célula
+      // (.grid-tabela td input) — ou seja, sozinho ele já preenche a célula
+      // inteira. Ao somar a largura dos ícones NA FRENTE dele, o total
+      // sempre estourava a célula. Como um <input> é uma caixa atômica (o
+      // navegador não consegue reticenciar só uma parte do texto dele), o
+      // resultado era a caixa inteira sumir por trás do "…", levando o nome
+      // junto — sobrando só os ícones (que vêm antes e cabem). É por isso
+      // que só as atividades marcadas apareciam sem nome; as demais não têm
+      // ícone nenhum disputando espaço com o input.
+      // Correção: ícone(s) + input dentro de um flex container — os ícones
+      // ficam com largura fixa (flex:0 0 auto) e o input divide só o espaço
+      // que sobra (flex:1 1 auto, min-width:0, width:auto — sobrescrevendo
+      // via style inline o width:100% do CSS genérico, já que style inline
+      // sempre tem prioridade sobre uma regra de classe no stylesheet).
       const marcas = `${a.eh_atividade_master?`<span title="Atividade master (entregável mestre do projeto)">★</span> `:""}${a.eh_entregavel?`<span title="Entregável (atrelado a faturamento)">💰</span> `:""}${a.data_execucao_fixada?`<span title="Data de execução fixada — Início/Fim previsto só mudam manualmente">📌</span> `:""}`;
-      return `${marcas}<input type="text" data-campo="nome" value="${esc(v||"")}" ${dis}>`;
+      return `<div style="display:flex;align-items:center;gap:2px;min-width:0;overflow:hidden;">${marcas?`<span style="flex:0 0 auto;white-space:nowrap;">${marcas}</span>`:""}<input type="text" data-campo="nome" value="${esc(v||"")}" ${dis} style="flex:1 1 auto;min-width:0;width:auto;"></div>`;
     }
     case "etapa_id": {
       const v = _efetivo(a, "etapa_id");
