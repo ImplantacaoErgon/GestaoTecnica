@@ -98,6 +98,18 @@ PRIORIDADE_VALIDAS = {"Urgente", "Alta", "Média", "Baixa"}
 COBRANCA_VALIDAS = {"Sim", "Não", "N/A"}
 TIPO_REQUISITO_VALIDOS = {"Funcional", "Não Funcional"}
 TIPO_VINCULO_VALIDOS = {"Consultoria", "Cliente", "Terceirizado"}
+# 74ª rodada (migração 033) — "Tipo de Restrição", padrão MS Project/ProjectLibre
+# (pedido do usuário com print da tela de restrição do MS Project/ProjectLibre em
+# anexo). Os dois primeiros ("...possível") nunca têm data associada — ver
+# TIPOS_RESTRICAO_SEM_DATA, usado pela cascata da Edição em Lote (cronograma_edicao_lote.py)
+# pra zerar data_restricao sozinha quando o tipo muda pra um desses.
+TIPOS_RESTRICAO_VALIDOS = [
+    "O Mais Breve Possível", "O mais tarde possível",
+    "Deve iniciar em", "Deve terminar em",
+    "Não iniciar antes de", "Não iniciar depois de",
+    "Não terminar antes de", "Não terminar depois de",
+]
+TIPOS_RESTRICAO_SEM_DATA = {"O Mais Breve Possível", "O mais tarde possível"}
 
 ATIVIDADE_FIELDS = [
     "projeto_id", "etapa_id", "frente_trabalho_id", "tipo_atividade_elementar_id", "atividade_pai_id",
@@ -110,6 +122,13 @@ ATIVIDADE_FIELDS = [
     # por dependência (Replanejamento e cascata da Edição em Lote) — só edição manual direta
     # (aqui mesmo) pode mudar a data de uma atividade fixada. Ver app/cronograma_anomalias.py.
     "data_execucao_fixada",
+    # 74ª rodada (migração 033) — Tipo de Restrição/Data da restrição (padrão MS
+    # Project/ProjectLibre) + 15 campos genéricos (uso livre, sem significado
+    # pré-definido) pedidos pra poderem ser usados diretamente no Cronograma.
+    "tipo_restricao", "data_restricao",
+    "numero_1", "numero_2", "numero_3", "numero_4", "numero_5",
+    "booleano_1", "booleano_2", "booleano_3", "booleano_4", "booleano_5",
+    "texto_1", "texto_2", "texto_3", "texto_4", "texto_5",
 ]
 RELATO_FIELDS = ["autor_id", "autor_nome", "texto"]  # eh_pendencia/pendencia_* removidos na 41ª rodada (migração 027) — ver PENDENCIA_FIELDS abaixo
 # Status que exigem ao menos um relato de andamento registrado (ver create/update_atividade).
@@ -576,6 +595,17 @@ def _normaliza_data(v):
     if v in (None, ""):
         return None
     return v.isoformat() if hasattr(v, "isoformat") else v
+
+
+def _normalizar_restricao(data):
+    """74ª rodada — mesma regra usada na cascata da Edição em Lote
+    (cronograma_edicao_lote._validar_campos_simples): um tipo_restricao
+    "...possível" (O Mais Breve Possível / O mais tarde possível) nunca tem
+    data associada — zera data_restricao sozinho aqui pra não depender só
+    do front-end (que já desabilita/limpa o campo na tela) pra manter essa
+    regra consistente com quem chamar a API diretamente."""
+    if data.get("tipo_restricao") in TIPOS_RESTRICAO_SEM_DATA:
+        data["data_restricao"] = None
 
 
 def _cascatear_edicao_individual(projeto_id, edicao, excluir_id=None, origem_rotulo=None):
@@ -1209,6 +1239,7 @@ def create_app():
         except ValueError as e:
             return jsonify({"erro": str(e)}), 400
         aplicar_percentual_inicial(None, data)
+        _normalizar_restricao(data)
         return jsonify(insert_row("atividades", data, ATIVIDADE_FIELDS)), 201
 
     @app.get("/api/atividades/<id>")
@@ -1246,6 +1277,7 @@ def create_app():
         except ValueError as e:
             return jsonify({"erro": str(e)}), 400
         aplicar_percentual_inicial(atual, data)
+        _normalizar_restricao(data)
         usuario = request.headers.get("X-Usuario", "")
         prelude = f"SET LOCAL app.usuario_atual = {db.q(usuario)};" if usuario else ""
         # 71ª rodada — dispara a cascata pras sucessoras quando o que muda é
@@ -2098,6 +2130,28 @@ def create_app():
         if extraidos is not None and carregados is not None:
             payload["qtd_rejeicoes"] = max(0, int(extraidos) - int(carregados))
         return jsonify(insert_row("ciclos_migracao", payload, CICLO_FIELDS)), 201
+
+    @app.put("/api/ciclos-migracao/<id>")
+    def update_ciclo(id):
+        """76ª rodada: permite corrigir os dados de um ciclo já registrado
+        (a tela só tinha "+ Registrar ciclo" e excluir — sem editar, um
+        número digitado errado só dava pra corrigir excluindo e recriando,
+        perdendo o número/posição original). Mesma regra de
+        `create_ciclo` pra Rejeições = Extraídos - Carregados, recalculada
+        aqui a partir do valor já salvo quando a edição não reenvia os
+        dois campos (patch_row só atualiza o que vier no payload)."""
+        atual = db.fetch_one(f"SELECT * FROM ciclos_migracao WHERE id = {db.q(id)}")
+        if not atual:
+            abort(404)
+        payload = request.get_json(force=True)
+        extraidos = payload.get("qtd_registros_extraidos", atual.get("qtd_registros_extraidos"))
+        carregados = payload.get("qtd_registros_carregados", atual.get("qtd_registros_carregados"))
+        if extraidos is not None and carregados is not None:
+            payload["qtd_rejeicoes"] = max(0, int(extraidos) - int(carregados))
+        row = patch_row("ciclos_migracao", id, payload, CICLO_FIELDS)
+        if not row:
+            abort(404)
+        return jsonify(row)
 
     @app.delete("/api/ciclos-migracao/<id>")
     def delete_ciclo(id):

@@ -1484,6 +1484,7 @@
       <button data-pane="dependencias">Dependências</button>
       <button data-pane="requisitos">Requisitos vinculados</button>
       <button data-pane="anexos">Anexos</button>
+      <button data-pane="genericos">🧩 Campos genéricos</button>
       <button data-pane="historico" id="at-tab-historico">🛡️ Histórico</button>
     </div>
 
@@ -1531,6 +1532,23 @@
             📌 Fixar data de execução (Início/Fim previsto só mudam manualmente)
           </label>
         </div>
+
+        <!-- 74ª rodada (migração 033) — Tipo de restrição, padrão MS Project/ProjectLibre.
+             "Data da restrição" só se aplica aos tipos que não são "...possível" — mostra
+             "ND" (desabilitado) pros dois que não usam data, igual ao print do usuário. -->
+        <div class="field"><label>Tipo de restrição</label>
+          <select id="at-tipo-restricao">
+            <option>O Mais Breve Possível</option>
+            <option>O mais tarde possível</option>
+            <option>Deve iniciar em</option>
+            <option>Deve terminar em</option>
+            <option>Não iniciar antes de</option>
+            <option>Não iniciar depois de</option>
+            <option>Não terminar antes de</option>
+            <option>Não terminar depois de</option>
+          </select>
+        </div>
+        <div class="field"><label>Data da restrição</label><input id="at-data-restricao" type="date" placeholder="ND"></div>
 
         <div class="field full"><label>Observações</label><textarea id="at-observacoes"></textarea></div>
       </div>
@@ -1599,6 +1617,32 @@
           <button class="btn small" id="at-anexo-add">Enviar</button>
         </div>
         <p class="muted" style="margin-top:10px;">Aceita xls, xlsx, csv, txt, pdf e outros formatos.</p>
+      </div>
+    </div>
+
+    <!-- 74ª rodada (migração 033) — 15 campos genéricos (5 numéricos, 5 booleanos,
+         5 de texto), sem significado pré-definido: uso livre por projeto, pra
+         necessidades que só aparecem depois do sistema em uso (mesmo espírito dos
+         campos Number/Flag/Text do Microsoft Project). Também editáveis direto na
+         grade do Cronograma (colunas no fim da grade, ver GANTT_COLUNAS_BASE). -->
+    <div class="modal-pane" data-pane="genericos">
+      <div class="modal-body">
+        <p class="muted full" style="margin:-4px 0 4px;">Campos de uso livre, sem significado fixo — dá pra usar pra qualquer controle específico que apareça durante o projeto. Também ficam disponíveis como colunas na grade do Cronograma.</p>
+        <div class="field"><label>Numérico 1</label><input id="at-numero-1" type="number" step="any"></div>
+        <div class="field"><label>Numérico 2</label><input id="at-numero-2" type="number" step="any"></div>
+        <div class="field"><label>Numérico 3</label><input id="at-numero-3" type="number" step="any"></div>
+        <div class="field"><label>Numérico 4</label><input id="at-numero-4" type="number" step="any"></div>
+        <div class="field"><label>Numérico 5</label><input id="at-numero-5" type="number" step="any"></div>
+        <div class="field" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="at-booleano-1" style="width:auto;"><label for="at-booleano-1" style="margin:0;">Booleano 1</label></div>
+        <div class="field" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="at-booleano-2" style="width:auto;"><label for="at-booleano-2" style="margin:0;">Booleano 2</label></div>
+        <div class="field" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="at-booleano-3" style="width:auto;"><label for="at-booleano-3" style="margin:0;">Booleano 3</label></div>
+        <div class="field" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="at-booleano-4" style="width:auto;"><label for="at-booleano-4" style="margin:0;">Booleano 4</label></div>
+        <div class="field" style="display:flex;align-items:center;gap:8px;"><input type="checkbox" id="at-booleano-5" style="width:auto;"><label for="at-booleano-5" style="margin:0;">Booleano 5</label></div>
+        <div class="field"><label>Texto 1</label><input id="at-texto-1" type="text"></div>
+        <div class="field"><label>Texto 2</label><input id="at-texto-2" type="text"></div>
+        <div class="field"><label>Texto 3</label><input id="at-texto-3" type="text"></div>
+        <div class="field"><label>Texto 4</label><input id="at-texto-4" type="text"></div>
+        <div class="field"><label>Texto 5</label><input id="at-texto-5" type="text"></div>
       </div>
     </div>
 
@@ -1767,6 +1811,7 @@
           <div class="field" style="margin:0;"><label>Carregados</label><input id="mig-ciclo-carregados" type="number" min="0" step="1" style="width:100px;"></div>
           <div class="field" style="margin:0;"><label>Rejeições (calculado)</label><input id="mig-ciclo-rejeicoes" type="number" min="0" step="1" style="width:100px;" readonly tabindex="-1"></div>
           <button class="btn secondary small" id="mig-ciclo-add">+ Registrar ciclo</button>
+          <button class="btn ghost small" id="mig-ciclo-cancelar-edicao" hidden>Cancelar edição</button>
         </div>
       </div>
       <div class="muted" id="mig-ciclos-aviso" style="grid-column:1/-1;">Salve o item primeiro pra poder registrar ciclos de execução.</div>
@@ -2508,6 +2553,16 @@ const STATUS_COLOR = {"Não iniciada":"faint","Em andamento":"accent","Bloqueada
 // Família de status "concluído" (29ª rodada) — mesma lista de backend/app/main.py
 // STATUS_FAMILIA_CONCLUIDA, duplicada aqui porque o front-end não importa Python.
 const STATUS_FAMILIA_CONCLUIDA = ["Concluída","Concluída com atraso","Concluída com esforço maior","Concluída com atraso e esforço maior"];
+// Tipo de Restrição (74ª rodada, migração 033) — mesma lista de
+// TIPOS_RESTRICAO_VALIDOS/TIPOS_RESTRICAO_SEM_DATA em backend/app/main.py,
+// duplicada aqui pelo mesmo motivo de STATUS_FAMILIA_CONCLUIDA acima.
+const TIPOS_RESTRICAO_OPCOES = [
+  "O Mais Breve Possível", "O mais tarde possível",
+  "Deve iniciar em", "Deve terminar em",
+  "Não iniciar antes de", "Não iniciar depois de",
+  "Não terminar antes de", "Não terminar depois de",
+];
+const TIPOS_RESTRICAO_SEM_DATA = new Set(["O Mais Breve Possível", "O mais tarde possível"]);
 const ATENDIMENTO_COLOR = {"Nativo":"ok","Parcial":"warn","Customizado":"accent","Não atende":"danger","A analisar":"faint"};
 const COLOR_VAR = {ok:"var(--ok)",warn:"var(--warn)",accent:"var(--accent)",danger:"var(--danger)",faint:"var(--text-faint)"};
 const SOFT_VAR = {ok:"var(--ok-soft)",warn:"var(--warn-soft)",accent:"var(--accent-soft)",danger:"var(--danger-soft)",faint:"var(--surface-2)"};
@@ -3498,6 +3553,27 @@ const GANTT_COLUNAS_BASE = [
   // com outro software). Fica no fim, como qualquer coluna nova (ver
   // _gridColunasOrdemLer) — quem quiser em outra posição arrasta pra lá.
   { key:"num_linha",            label:"Nº",                    largura:44  },
+  // 74ª rodada (migração 033) — Tipo de restrição/Data da restrição (padrão MS
+  // Project/ProjectLibre) e os 15 campos genéricos (uso livre) — pedido do
+  // usuário pra poderem ser usados diretamente na grade do Cronograma, não só
+  // no modal individual. Mesma convenção de toda coluna nova: nascem no fim.
+  { key:"tipo_restricao",       label:"Tipo de restrição",     largura:150 },
+  { key:"data_restricao",       label:"Data da restrição",     largura:110 },
+  { key:"numero_1",             label:"Numérico 1",            largura:90  },
+  { key:"numero_2",             label:"Numérico 2",            largura:90  },
+  { key:"numero_3",             label:"Numérico 3",            largura:90  },
+  { key:"numero_4",             label:"Numérico 4",            largura:90  },
+  { key:"numero_5",             label:"Numérico 5",            largura:90  },
+  { key:"booleano_1",           label:"Booleano 1",            largura:80  },
+  { key:"booleano_2",           label:"Booleano 2",            largura:80  },
+  { key:"booleano_3",           label:"Booleano 3",            largura:80  },
+  { key:"booleano_4",           label:"Booleano 4",            largura:80  },
+  { key:"booleano_5",           label:"Booleano 5",            largura:80  },
+  { key:"texto_1",              label:"Texto 1",               largura:130 },
+  { key:"texto_2",              label:"Texto 2",               largura:130 },
+  { key:"texto_3",              label:"Texto 3",               largura:130 },
+  { key:"texto_4",              label:"Texto 4",               largura:130 },
+  { key:"texto_5",              label:"Texto 5",               largura:130 },
 ];
 function _gridColunasOrdemLer(){
   const chavesValidas = GANTT_COLUNAS_BASE.map(c=>c.key);
@@ -3707,6 +3783,31 @@ function _gridCelulaHtml(a, col){
       return responsaveisCell(a);
     case "critica":
       return a.cpm_critica ? pill("Crítica","danger") : "";
+    case "tipo_restricao": {
+      const v = _efetivo(a, "tipo_restricao") || "O Mais Breve Possível";
+      const opts = TIPOS_RESTRICAO_OPCOES.map(t=>`<option ${v===t?"selected":""}>${esc(t)}</option>`).join("");
+      return `<select data-campo="tipo_restricao" ${dis}>${opts}</select>`;
+    }
+    case "data_restricao": {
+      const tipo = _efetivo(a, "tipo_restricao") || "O Mais Breve Possível";
+      const semData = TIPOS_RESTRICAO_SEM_DATA.has(tipo);
+      const v = semData ? "" : (_efetivo(a, "data_restricao") || "");
+      return `<input type="date" data-campo="data_restricao" value="${v}" placeholder="ND" ${dis || (semData?"disabled":"")}>`;
+    }
+    // 15 campos genéricos (74ª rodada) — mesmo padrão de qualquer campo
+    // simples da grade: _efetivo() já respeita edição pendente sozinho.
+    case "numero_1": case "numero_2": case "numero_3": case "numero_4": case "numero_5": {
+      const v = _efetivo(a, col.key);
+      return `<input type="number" step="any" data-campo="${col.key}" value="${v==null?"":v}" ${dis}>`;
+    }
+    case "booleano_1": case "booleano_2": case "booleano_3": case "booleano_4": case "booleano_5": {
+      const v = _efetivo(a, col.key);
+      return `<input type="checkbox" data-campo="${col.key}" ${v?"checked":""} ${dis} style="width:auto;">`;
+    }
+    case "texto_1": case "texto_2": case "texto_3": case "texto_4": case "texto_5": {
+      const v = _efetivo(a, col.key);
+      return `<input type="text" data-campo="${col.key}" value="${esc(v||"")}" ${dis}>`;
+    }
     default:
       return "";
   }
@@ -3857,15 +3958,46 @@ function _gridOnEdicaoCampo(id, campo, el){
     mudou = valor!==null && valor!==valorOriginal;
   } else if(campo==="dtini_prev" || campo==="dtfim_prev"){
     mudou = !!valor && valor !== (original[campo]||"");
-  } else if(campo==="etapa_id" || campo==="frente_trabalho_id"){
+  } else if(campo==="data_restricao"){
+    valor = valor || null;
+    mudou = valor !== (original.data_restricao || null);
+  } else if(campo==="etapa_id" || campo==="frente_trabalho_id" || campo==="tipo_restricao"){
     valor = valor || "";
     mudou = valor !== (original[campo]||"");
+  } else if(/^numero_[1-5]$/.test(campo)){
+    valor = valor===""? null : Number(valor);
+    const valorOriginal = original[campo]==null? null : Number(original[campo]);
+    mudou = valor !== valorOriginal;
+  } else if(/^booleano_[1-5]$/.test(campo)){
+    valor = el.checked;
+    mudou = valor !== !!original[campo];
+  } else if(/^texto_[1-5]$/.test(campo)){
+    mudou = valor !== (original[campo]||""); // string vazia é uma mudança válida (limpar o campo)
   } else { // nome
     mudou = !!valor.trim() && valor !== (original[campo]||"");
   }
   if(!PENDENTES[id]) PENDENTES[id] = {};
   if(mudou) PENDENTES[id][campo] = valor;
   else delete PENDENTES[id][campo];
+
+  // Tipo de restrição virando "...possível" (sem data) — mesma regra do
+  // modal individual (_aplicarEstadoRestricaoModal): zera/desabilita a
+  // "Data da restrição" desta MESMA linha na hora, sem esperar redesenhar
+  // a grade inteira de novo.
+  if(campo==="tipo_restricao"){
+    const trRow = el.closest("tr[data-id]");
+    const campoData = trRow && trRow.querySelector('[data-campo="data_restricao"]');
+    if(campoData){
+      const semData = TIPOS_RESTRICAO_SEM_DATA.has(valor);
+      campoData.disabled = semData;
+      if(semData){
+        campoData.value = "";
+        if(original.data_restricao) PENDENTES[id]["data_restricao"] = null;
+        else delete PENDENTES[id]["data_restricao"];
+      }
+    }
+  }
+
   if(!Object.keys(PENDENTES[id]).length) delete PENDENTES[id];
   const tr = el.closest("tr[data-id]");
   if(tr){
@@ -5241,6 +5373,7 @@ function wireItemMigracaoModal(){
   $("mig-save").addEventListener("click", saveItemMigracao);
   $("mig-delete").addEventListener("click", deleteItemMigracao);
   $("mig-ciclo-add").addEventListener("click", addCicloMigracao);
+  $("mig-ciclo-cancelar-edicao").addEventListener("click", cancelarEdicaoCiclo);
   // Rejeições = Extraídos - Carregados, recalculado a cada digitação (campo
   // somente-leitura — nunca digitado diretamente, pra não ficar inconsistente
   // com os outros dois números).
@@ -5257,6 +5390,13 @@ function atualizarRejeicoesCiclo(){
 
 function openItemMigracaoModal(m){
   editingItemMigracaoId = m ? m.id : null;
+  // 76ª rodada: garante que abrir/trocar de item nunca deixe uma edição de
+  // ciclo de OUTRO item "pendurada" (editingCicloId de uma sessão anterior),
+  // o que faria "Salvar edição" tentar dar PUT num ciclo que nem pertence
+  // ao item aberto agora.
+  editingCicloId = null;
+  $("mig-ciclo-add").textContent = "+ Registrar ciclo";
+  $("mig-ciclo-cancelar-edicao").hidden = true;
   $("mig-modal-title").textContent = m ? "Editar item de migração" : "Novo item de migração";
   $("mig-tabela-legado").value = m?.nome_tabela_legado || "";
   $("mig-tabela-destino").value = m?.nome_tabela_destino || "";
@@ -5275,7 +5415,7 @@ function openItemMigracaoModal(m){
   if(m){ renderCiclosMigracaoModal(m.id); }
   $("overlay-item-migracao").hidden = false;
 }
-function closeItemMigracaoModal(){ $("overlay-item-migracao").hidden = true; editingItemMigracaoId = null; }
+function closeItemMigracaoModal(){ $("overlay-item-migracao").hidden = true; editingItemMigracaoId = null; editingCicloId = null; }
 
 async function saveItemMigracao(){
   const data = {
@@ -5321,21 +5461,61 @@ async function renderCiclosMigracaoModal(itemId){
       <td class="mono">${Number(c.qtd_registros_carregados||0).toLocaleString('pt-BR')}</td>
       <td class="mono">${Number(c.qtd_rejeicoes||0).toLocaleString('pt-BR')}</td>
       <td>${c.percentual_rejeicao!=null ? c.percentual_rejeicao+"%" : "—"}</td>
-      <td><button class="btn ghost small" data-del-ciclo="${c.id}" title="Excluir ciclo">✕</button></td>
+      <td style="white-space:nowrap;">
+        <button class="btn ghost small" data-edit-ciclo="${c.id}" title="Editar ciclo">✎</button>
+        <button class="btn ghost small" data-del-ciclo="${c.id}" title="Excluir ciclo">✕</button>
+      </td>
     </tr>`).join("") : `<tr class="empty-row"><td colspan="7">Nenhum ciclo registrado ainda.</td></tr>`;
   $("mig-ciclos-tbody").querySelectorAll("[data-del-ciclo]").forEach(btn=>{
     btn.addEventListener("click", async (e)=>{
       e.stopPropagation();
       if(!confirm("Excluir este ciclo de execução?")) return;
       await api(`/ciclos-migracao/${btn.dataset.delCiclo}`, {method:"DELETE"});
+      // Excluir o ciclo em edição cancela a edição (não faz sentido salvar
+      // por cima de um registro que não existe mais).
+      if(editingCicloId === btn.dataset.delCiclo) cancelarEdicaoCiclo();
       await renderCiclosMigracaoModal(itemId);
       await loadItensMigracao(); renderItensMigracao();
     });
   });
+  $("mig-ciclos-tbody").querySelectorAll("[data-edit-ciclo]").forEach(btn=>{
+    btn.addEventListener("click", (e)=>{
+      e.stopPropagation();
+      const c = ciclos.find(x=>String(x.id)===btn.dataset.editCiclo);
+      if(c) iniciarEdicaoCiclo(c);
+    });
+  });
+  // Reaplica os valores em edição por cima do reset abaixo (edição
+  // sobrevive a um re-render do modal, ex.: depois de excluir outro ciclo).
+  if(editingCicloId && ciclos.some(c=>String(c.id)===editingCicloId)){
+    return;
+  }
   const proximoNumero = ciclos.length ? Math.max(...ciclos.map(c=>c.numero_ciclo))+1 : 1;
   $("mig-ciclo-numero").value = proximoNumero;
   $("mig-ciclo-data").value = toISO(new Date());
   $("mig-ciclo-extraidos").value = ""; $("mig-ciclo-carregados").value = ""; $("mig-ciclo-rejeicoes").value = "";
+}
+
+// 76ª rodada: edição de ciclo de migração — reaproveita o mesmo formulário
+// de "+ Registrar ciclo" (fica em modo edição enquanto editingCicloId != null),
+// só trocando o rótulo/ação do botão e liberando "Cancelar edição".
+let editingCicloId = null;
+function iniciarEdicaoCiclo(c){
+  editingCicloId = String(c.id);
+  $("mig-ciclo-numero").value = c.numero_ciclo;
+  $("mig-ciclo-data").value = c.data_execucao ? String(c.data_execucao).slice(0,10) : "";
+  $("mig-ciclo-extraidos").value = c.qtd_registros_extraidos ?? "";
+  $("mig-ciclo-carregados").value = c.qtd_registros_carregados ?? "";
+  $("mig-ciclo-rejeicoes").value = c.qtd_rejeicoes ?? "";
+  $("mig-ciclo-add").textContent = "Salvar edição";
+  $("mig-ciclo-cancelar-edicao").hidden = false;
+  $("mig-ciclo-numero").focus();
+}
+function cancelarEdicaoCiclo(){
+  editingCicloId = null;
+  $("mig-ciclo-add").textContent = "+ Registrar ciclo";
+  $("mig-ciclo-cancelar-edicao").hidden = true;
+  if(editingItemMigracaoId) renderCiclosMigracaoModal(editingItemMigracaoId);
 }
 
 async function addCicloMigracao(){
@@ -5355,10 +5535,21 @@ async function addCicloMigracao(){
   };
   if(!data.numero_ciclo || !data.data_execucao){ toast("Informe o número do ciclo e a data de execução.", true); return; }
   try{
-    await api("/ciclos-migracao", {method:"POST", body: JSON.stringify(data)});
+    // 76ª rodada: mesmo formulário serve pra registrar um ciclo novo E pra
+    // editar um existente — editingCicloId (setado por iniciarEdicaoCiclo,
+    // via o botão ✎ de cada linha) decide POST vs PUT.
+    if(editingCicloId){
+      await api(`/ciclos-migracao/${editingCicloId}`, {method:"PUT", body: JSON.stringify(data)});
+      editingCicloId = null;
+      $("mig-ciclo-add").textContent = "+ Registrar ciclo";
+      $("mig-ciclo-cancelar-edicao").hidden = true;
+      toast("Ciclo atualizado.");
+    }else{
+      await api("/ciclos-migracao", {method:"POST", body: JSON.stringify(data)});
+      toast("Ciclo registrado.");
+    }
     await renderCiclosMigracaoModal(editingItemMigracaoId);
     await loadItensMigracao(); renderItensMigracao();
-    toast("Ciclo registrado.");
   }catch(e){}
 }
 
@@ -5793,6 +5984,9 @@ function wireAtividadeModal(){
   $("at-cancel").addEventListener("click", closeAtividadeModal);
   modal.addEventListener("click", e=>{ if(e.target===modal) closeAtividadeModal(); });
   $("at-save").addEventListener("click", saveAtividade);
+  // 74ª rodada — "Data da restrição" só existe pros tipos que não são
+  // "...possível" (igual ao print do usuário): ND/desabilitado nos outros dois.
+  $("at-tipo-restricao").addEventListener("change", _aplicarEstadoRestricaoModal);
   $("at-delete").addEventListener("click", ()=>{
     askConfirm("Excluir esta atividade? Dependências e vínculos serão removidos também.", async ()=>{
       await api(`/atividades/${editingAtividadeId}`, {method:"DELETE"});
@@ -5876,6 +6070,17 @@ function wireAtividadeModal(){
   });
 }
 
+// 74ª rodada — desabilita/limpa "Data da restrição" quando o Tipo de
+// restrição escolhido é um dos dois "...possível" (que nunca têm data —
+// mesmo padrão do print do usuário, campo mostrando "ND"), e reabilita nos
+// demais. Chamada tanto ao trocar o select quanto ao abrir o modal.
+function _aplicarEstadoRestricaoModal(){
+  const semData = TIPOS_RESTRICAO_SEM_DATA.has($("at-tipo-restricao").value);
+  const campo = $("at-data-restricao");
+  campo.disabled = semData;
+  if(semData) campo.value = "";
+}
+
 function openAtividadeModal(atividade){
   editingAtividadeId = atividade ? atividade.id : null;
   $("at-modal-title").textContent = atividade ? "Editar atividade" : "Nova atividade";
@@ -5907,6 +6112,14 @@ function openAtividadeModal(atividade){
   $("at-dtini-real").value = atividade?.dtini_real || "";
   $("at-dtfim-real").value = atividade?.dtfim_real || "";
   $("at-data-fixada").checked = !!atividade?.data_execucao_fixada;
+  $("at-tipo-restricao").value = atividade?.tipo_restricao || "O Mais Breve Possível";
+  $("at-data-restricao").value = atividade?.data_restricao || "";
+  _aplicarEstadoRestricaoModal();
+  for(let n=1;n<=5;n++){
+    $(`at-numero-${n}`).value = atividade?.[`numero_${n}`] ?? "";
+    $(`at-booleano-${n}`).checked = !!atividade?.[`booleano_${n}`];
+    $(`at-texto-${n}`).value = atividade?.[`texto_${n}`] || "";
+  }
   $("at-observacoes").value = atividade?.observacoes || "";
   $("at-relato-texto").value="";
   switchPane($("overlay-atividade"), "detalhes");
@@ -5963,8 +6176,18 @@ async function saveAtividade(){
     dtini_prev: $("at-dtini-prev").value || null, dtfim_prev: $("at-dtfim-prev").value || null,
     dtini_real: $("at-dtini-real").value || null, dtfim_real: $("at-dtfim-real").value || null,
     data_execucao_fixada: $("at-data-fixada").checked,
+    tipo_restricao: $("at-tipo-restricao").value,
+    // ND pros tipos "...possível" — _aplicarEstadoRestricaoModal() já limpa o
+    // campo na tela ao trocar o select, isto aqui é só o reforço na hora de montar
+    // o payload (ver _normalizar_restricao em main.py pra quem chamar a API direto).
+    data_restricao: TIPOS_RESTRICAO_SEM_DATA.has($("at-tipo-restricao").value) ? null : ($("at-data-restricao").value || null),
     observacoes: $("at-observacoes").value.trim(),
   };
+  for(let n=1;n<=5;n++){
+    data[`numero_${n}`] = $(`at-numero-${n}`).value!=="" ? Number($(`at-numero-${n}`).value) : null;
+    data[`booleano_${n}`] = $(`at-booleano-${n}`).checked;
+    data[`texto_${n}`] = $(`at-texto-${n}`).value.trim() || null;
+  }
   if(!data.nome){ toast("Informe o nome da atividade.", true); return; }
   if(!editingAtividadeId) data.projeto_id = PROJETO.id;
   try{
