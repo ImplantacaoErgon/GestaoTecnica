@@ -55,19 +55,26 @@ Pesquisado na documentação oficial da Microsoft
   casar `recursos`/`atividade_recurso` com um segundo bloco do XML; fica de
   fora por ora para manter o escopo do pedido.
 
-## Risco conhecido, não verificável neste ambiente
+## Dois botões, dois namespaces (72ª/73ª rodada)
 
-O namespace raiz usado abaixo é o SEM VERSÃO
-`http://schemas.microsoft.com/project` — é o que arquivos realmente gerados
-por "Salvar como XML" do MS Project usam na prática, e o mais comumente
-aceito por leitores desse formato. O XSD oficial hoje publicado pela
-Microsoft declara `targetNamespace` COM versão
-("http://schemas.microsoft.com/project/2007"). Não foi possível confirmar
-com certeza qual delas o importador MSPDI do ProjectLibre (via MPXJ) exige,
-nem rodar um teste de importação real (sem acesso de rede a Maven/PyPI
-neste ambiente para trazer o MPXJ como verificador). Se o ProjectLibre
-recusar ou ignorar o arquivo, o primeiro ajuste a tentar é trocar a
-constante NAMESPACE abaixo para a versão com "/2007".
+O mesmo XML MSPDI serve tanto pro ProjectLibre quanto pro Microsoft Project
+de verdade — é o mesmo formato de intercâmbio — mas o NAMESPACE raiz do
+`<Project>` usado por cada um na prática diverge, e por isso agora é
+parametrizável (`namespace=` de `gerar_xml_bytes`), um valor por botão:
+
+- `NAMESPACE_PROJECTLIBRE = "http://schemas.microsoft.com/project"` (SEM
+  versão) — já confirmado funcionando pelo usuário com o ProjectLibre
+  (botão da 69ª rodada). É o que arquivos gerados de fato por "Salvar como
+  XML" de versões mais antigas do MS Project (e a maioria dos leitores
+  MSPDI, via MPXJ) aceitam/ignoram sem reclamar do namespace.
+- `NAMESPACE_MS_PROJECT = "http://schemas.microsoft.com/project/2007"` (COM
+  versão) — é o `targetNamespace` que o XSD OFICIAL hoje publicado pela
+  Microsoft declara (schemas.microsoft.com/project/2007/mspdi_pj12.xsd,
+  confirmado via learn.microsoft.com — "XML Schema for the Project
+  Element"), usado como base pra validação de schema no MS Project de
+  verdade — por isso é o valor mais seguro pro botão "Exportar XML
+  (Microsoft Project)", ainda que não tenha sido possível rodar um teste de
+  importação real neste ambiente (sem acesso ao MS Project instalado).
 """
 from datetime import date, datetime
 
@@ -75,9 +82,8 @@ from xml.sax.saxutils import escape as _esc
 
 from . import cpm
 
-NAMESPACE = "http://schemas.microsoft.com/project"
-# Ver "Risco conhecido" acima. Alternativa a tentar se o ProjectLibre recusar o arquivo:
-# NAMESPACE = "http://schemas.microsoft.com/project/2007"
+NAMESPACE_PROJECTLIBRE = "http://schemas.microsoft.com/project"
+NAMESPACE_MS_PROJECT = "http://schemas.microsoft.com/project/2007"
 
 TIPO_PARA_LINKTYPE = {"FF": 0, "FS": 1, "SF": 2, "SS": 3}
 PRIORIDADE_PARA_MSPROJECT = {"Baixa": 200, "Média": 500, "Alta": 800, "Urgente": 900}
@@ -147,12 +153,16 @@ def _outline_level(codigo_wbs):
     return max(1, len(str(codigo_wbs).split(".")))
 
 
-def gerar_xml_bytes(projeto, atividades, marcos, deps_por_atividade):
+def gerar_xml_bytes(projeto, atividades, marcos, deps_por_atividade, namespace=NAMESPACE_PROJECTLIBRE):
     """`atividades`: lista de dicts no formato de ATIVIDADE_SELECT (main.py),
     já ORDENADA por codigo_wbs_chave_ordenacao — a ordem de entrada aqui é a
     ordem final das tarefas no XML (ver docstring do módulo, seção MSPDI).
     `marcos`: lista de dicts da tabela `marcos`.
     `deps_por_atividade`: {atividade_id: [{predecessora_id, tipo, lag_horas}, ...]}.
+    `namespace`: NAMESPACE_PROJECTLIBRE (padrão) ou NAMESPACE_MS_PROJECT —
+    ver "Dois botões, dois namespaces" no docstring do módulo. Todo o resto
+    do arquivo (tarefas, dependências, marcos, calendário) é idêntico
+    independente do alvo.
     """
     horas_dia_util = float(projeto.get("horas_dia_util") or 8.0)
     hoje = date.today().isoformat()
@@ -169,7 +179,7 @@ def gerar_xml_bytes(projeto, atividades, marcos, deps_por_atividade):
 
     L = []
     L.append('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>')
-    L.append(f'<Project xmlns="{NAMESPACE}">')
+    L.append(f'<Project xmlns="{namespace}">')
     L.append("  <SaveVersion>1</SaveVersion>")
     L.append(f"  <Name>{_texto(projeto.get('nome'))}</Name>")
     L.append(f"  <Title>{_texto(projeto.get('nome'))}</Title>")
@@ -246,6 +256,10 @@ def gerar_xml_bytes(projeto, atividades, marcos, deps_por_atividade):
         L.append(f"      <Duration>{duracao}</Duration>")
         L.append("      <DurationFormat>7</DurationFormat>")
         L.append(f"      <Work>{duracao}</Work>")
+        # "Completo por cento" é o rótulo que o PRÓPRIO ProjectLibre usa (localização
+        # PT-BR dele) pra coluna do campo padrão PercentComplete do MSPDI — não é
+        # nome escolhido por este exportador nem dá pra mudar por aqui (é tradução
+        # da interface do ProjectLibre, não do XML).
         L.append(f"      <PercentComplete>{pct}</PercentComplete>")
         L.append(f"      <PercentWorkComplete>{pct}</PercentWorkComplete>")
         L.append("      <Milestone>0</Milestone>")

@@ -2646,12 +2646,24 @@ def create_app():
     def cronograma_exportar_xml():
         """Exporta o cronograma do projeto INTEIRO (sem filtros — ver
         justificativa no docstring de app/cronograma_export_xml.py) num XML
-        MSPDI, para abrir no ProjectLibre. Botão "Exportar XML (ProjectLibre)"
-        na tela de Cronograma, 69ª rodada. Pedido explícito do cliente:
-        incluir dependências e % de conclusão."""
+        MSPDI. Botão "Exportar XML (ProjectLibre)" na tela de Cronograma,
+        69ª rodada — pedido explícito do cliente: incluir dependências e %
+        de conclusão. Botão irmão "Exportar XML (Microsoft Project)",
+        73ª rodada: mesmo gerador, mesmo arquivo — só muda o NAMESPACE do
+        `<Project>` raiz (`alvo=projectlibre|msproject`, ver "Dois botões,
+        dois namespaces" no docstring de cronograma_export_xml.py) e o nome
+        do arquivo baixado, pra deixar claro pra qual ferramenta cada
+        download foi pensado."""
         projeto_id = request.args.get("projeto_id")
         if not projeto_id:
             return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        alvo = request.args.get("alvo", "projectlibre")
+        if alvo not in ("projectlibre", "msproject"):
+            return jsonify({"erro": "alvo inválido — use 'projectlibre' ou 'msproject'"}), 400
+        namespace = (
+            cronograma_export_xml.NAMESPACE_MS_PROJECT if alvo == "msproject"
+            else cronograma_export_xml.NAMESPACE_PROJECTLIBRE
+        )
         projeto = db.fetch_one(f"SELECT * FROM projetos WHERE id = {db.q(projeto_id)}")
         if not projeto:
             abort(404)
@@ -2676,7 +2688,9 @@ def create_app():
         for r in deps_rows:
             deps_por_atividade.setdefault(r["atividade_id"], []).append(r)
         try:
-            xml_bytes = cronograma_export_xml.gerar_xml_bytes(projeto, atividades, marcos, deps_por_atividade)
+            xml_bytes = cronograma_export_xml.gerar_xml_bytes(
+                projeto, atividades, marcos, deps_por_atividade, namespace=namespace,
+            )
         except Exception as e:
             print(f"[cronograma_export_xml] erro ao gerar XML: {e}", flush=True)
             import traceback
@@ -2684,7 +2698,8 @@ def create_app():
             return jsonify({"erro": f"Falha ao gerar o XML: {e}"}), 500
         base = (projeto.get("sigla") or projeto.get("nome") or "projeto").strip()
         base = "".join(c if c.isalnum() or c in "-_" else "-" for c in base).strip("-") or "projeto"
-        nome_arquivo = f"cronograma-{base}-{date.today().isoformat()}.xml"
+        sufixo_alvo = "ms-project" if alvo == "msproject" else "projectlibre"
+        nome_arquivo = f"cronograma-{base}-{sufixo_alvo}-{date.today().isoformat()}.xml"
         return send_file(
             io.BytesIO(xml_bytes),
             mimetype="application/xml",
