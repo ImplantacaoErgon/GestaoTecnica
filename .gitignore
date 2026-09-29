@@ -4,3 +4,8 @@ __pycache__/
 backend/uploads/*
 !backend/uploads/.gitkeep
 .env
+
+# 84a rodada -- saidas de sessoes de trabalho e dado real de carga, fora do Git
+Claude outputs/
+testes_xml/
+db/Cronograma_PCR_Implantacao_para_carga_20260806.xlsx
