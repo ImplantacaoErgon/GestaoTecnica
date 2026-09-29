@@ -1113,13 +1113,21 @@
         <div id="cfd-situacao"></div>
       </div>
       <div class="card">
-        <h3>Rubricas Ergon × Verbas Consist, por empresa</h3>
-        <div class="view-sub" style="margin-top:-6px;">Quantidade de códigos distintos de cada lado aparecendo na comparação, por empresa — não é valor financeiro. Uma diferença grande entre as duas colunas é sinal de mapeamento incompleto naquela empresa.</div>
+        <h3>Comparação por Tipo de Rubrica</h3>
+        <div class="view-sub" style="margin-top:-6px;">Mesma pergunta de "onde focar primeiro", quebrada por Tipo de Rubrica — os % são sobre o total de CADA tipo, não do total geral, pra dar pra comparar taxa de acerto entre tipos, não só volume.</div>
         <div class="table-wrap"><table>
-          <thead><tr><th>Empresa</th><th>Linhas</th><th>Rubricas Ergon</th><th>Verbas Consist</th><th>% sem divergência</th></tr></thead>
-          <tbody id="cfd-empresa-tbody"></tbody>
+          <thead><tr><th>Tipo de Rubrica</th><th>Total</th><th>Sem divergência</th><th>Divergente</th><th>% sem div.</th><th>% divergente</th></tr></thead>
+          <tbody id="cfd-tiporubr-tbody"></tbody>
         </table></div>
       </div>
+    </div>
+    <div class="card">
+      <h3>Rubricas Ergon × Verbas Consist, por empresa</h3>
+      <div class="view-sub" style="margin-top:-6px;">Quantidade de códigos distintos de cada lado aparecendo na comparação, por empresa — não é valor financeiro. Uma diferença grande entre as duas colunas é sinal de mapeamento incompleto naquela empresa.</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Empresa</th><th>Linhas</th><th>Rubricas Ergon</th><th>Verbas Consist</th><th>% sem divergência</th></tr></thead>
+        <tbody id="cfd-empresa-tbody"></tbody>
+      </table></div>
     </div>
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
@@ -9217,6 +9225,20 @@ async function cfdCarregarDados(){
       <span class="count">${s.total.toLocaleString('pt-BR')} (${s.pct_do_total}%)</span>
     </div>`;
   }).join("") : `<div class="muted" style="font-size:12.5px;">Nenhum dado para esta competência.</div>`;
+
+  // 81ª rodada: quadro "Comparação por Tipo de Rubrica", ao lado do de
+  // Situação — tabela (não barra) porque tem 5 números por linha, diferente
+  // do de Situação que só tem 1 (o total do total geral).
+  const porTipoRubr = r.por_tiporubr || [];
+  $("cfd-tiporubr-tbody").innerHTML = porTipoRubr.length ? porTipoRubr.map(t=>`
+    <tr>
+      <td>${esc(t.tiporubr)}</td>
+      <td class="mono">${Number(t.total_linhas||0).toLocaleString('pt-BR')}</td>
+      <td class="mono">${Number(t.total_sem_divergencia||0).toLocaleString('pt-BR')}</td>
+      <td class="mono">${Number(t.total_divergente||0).toLocaleString('pt-BR')}</td>
+      <td>${t.pct_sem_divergencia==null ? "—" : t.pct_sem_divergencia+"%"}</td>
+      <td>${t.pct_divergente==null ? "—" : t.pct_divergente+"%"}</td>
+    </tr>`).join("") : `<tr class="empty-row"><td colspan="6">Nenhum dado para esta competência.</td></tr>`;
 
   const porEmpresa = r.por_empresa || [];
   $("cfd-empresa-tbody").innerHTML = porEmpresa.length ? porEmpresa.map(e=>`

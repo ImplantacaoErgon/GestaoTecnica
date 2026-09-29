@@ -204,6 +204,26 @@ def dashboard(projeto_id, mesano=None):
         GROUP BY situacao ORDER BY total DESC
     """)
 
+    # 81ª rodada: mesma pergunta de "onde focar primeiro" de por_situacao,
+    # mas quebrada por Tipo de Rubrica (tiporubr) em vez de situação — pedido
+    # do usuário pra ficar ao lado do quadro "% de comparação por Situação"
+    # no dashboard. Diferente de por_situacao (que só tem o total e o % do
+    # total geral), aqui o total sem divergência e o divergente vêm cada um
+    # com sua própria contagem e percentual (sobre o total DAQUELE tipo de
+    # rubrica, não do total geral) — é o que permite comparar tipos de
+    # rubrica entre si por taxa de acerto, não só por volume.
+    por_tiporubr = db.fetch_all(f"""
+        SELECT
+          COALESCE(tiporubr, '(sem tipo)') AS tiporubr,
+          COUNT(*) AS total_linhas,
+          COUNT(*) FILTER (WHERE UPPER(situacao) = 'NÃO DIVERGENTE') AS total_sem_divergencia,
+          COUNT(*) FILTER (WHERE UPPER(situacao) <> 'NÃO DIVERGENTE') AS total_divergente,
+          ROUND(100.0 * COUNT(*) FILTER (WHERE UPPER(situacao) = 'NÃO DIVERGENTE') / GREATEST(COUNT(*), 1), 1) AS pct_sem_divergencia,
+          ROUND(100.0 * COUNT(*) FILTER (WHERE UPPER(situacao) <> 'NÃO DIVERGENTE') / GREATEST(COUNT(*), 1), 1) AS pct_divergente
+        FROM comparacao_folha{where}
+        GROUP BY tiporubr ORDER BY total_linhas DESC
+    """)
+
     por_empresa = db.fetch_all(f"""
         SELECT
           COALESCE(empresa_consist, '(sem empresa)') AS empresa,
@@ -263,6 +283,7 @@ def dashboard(projeto_id, mesano=None):
     return {
         "geral": geral,
         "por_situacao": por_situacao,
+        "por_tiporubr": por_tiporubr,
         "por_empresa": por_empresa,
         "cobertura_mapeamento": {
             "rubricas_parametrizadas_sem_uso": rubricas_parametrizadas_sem_uso,
