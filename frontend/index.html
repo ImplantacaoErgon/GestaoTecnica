@@ -1126,6 +1126,26 @@
         </table></div>
       </div>
     </div>
+    <!-- 84ª rodada: quadro "Top divergências por Empresa × Rubrica Ergon" —
+         pedido do usuário original era um quadro com TODAS as combinações
+         de empresa×rubrica, e um segundo quadro ainda mais granular
+         (empresa×rubrica×situação). Como uma combinação empresa×rubrica
+         pode chegar a milhares de linhas, decidido com o usuário
+         (AskUserQuestion) virar só as PIORES (mais divergência), ordenadas,
+         com o segundo quadro substituído por um drill-down ao clicar (ver
+         cfdAbrirDetalheEmpresaRubrica abaixo) em vez de uma segunda tabela
+         estática gigante. -->
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+        <h3>🎯 Top divergências por Empresa × Rubrica Ergon</h3>
+        <span class="muted" id="cfd-emprub-contagem" style="font-size:11.5px;"></span>
+      </div>
+      <div class="view-sub" style="margin-top:-6px;">As combinações com mais linhas divergentes primeiro — onde focar o esforço de correção. Clique numa linha para ver o detalhe (por situação) na aba Comparação Folha.</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Empresa</th><th>Rubrica Ergon</th><th>Total</th><th>Sem divergência</th><th>Divergente</th><th>% sem div.</th><th>% divergente</th></tr></thead>
+        <tbody id="cfd-emprub-tbody"></tbody>
+      </table></div>
+    </div>
     <div class="card">
       <h3>Rubricas Ergon × Verbas Consist, por empresa</h3>
       <div class="view-sub" style="margin-top:-6px;">Quantidade de códigos distintos de cada lado aparecendo na comparação, por empresa — não é valor financeiro. Uma diferença grande entre as duas colunas é sinal de mapeamento incompleto naquela empresa.</div>
@@ -2624,6 +2644,13 @@ const COLOR_VAR = {ok:"var(--ok)",warn:"var(--warn)",accent:"var(--accent)",dang
 const SOFT_VAR = {ok:"var(--ok-soft)",warn:"var(--warn-soft)",accent:"var(--accent-soft)",danger:"var(--danger-soft)",faint:"var(--surface-2)"};
 
 function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+// 84ª rodada — monta argumentos de string pra um onclick="funcao(...)" inline
+// de forma segura mesmo quando o valor pode ter aspas dentro (ex: nome de
+// empresa/rubrica vindo do banco, diferente de um id/uuid que nunca tem
+// caractere especial): usa JSON.stringify (escapa aspas, barra invertida,
+// etc. do jeito que o JS espera) e escapa as aspas duplas resultantes como
+// &quot; pra não fechar o atributo onclick="..." antes da hora.
+function attrArgs(...vals){ return vals.map(v => JSON.stringify(v==null?"":v).replace(/"/g,"&quot;")).join(", "); }
 function fmtDate(iso){ if(!iso) return "—"; const d=new Date(iso+"T00:00:00"); if(isNaN(d)) return "—"; return d.toLocaleDateString('pt-BR'); }
 function fmtDateTime(iso){ if(!iso) return "—"; const d=new Date(iso); if(isNaN(d)) return "—"; return d.toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}); }
 function diaSemanaLabel(iso){ if(!iso) return "—"; const d=new Date(iso+"T00:00:00"); if(isNaN(d)) return "—"; const s = d.toLocaleDateString('pt-BR', {weekday:'long'}); return s.charAt(0).toUpperCase()+s.slice(1); }
@@ -3285,7 +3312,12 @@ function wireDashboardRefresh(){
 // própria tela de Configurações. VIEW_ALIAS mapeia qual section de verdade
 // mostrar; goToView cuida de também selecionar a aba certa dentro dela.
 const VIEW_ALIAS = { calendario: "configuracoes", manuais: "configuracoes" };
-function goToView(view){
+// 84ª rodada — `opcoes.filtroInicial`, repassado só pra comparacao-folha por
+// enquanto: usado pelo drill-down do Dashboard de Comparação (ver
+// cfdAbrirDetalheEmpresaRubrica) pra abrir a aba "Comparação Folha" já
+// filtrada por empresa+rubrica (e a mesma competência que estava selecionada
+// no dashboard), em vez de só trocar de aba sem contexto nenhum.
+function goToView(view, opcoes){
   document.querySelectorAll("nav.tabs button[data-view]").forEach(b=>b.classList.toggle("active", b.dataset.view===view));
   // Gatilho do grupo (ex.: "Cronograma ▾") fica destacado quando a view atual
   // é a dele ou de qualquer uma das views agrupadas dentro do seu submenu.
@@ -3307,7 +3339,7 @@ function goToView(view){
   if(view==="critico") loadCaminhoCritico();
   if(view==="minhas-atividades") carregarMinhasAtividades();
   if(view==="analisar-requisitos") renderAnalisarRequisitos();
-  if(view==="comparacao-folha") renderComparacaoFolhaPane();
+  if(view==="comparacao-folha") renderComparacaoFolhaPane(opcoes && opcoes.filtroInicial);
   if(view==="comparacao-folha-dashboard") renderComparacaoFolhaDashboard();
   if(view==="calendario" || view==="manuais"){
     // Nenhum botão/gatilho de #cfg-tabs corresponde a "calendario"/"manuais"
@@ -8936,10 +8968,49 @@ function cfQueryString(extra={}){
   return p.toString();
 }
 
-async function renderComparacaoFolhaPane(){
+async function renderComparacaoFolhaPane(filtroInicial){
   CF_PAGINA = 1;
-  await Promise.all([cfCarregarResumo(), cfCarregarLista(false)]);
+  if(filtroInicial){
+    // 84ª rodada — vindo de um drill-down (clique numa linha do quadro
+    // Empresa × Rubrica Ergon no Dashboard): precisa que as <option> dos
+    // selects existam ANTES de aplicar o filtro (um valor sem <option>
+    // correspondente faz o <select> resetar pra "" sozinho), então aqui
+    // roda em SEQUÊNCIA — espera cfCarregarResumo() popular os selects,
+    // só então aplica os valores e carrega a lista — diferente do caminho
+    // normal abaixo, que roda em paralelo (mais rápido) porque não precisa
+    // mexer nos filtros.
+    // IMPORTANTE: cfCarregarResumo() também recalcula os KPIs do topo
+    // (#cf-kpis) com base no filtro ATUAL no momento em que roda — como
+    // nesse primeiro await os filtros de empresa/rubrica ainda não foram
+    // aplicados, ele só serve aqui pra popular as <option>s. Por isso é
+    // chamado de novo (já com os filtros aplicados) junto com
+    // cfCarregarLista(), senão os KPIs ficam com o total geral (sem filtro)
+    // enquanto a grade abaixo já mostra só as linhas filtradas.
+    await cfCarregarResumo();
+    if(filtroInicial.mesano !== undefined) $("cf-f-mesano").value = filtroInicial.mesano;
+    if(filtroInicial.empresa !== undefined) $("cf-f-empresa").value = filtroInicial.empresa;
+    if(filtroInicial.rubricaErgon !== undefined) $("cf-f-rubrica-ergon").value = filtroInicial.rubricaErgon;
+    await Promise.all([cfCarregarResumo(), cfCarregarLista(false)]);
+  }else{
+    await Promise.all([cfCarregarResumo(), cfCarregarLista(false)]);
+  }
   cfVerificarCargaAtual();
+}
+
+// 84ª rodada — drill-down do quadro "Top divergências por Empresa × Rubrica
+// Ergon" (Dashboard de Comparação): em vez de um segundo quadro estático
+// com todas as combinações de empresa×rubrica×situação (que seria ainda
+// maior que o primeiro), clicar numa linha abre a aba "Comparação Folha"
+// já filtrada por aquela empresa+rubrica — a própria grade mostra o
+// detalhe por situação, linha a linha, reaproveitando os filtros que já
+// existem na tela. Carrega também a competência atual do filtro do
+// Dashboard (cfd-f-mesano), pra abrir já no mesmo período que o usuário
+// estava olhando, em vez de "todas" — se o Dashboard estiver em "todas",
+// isso também é repassado (string vazia é um valor válido de filtro).
+function cfdAbrirDetalheEmpresaRubrica(empresa, rubricaErgon){
+  goToView("comparacao-folha", {
+    filtroInicial: { mesano: $("cfd-f-mesano").value, empresa, rubricaErgon },
+  });
 }
 
 // ---------------------------------------------------------------------
@@ -9366,6 +9437,28 @@ async function cfdCarregarDados(){
       <td>${t.pct_sem_divergencia==null ? "—" : t.pct_sem_divergencia+"%"}</td>
       <td>${t.pct_divergente==null ? "—" : t.pct_divergente+"%"}</td>
     </tr>`).join("") : `<tr class="empty-row"><td colspan="6">Nenhum dado para esta competência.</td></tr>`;
+
+  // 84ª rodada — quadro "Top divergências por Empresa × Rubrica Ergon" (ver
+  // comentário grande em app/comparacao_folha.py, dashboard()). Só as
+  // LIMITE_EMPRESA_RUBRICA piores combinações (as que têm divergência,
+  // ordenadas pela quantidade); total_combinacoes_empresa_rubrica é quantas
+  // existem ao todo (com divergência), pra "mostrando X de Y" não dar a
+  // entender que é a lista completa.
+  const porEmpresaRubrica = r.por_empresa_rubrica || [];
+  const totalCombosDivergentes = r.total_combinacoes_empresa_rubrica || 0;
+  $("cfd-emprub-contagem").textContent = totalCombosDivergentes
+    ? `Mostrando ${porEmpresaRubrica.length} de ${totalCombosDivergentes.toLocaleString('pt-BR')} combinação(ões) com divergência`
+    : "";
+  $("cfd-emprub-tbody").innerHTML = porEmpresaRubrica.length ? porEmpresaRubrica.map(x=>`
+    <tr style="cursor:pointer;" title="Ver detalhe na Comparação Folha" onclick="cfdAbrirDetalheEmpresaRubrica(${attrArgs(x.empresa, x.rubrica_ergon)})">
+      <td>${esc(x.empresa)}</td>
+      <td class="mono" title="${esc(x.rubrica_nome_ergon||"")}">${esc(x.rubrica_ergon)}${x.rubrica_nome_ergon?` — ${esc(x.rubrica_nome_ergon)}`:""}</td>
+      <td class="mono">${Number(x.total_linhas||0).toLocaleString('pt-BR')}</td>
+      <td class="mono">${Number(x.total_sem_divergencia||0).toLocaleString('pt-BR')}</td>
+      <td class="mono">${Number(x.total_divergente||0).toLocaleString('pt-BR')}</td>
+      <td>${x.pct_sem_divergencia==null ? "—" : x.pct_sem_divergencia+"%"}</td>
+      <td>${x.pct_divergente==null ? "—" : x.pct_divergente+"%"}</td>
+    </tr>`).join("") : `<tr class="empty-row"><td colspan="7">Nenhuma divergência encontrada. 🎉</td></tr>`;
 
   const porEmpresa = r.por_empresa || [];
   $("cfd-empresa-tbody").innerHTML = porEmpresa.length ? porEmpresa.map(e=>`

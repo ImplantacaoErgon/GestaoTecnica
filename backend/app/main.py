@@ -2613,8 +2613,12 @@ def create_app():
         pid = request.args.get("projeto_id")
         if not pid:
             return jsonify({"erro": "projeto_id é obrigatório"}), 400
-        mesano = request.args.get("mesano") or None
-        return jsonify(comparacao_folha.resumo(projeto_id=pid, mesano=mesano))
+        # 84ª rodada: antes só repassava "mesano" — os KPIs do topo (rótulo
+        # "Linhas (filtro atual)") ficavam sempre com o total do mês, iguais
+        # pra qualquer Empresa/Rubrica/Situação selecionada. Agora repassa os
+        # mesmos filtros da listagem (ver _filtros_comparacao_folha() acima).
+        filtros = _filtros_comparacao_folha()
+        return jsonify(comparacao_folha.resumo(projeto_id=pid, **filtros))
 
     @app.get("/api/comparacao-folha/dashboard")
     def dashboard_comparacao_folha():

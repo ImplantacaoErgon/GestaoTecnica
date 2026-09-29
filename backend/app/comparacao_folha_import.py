@@ -131,6 +131,17 @@ _DATA_TEXTO_RE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{2,4})$")
 # CSV direto de banco de dados; aceito como alternativa ao formato acima,
 # sem substituir nada (Adendo 4, 55ª rodada — suporte a .csv).
 _DATA_ISO_RE = re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})$")
+# 85ª rodada — MESANO só tem sentido como mês/ano (é uma competência, não um
+# dia específico), e no export real visto o cliente manda só "MM/AAAA" (ex.:
+# "08/2026"), sem dia nenhum — o que não batia com _DATA_TEXTO_RE (que exige
+# DD/MM/AAAA, 2 barras) nem com _DATA_ISO_RE, então toda linha caía em
+# `_data() -> None` e a carga falhava logo de cara com "Não foi possível
+# identificar a competência (MESANO)...", mesmo a coluna estando preenchida.
+# Como esse padrão (1 barra só) nunca é ambíguo com DD/MM/AAAA (2 barras) nem
+# com o formato ISO (hífens), é seguro reconhecê-lo pra qualquer CAMPOS_DATA,
+# não só MESANO — assume dia 1, mesma convenção já usada pra guardar mesano
+# no banco ("a coluna sempre guarda o 1º dia do mês").
+_DATA_MES_ANO_RE = re.compile(r"^(\d{1,2})/(\d{2,4})$")
 
 
 class ComparacaoFolhaImportError(Exception):
@@ -181,6 +192,18 @@ def _data(v):
         ano, mes, dia = m.groups()
         try:
             return date(int(ano), int(mes), int(dia)).isoformat()
+        except ValueError:
+            return None
+    # 85ª rodada — "MM/AAAA" (só mês/ano, sem dia — ver comentário de
+    # _DATA_MES_ANO_RE acima). Testado por último de propósito: só chega
+    # aqui se não bateu DD/MM/AAAA nem AAAA-MM-DD, então não há risco de
+    # truncar um dia que já foi capturado certo acima.
+    m = _DATA_MES_ANO_RE.match(s)
+    if m:
+        mes, ano = m.groups()
+        ano_i = int(ano) + 2000 if len(ano) == 2 else int(ano)
+        try:
+            return date(ano_i, int(mes), 1).isoformat()
         except ValueError:
             return None
     return None

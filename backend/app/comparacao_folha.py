@@ -78,7 +78,7 @@ def contar(**filtros):
     return (row or {}).get("total", 0)
 
 
-def resumo(projeto_id=None, mesano=None):
+def resumo(projeto_id=None, **filtros):
     """KPIs pro topo da tela: total de linhas, quantas são divergentes
     (situação diferente de "Não Divergente"), soma da diferença, e as listas
     de meses/situações/tipos de rubrica disponíveis pra popular os filtros —
@@ -95,8 +95,20 @@ def resumo(projeto_id=None, mesano=None):
     Consist vêm como {codigo, nome} (MAX do nome associado a cada código —
     qualquer um serve de rótulo, já que na prática um código sempre carrega
     o mesmo nome) pra o combo mostrar "código — nome", igual já aparece na
-    tabela e no modal de detalhe."""
-    where = _where_filtros(projeto_id=projeto_id, mesano=mesano)
+    tabela e no modal de detalhe.
+
+    84ª rodada — correção: até aqui, `resumo()` só aceitava `mesano` (o
+    `**filtros` abaixo é novo), então os KPIs do topo ("Linhas (filtro
+    atual)" etc.) ficavam sempre com o total do mês, ignorando Empresa,
+    Rubrica Ergon, Situação e todos os outros filtros que a tela já manda
+    pra cá (ver cfFiltrosAtuais()/cfQueryString() no front-end) — o rótulo
+    "filtro atual" já prometia isso, só não cumpria. Ficou visível ao testar
+    o drill-down do Dashboard (empresa+rubrica aplicados na grade, mas o
+    KPI continuava mostrando o total geral do projeto). Os filtros agora
+    valem pra `where` (totais e por_situacao); `where_projeto` continua só
+    com projeto_id, de propósito, pra não esconder opção nenhuma dos
+    combos (ver parágrafo acima)."""
+    where = _where_filtros(projeto_id=projeto_id, **filtros)
     row = db.fetch_one(f"""
         SELECT
           COUNT(*) AS total,
@@ -147,6 +159,11 @@ def resumo(projeto_id=None, mesano=None):
         "verbas_consist_disponiveis": verbas_consist,
     }
 
+
+# 84ª rodada — teto do quadro "Top divergências por Empresa × Rubrica Ergon"
+# (ver dashboard() abaixo): decidido com o usuário que esse quadro mostra só
+# as piores combinações, não a lista inteira (que pode chegar a milhares).
+LIMITE_EMPRESA_RUBRICA = 25
 
 # ---- Dashboard de Convergência (65ª rodada) ----
 # Consultas pensadas pra nortear o trabalho de aumentar a convergência entre
@@ -224,6 +241,57 @@ def dashboard(projeto_id, mesano=None):
         GROUP BY tiporubr ORDER BY total_linhas DESC
     """)
 
+    # 84ª rodada — pedido do usuário (verbatim): "Quadro rubricas por empresa:
+    # Empresa, rubrica ergon, qtd, sem divergencia, qtd com divergencia %
+    # sem divergencia, % com divergencia" e um segundo quadro ainda mais
+    # granular (Empresa × Rubrica × Situação). Como uma empresa real tem
+    # dezenas/centenas de rubricas Ergon distintas, a combinação (empresa,
+    # rubrica_ergon) pode chegar a milhares de linhas — listar TODAS não
+    # rende um "quadro gerencial" (quadro pra apontar onde agir), vira uma
+    # descarga de dados. Decidido com o usuário (AskUserQuestion): este
+    # quadro mostra só as combinações COM divergência (HAVING abaixo),
+    # ordenadas pela quantidade divergente (impacto absoluto, não só taxa —
+    # uma combinação com 3.000 linhas divergentes pesa mais no trabalho de
+    # correção que uma com 2 linhas 100% divergentes), limitadas às
+    # LIMITE_EMPRESA_RUBRICA piores. `COUNT(*) OVER()` (antes do LIMIT, veja
+    # o CTE) devolve quantas combinações COM divergência existem ao todo,
+    # pro front-end poder dizer "mostrando 25 de N" em vez de dar a entender
+    # que aquela é a lista completa.
+    #
+    # O segundo quadro pedido (por Situação) virou um DRILL-DOWN em vez de
+    # uma segunda tabela estática: clicar numa linha aqui abre a aba
+    # "Comparação Folha" já filtrada por aquela empresa+rubrica (reaproveita
+    # os filtros que já existem na tela — ver cfdAbrirDetalheEmpresaRubrica
+    # no front-end), mostrando o detalhe por situação sob demanda, sem
+    # pré-computar todas as combinações de empresa×rubrica×situação (que
+    # seria ainda maior que esta aqui) de uma vez só.
+    por_empresa_rubrica = db.fetch_all(f"""
+        WITH combinacoes AS (
+          SELECT
+            COALESCE(empresa_consist, '(sem empresa)') AS empresa,
+            rubrica_ergon,
+            MAX(rubrica_nome_ergon) AS rubrica_nome_ergon,
+            COUNT(*) AS total_linhas,
+            COUNT(*) FILTER (WHERE UPPER(situacao) = 'NÃO DIVERGENTE') AS total_sem_divergencia,
+            COUNT(*) FILTER (WHERE UPPER(situacao) <> 'NÃO DIVERGENTE') AS total_divergente
+          FROM comparacao_folha{where} AND rubrica_ergon IS NOT NULL
+          GROUP BY empresa_consist, rubrica_ergon
+          HAVING COUNT(*) FILTER (WHERE UPPER(situacao) <> 'NÃO DIVERGENTE') > 0
+        )
+        SELECT
+          empresa, rubrica_ergon, rubrica_nome_ergon, total_linhas, total_sem_divergencia, total_divergente,
+          ROUND(100.0 * total_sem_divergencia / GREATEST(total_linhas, 1), 1) AS pct_sem_divergencia,
+          ROUND(100.0 * total_divergente / GREATEST(total_linhas, 1), 1) AS pct_divergente,
+          COUNT(*) OVER() AS total_combinacoes_com_divergencia
+        FROM combinacoes
+        ORDER BY total_divergente DESC, total_linhas DESC
+        LIMIT {LIMITE_EMPRESA_RUBRICA}
+    """)
+    total_combinacoes_empresa_rubrica = (por_empresa_rubrica[0]["total_combinacoes_com_divergencia"]
+                                          if por_empresa_rubrica else 0)
+    for linha in por_empresa_rubrica:
+        linha.pop("total_combinacoes_com_divergencia", None)
+
     por_empresa = db.fetch_all(f"""
         SELECT
           COALESCE(empresa_consist, '(sem empresa)') AS empresa,
@@ -284,6 +352,8 @@ def dashboard(projeto_id, mesano=None):
         "geral": geral,
         "por_situacao": por_situacao,
         "por_tiporubr": por_tiporubr,
+        "por_empresa_rubrica": por_empresa_rubrica,
+        "total_combinacoes_empresa_rubrica": total_combinacoes_empresa_rubrica,
         "por_empresa": por_empresa,
         "cobertura_mapeamento": {
             "rubricas_parametrizadas_sem_uso": rubricas_parametrizadas_sem_uso,
