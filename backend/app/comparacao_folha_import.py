@@ -517,8 +517,27 @@ def importar_comparacao_folha(projeto_id, conteudo_bytes, timeout=900):
     contadores = {"total": 0, "por_situacao": {}, "mesano_divergente": 0, "_coluna_ordem": coluna_ordem}
 
     colunas_copy = ", ".join(["projeto_id"] + coluna_ordem)
+    # 88ª rodada — carga real (~300 mil linhas) sendo cancelada no meio do
+    # COPY com "canceling statement due to statement timeout", vindo do
+    # PRÓPRIO Postgres (não do timeout do lado Python/subprocess, que gera
+    # uma mensagem diferente — "Tempo esgotado (...) executando o script no
+    # banco", ver db.execute_stream). Causa: o banco de produção fica atrás
+    # de um pooler em modo transação (Supabase Transaction Pooler/PgBouncer
+    # — já documentado em execute_returning_one() acima), que aplica um
+    # `statement_timeout` padrão bem menor que os 900s que esta carga grande
+    # já tinha como orçamento (gunicorn --timeout 900 + db.execute_stream
+    # timeout=900, ver comentário no Dockerfile — "os dois devem ficar
+    # alinhados"). Faltava alinhar também o terceiro lado: o Postgres em si.
+    # `SET LOCAL` (não `SET`) dentro do mesmo bloco BEGIN...COMMIT é seguro
+    # com esse tipo de pooler pelo mesmo motivo já explicado em
+    # execute_returning_one(): a transação inteira fica presa numa única
+    # conexão física, então o valor vale pro COPY seguinte; um `SET` solto
+    # (fora de transação) correria o risco de cair numa conexão diferente da
+    # do COPY. Usa o mesmo `timeout` (em segundos) já recebido por esta
+    # função como única fonte de verdade, em vez de duplicar o número 900.
     prefixo = (
         "BEGIN;\n"
+        f"SET LOCAL statement_timeout = {int(timeout * 1000)};\n"
         f"DELETE FROM comparacao_folha WHERE projeto_id = {db.q(projeto_id)} "
         f"AND date_trunc('month', mesano) = date_trunc('month', {db.q(mesano_alvo)}::date);\n"
         f"COPY comparacao_folha ({colunas_copy}) FROM STDIN WITH (FORMAT text);\n"
