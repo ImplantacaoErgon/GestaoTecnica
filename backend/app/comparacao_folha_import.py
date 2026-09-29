@@ -142,6 +142,20 @@ _DATA_ISO_RE = re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})$")
 # não só MESANO — assume dia 1, mesma convenção já usada pra guardar mesano
 # no banco ("a coluna sempre guarda o 1º dia do mês").
 _DATA_MES_ANO_RE = re.compile(r"^(\d{1,2})/(\d{2,4})$")
+# 86ª rodada — mesma família de problema do MESANO acima, mas na única coluna
+# de TIMESTAMP (DATA_HORA_CONVERGENCIA): o valor de texto vem no formato
+# brasileiro "DD/MM/AAAA HH:MM:SS" (ex.: "29/09/2026 08:20:10"). Diferente de
+# CAMPOS_DATA, _timestamp() (abaixo) não convertia esse texto — mandava ele
+# cru pro COPY, e o Postgres interpreta uma data ambígua desse jeito
+# conforme o `datestyle` configurado no servidor (por padrão, mês antes do
+# dia). "29/09/2026" com "29" no lugar do mês estoura o range válido (12) e
+# derruba a carga inteira com "date/time field value out of range". Aceita
+# segundos opcionais (":SS") e "T" ou espaço como separador entre data e
+# hora, cobrindo tanto o texto de planilha/CSV quanto um eventual ISO já
+# formatado que chegue como string em vez de datetime nativo.
+_TIMESTAMP_TEXTO_RE = re.compile(
+    r"^(\d{1,2})/(\d{1,2})/(\d{2,4})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$"
+)
 
 
 class ComparacaoFolhaImportError(Exception):
@@ -216,7 +230,25 @@ def _timestamp(v):
         return v.isoformat(sep=" ")
     if isinstance(v, date):
         return v.isoformat()
-    return _texto(v)
+    texto = _texto(v)
+    if texto is None:
+        return None
+    # 86ª rodada — ver comentário de _TIMESTAMP_TEXTO_RE acima: converte o
+    # formato brasileiro "DD/MM/AAAA HH:MM:SS" pra ISO explícito antes de
+    # mandar pro COPY, em vez de confiar no `datestyle` do servidor pra
+    # desambiguar. Não bateu o formato (já veio em ISO, por exemplo) → devolve
+    # o texto como estava, igual já fazia antes desta rodada.
+    m = _TIMESTAMP_TEXTO_RE.match(texto)
+    if m:
+        dia, mes, ano, hora, minuto, segundo = m.groups()
+        ano_i = int(ano) + 2000 if len(ano) == 2 else int(ano)
+        try:
+            return datetime(
+                ano_i, int(mes), int(dia), int(hora), int(minuto), int(segundo or 0)
+            ).isoformat(sep=" ")
+        except ValueError:
+            return None
+    return texto
 
 
 def _copy_escape(v):
