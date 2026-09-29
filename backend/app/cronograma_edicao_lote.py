@@ -102,6 +102,18 @@ import networkx as nx
 from . import db
 from .cpm import _dur_dias, _business_day_offset, dias_uteis_entre
 
+# 74ª rodada (migração 033) — mesma lista de app/main.py (TIPOS_RESTRICAO_VALIDOS/
+# TIPOS_RESTRICAO_SEM_DATA); duplicada aqui (em vez de importada) só pra não criar
+# um import circular (main.py já importa este módulo) — são 8 rótulos fixos, sem
+# expectativa de mudar; se mudar, mudar nos dois lugares.
+TIPOS_RESTRICAO_VALIDOS = {
+    "O Mais Breve Possível", "O mais tarde possível",
+    "Deve iniciar em", "Deve terminar em",
+    "Não iniciar antes de", "Não iniciar depois de",
+    "Não terminar antes de", "Não terminar depois de",
+}
+TIPOS_RESTRICAO_SEM_DATA = {"O Mais Breve Possível", "O mais tarde possível"}
+
 
 def _to_date(d):
     if d is None:
@@ -173,6 +185,62 @@ def _validar_campos_simples(a, edicao_raw, prioridade_validas):
         novo = bool(edicao_raw["eh_entregavel"])
         if novo != bool(a.get("eh_entregavel")):
             simples["eh_entregavel"] = {"atual": bool(a.get("eh_entregavel")), "novo": novo}
+
+    # 74ª rodada (migração 033) — Tipo de Restrição/Data da restrição, editáveis
+    # direto na grade unificada do Cronograma (não só no modal individual) —
+    # precisam entrar aqui pra "Salvar" da grade (que passa por esta tela por
+    # baixo, ver /cronograma/edicao-lote/confirmar) não descartar a edição em
+    # silêncio. Mesma regra de "tipo sem data zera a data" do modal individual
+    # (_normalizar_restricao em main.py), reaplicada aqui porque uma edição pela
+    # grade pode tocar só UM dos dois campos por vez (célula por célula).
+    if "tipo_restricao" in edicao_raw:
+        novo = edicao_raw["tipo_restricao"] or "O Mais Breve Possível"
+        if novo not in TIPOS_RESTRICAO_VALIDOS:
+            raise ValueError(f'"{a["nome"]}": tipo de restrição inválido.')
+        if novo != (a.get("tipo_restricao") or "O Mais Breve Possível"):
+            simples["tipo_restricao"] = {"atual": a.get("tipo_restricao"), "novo": novo}
+        if novo in TIPOS_RESTRICAO_SEM_DATA and a.get("data_restricao") and "data_restricao" not in edicao_raw:
+            simples["data_restricao"] = {"atual": a.get("data_restricao"), "novo": None}
+
+    if "data_restricao" in edicao_raw:
+        novo = edicao_raw["data_restricao"] or None
+        tipo_efetivo = edicao_raw.get("tipo_restricao") or a.get("tipo_restricao") or "O Mais Breve Possível"
+        if novo and tipo_efetivo in TIPOS_RESTRICAO_SEM_DATA:
+            novo = None  # tipo "...possível" nunca tem data — ignora em vez de erro
+        if novo != a.get("data_restricao"):
+            simples["data_restricao"] = {"atual": a.get("data_restricao"), "novo": novo}
+
+    # 15 campos genéricos (5 numéricos, 5 booleanos, 5 de texto) — sem
+    # significado pré-definido, só copiados pro resultado como os demais
+    # campos simples acima (nunca entram no grafo de dependências).
+    for n in range(1, 6):
+        campo = f"numero_{n}"
+        if campo in edicao_raw:
+            bruto = edicao_raw[campo]
+            if bruto in (None, ""):
+                novo = None
+            else:
+                try:
+                    novo = float(bruto)
+                except (TypeError, ValueError):
+                    raise ValueError(f'"{a["nome"]}": {campo} precisa ser um número.')
+            atual = float(a[campo]) if a.get(campo) is not None else None
+            if novo != atual:
+                simples[campo] = {"atual": atual, "novo": novo}
+
+    for n in range(1, 6):
+        campo = f"booleano_{n}"
+        if campo in edicao_raw:
+            novo = bool(edicao_raw[campo])
+            if novo != bool(a.get(campo)):
+                simples[campo] = {"atual": bool(a.get(campo)), "novo": novo}
+
+    for n in range(1, 6):
+        campo = f"texto_{n}"
+        if campo in edicao_raw:
+            novo = (edicao_raw[campo] or "").strip() or None
+            if novo != (a.get(campo) or None):
+                simples[campo] = {"atual": a.get(campo), "novo": novo}
 
     return simples
 
@@ -359,7 +427,15 @@ def calcular(projeto_id, edicoes, status_familia_concluida, prioridade_validas,
     atividades = db.fetch_all(
         "SELECT id, codigo_wbs, nome, status, percentual_concluido, prazo_horas, horas_realizadas, "
         "dtini_prev, dtfim_prev, dtini_real, dtfim_real, etapa_id, frente_trabalho_id, "
-        "prioridade, observacoes, eh_atividade_master, eh_entregavel, data_execucao_fixada "
+        "prioridade, observacoes, eh_atividade_master, eh_entregavel, data_execucao_fixada, "
+        # 74ª rodada (migração 033) — precisam vir aqui pra _validar_campos_simples
+        # conseguir comparar "novo" contra o valor ATUAL de verdade (sem essas
+        # colunas, a.get(campo) sempre voltava None, fazendo a comparação de
+        # "mudou" dar falso positivo/negativo errado).
+        "tipo_restricao, data_restricao, "
+        "numero_1, numero_2, numero_3, numero_4, numero_5, "
+        "booleano_1, booleano_2, booleano_3, booleano_4, booleano_5, "
+        "texto_1, texto_2, texto_3, texto_4, texto_5 "
         f"FROM atividades WHERE projeto_id = {db.q(projeto_id)}"
     )
     by_id = {a["id"]: a for a in atividades}
