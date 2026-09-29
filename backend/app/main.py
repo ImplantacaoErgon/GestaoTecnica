@@ -3,6 +3,7 @@ import csv
 import io
 import json
 import os
+import threading
 import traceback
 import uuid
 from datetime import datetime, date, timedelta
@@ -807,6 +808,85 @@ def aplicar_percentual_inicial(atual, data):
     percentual_novo = int(percentual_novo) if percentual_novo not in (None, "") else percentual_antigo
     if percentual_novo == percentual_antigo and percentual_antigo == 0:
         data["percentual_concluido"] = 20
+
+
+# ---------------------------------------------------------------------------
+# 83ª rodada — carga em segundo plano da Comparação Folha (Google Picker).
+#
+# Até esta rodada, POST /comparacao-folha/importar/picker baixava do Drive
+# E importava (até ~300 mil linhas) tudo dentro da MESMA requisição HTTP,
+# sem devolver resposta até terminar — usuário reportou (verbatim) que
+# precisava "ficar na janela onde a carga está sendo feita" e perguntou se
+# não dava pra virar um processo em batch.
+#
+# Agora o endpoint só grava uma linha em cargas_comparacao_folha (status
+# em_andamento) e devolve na hora; estas duas funções rodam numa THREAD
+# separada, disparada pelo endpoint, e são as únicas responsáveis por
+# terminar a carga (baixar + importar) e atualizar o status ao final. Fora
+# de módulo/função aninhada de propósito: nada aqui depende do `app` Flask
+# nem de contexto de requisição — só dos módulos já importados no topo do
+# arquivo (db, google_drive, comparacao_folha_import, auditoria), que
+# funcionam de qualquer thread (ver comentário de threading em db.py: cada
+# chamada abre seu próprio subprocess `psql`, sem estado compartilhado).
+def _processar_carga_comparacao_folha_picker(
+    carga_id, projeto_id, file_id, mime_type, access_token, resource_key,
+    nome_arquivo, usuario_id, usuario_nome, usuario_email,
+):
+    try:
+        conteudo = google_drive.baixar_arquivo_selecionado(
+            file_id, mime_type, access_token, nome_arquivo, resource_key=resource_key,
+        )
+        resultado = comparacao_folha_import.importar_comparacao_folha(projeto_id, conteudo)
+    except google_drive.GoogleDriveError as e:
+        _marcar_carga_comparacao_folha_erro(carga_id, str(e))
+        return
+    except comparacao_folha_import.ComparacaoFolhaImportError as e:
+        _marcar_carga_comparacao_folha_erro(carga_id, f'{e} (arquivo selecionado: "{nome_arquivo}")')
+        return
+    except Exception as e:
+        _marcar_carga_comparacao_folha_erro(carga_id, f'Falha ao importar a planilha "{nome_arquivo}": {e}')
+        return
+
+    try:
+        db.execute(
+            "UPDATE cargas_comparacao_folha SET "
+            f"status = 'concluido', mesano = {db.q(resultado['mesano'])}, "
+            f"total_linhas = {db.q(resultado['total_linhas'])}, "
+            f"avisos = {db.q(json.dumps(resultado['avisos']))}::jsonb, concluido_em = now() "
+            f"WHERE id = {db.q(carga_id)}"
+        )
+        auditoria.registrar_evento_manual(
+            "edicao", f"Atualizou Comparação Folha — competência {resultado['mesano'][:7]} "
+            f"({resultado['total_linhas']} linhas, arquivo \"{nome_arquivo}\")",
+            entidade="comparacao_folha", entidade_rotulo=resultado["mesano"][:7],
+            projeto_id=projeto_id, sensivel=False,
+            usuario_id=usuario_id, usuario_nome=usuario_nome, usuario_email=usuario_email,
+        )
+    except Exception:
+        # A importação em si já terminou (dados gravados); uma falha aqui é
+        # só no registro de status/auditoria — não desfaz a carga, só evita
+        # que o front-end fique achando que ainda está em_andamento pra
+        # sempre. Loga pra investigar depois.
+        print("[comparacao_folha] falha ao marcar carga como concluída:", flush=True)
+        traceback.print_exc()
+        try:
+            db.execute(
+                "UPDATE cargas_comparacao_folha SET status = 'concluido', concluido_em = now() "
+                f"WHERE id = {db.q(carga_id)}"
+            )
+        except Exception:
+            pass
+
+
+def _marcar_carga_comparacao_folha_erro(carga_id, mensagem):
+    try:
+        db.execute(
+            f"UPDATE cargas_comparacao_folha SET status = 'erro', mensagem_erro = {db.q(mensagem)}, "
+            f"concluido_em = now() WHERE id = {db.q(carga_id)}"
+        )
+    except Exception:
+        print("[comparacao_folha] falha ao marcar carga como erro:", flush=True)
+        traceback.print_exc()
 
 
 def create_app():
@@ -2570,17 +2650,22 @@ def create_app():
 
     @app.post("/api/comparacao-folha/importar/picker")
     def importar_comparacao_folha_picker():
-        """Único passo (sem prévia — ver comentário no topo de
-        comparacao_folha_import.py): baixa o arquivo que o PRÓPRIO USUÁRIO
-        escolheu no Google Picker (frontend) — não uma pasta fixa varrida
-        pela conta de serviço — e já grava, substituindo as linhas da
-        competência detectada. Substitui o antigo endpoint
-        /importar/drive (busca automática "mais recente numa pasta fixa"):
-        cada comparação sai num arquivo/diretório novo no Drive do usuário,
-        então buscar sozinho numa pasta fixa não dava conta do caso real —
-        ver 60ª rodada. Pesado (até ~300 mil linhas) — pode demorar; ver
-        timeout do gunicorn no Dockerfile e o parâmetro `timeout` de
-        importar_comparacao_folha."""
+        """83ª rodada — deixou de baixar+importar dentro desta mesma
+        requisição (o que segurava o navegador até ~15min, ver timeout do
+        gunicorn no Dockerfile, pra arquivos grandes): agora só valida a
+        entrada, grava uma linha em cargas_comparacao_folha (status
+        em_andamento) e dispara uma THREAD separada
+        (_processar_carga_comparacao_folha_picker, definida antes de
+        create_app) que faz o trabalho de verdade — devolve 202 na hora,
+        com o id da carga, pro usuário poder fechar a aba. Ver GET
+        /comparacao-folha/carga-atual pra acompanhar o andamento depois.
+
+        `usuario_id`/nome/email são capturados AQUI, ainda dentro da
+        requisição (via `session`) — a thread não tem acesso a `session`
+        (não existe fora de contexto de requisição), então precisam ser
+        passados explicitamente pra auditoria.registrar_evento_manual não
+        perder a autoria do evento (ver comentário grande no próprio
+        registrar_evento_manual)."""
         data = request.get_json(silent=True) or {}
         projeto_id = data.get("projeto_id") or request.args.get("projeto_id")
         file_id = data.get("file_id")
@@ -2592,26 +2677,51 @@ def create_app():
             return jsonify({"erro": "projeto_id é obrigatório"}), 400
         if not file_id or not access_token:
             return jsonify({"erro": "Selecione o arquivo no Google Drive antes de importar."}), 400
+
+        usuario_atual = auth.buscar_usuario_publico(session.get("usuario_id")) or {}
+
         try:
-            conteudo = google_drive.baixar_arquivo_selecionado(
-                file_id, mime_type, access_token, nome_arquivo, resource_key=resource_key,
+            carga = db.execute_returning_one(
+                "INSERT INTO cargas_comparacao_folha (projeto_id, nome_arquivo, iniciado_por, iniciado_por_nome) "
+                f"VALUES ({db.q(projeto_id)}, {db.q(nome_arquivo)}, {db.q(usuario_atual.get('id'))}, "
+                f"{db.q(usuario_atual.get('nome'))}) RETURNING *"
             )
-        except google_drive.GoogleDriveError as e:
-            return jsonify({"erro": str(e)}), 502
-        try:
-            resultado = comparacao_folha_import.importar_comparacao_folha(projeto_id, conteudo)
-        except comparacao_folha_import.ComparacaoFolhaImportError as e:
-            return jsonify({"erro": f'{e} (arquivo selecionado: "{nome_arquivo}")'}), 400
-        except Exception as e:
-            return jsonify({"erro": f'Falha ao importar a planilha "{nome_arquivo}": {e}'}), 400
-        resultado["arquivo_origem"] = {"nome": nome_arquivo}
-        auditoria.registrar_evento_manual(
-            "edicao", f"Atualizou Comparação Folha — competência {resultado['mesano'][:7]} "
-            f"({resultado['total_linhas']} linhas, arquivo \"{nome_arquivo}\")",
-            entidade="comparacao_folha", entidade_rotulo=resultado["mesano"][:7],
-            projeto_id=projeto_id, sensivel=False,
+        except db.DbError as e:
+            if "idx_cargas_comparacao_folha_ativa" in str(e) or "duplicate key" in str(e):
+                return jsonify({
+                    "erro": "Já existe uma carga de Comparação Folha em andamento para este "
+                    "projeto — aguarde ela terminar (ou consulte o andamento na tela) antes "
+                    "de iniciar outra."
+                }), 409
+            raise
+
+        thread = threading.Thread(
+            target=_processar_carga_comparacao_folha_picker,
+            args=(
+                carga["id"], projeto_id, file_id, mime_type, access_token, resource_key,
+                nome_arquivo, usuario_atual.get("id"), usuario_atual.get("nome"), usuario_atual.get("email"),
+            ),
+            daemon=True,
         )
-        return jsonify(resultado)
+        thread.start()
+        return jsonify(carga), 202
+
+    @app.get("/api/comparacao-folha/carga-atual")
+    def comparacao_folha_carga_atual():
+        """83ª rodada — devolve a carga MAIS RECENTE (em_andamento,
+        concluido ou erro) deste projeto, pro front-end mostrar/atualizar o
+        indicador de progresso da importação pelo Google Picker — inclusive
+        depois de fechar e reabrir a aba, já que a carga em si roda no
+        servidor, não no navegador. `null` quando o projeto nunca teve
+        nenhuma carga por esse caminho."""
+        pid = request.args.get("projeto_id")
+        if not pid:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        carga = db.fetch_one(
+            f"SELECT * FROM cargas_comparacao_folha WHERE projeto_id = {db.q(pid)} "
+            "ORDER BY criado_em DESC LIMIT 1"
+        )
+        return jsonify(carga)
 
     @app.post("/api/comparacao-folha/importar/upload")
     def importar_comparacao_folha_upload():

@@ -358,14 +358,36 @@ def registrar_exclusao(tabela, row):
 
 
 def registrar_evento_manual(tipo_evento, descricao, *, entidade=None, entidade_id=None,
-                             entidade_rotulo=None, detalhes=None, projeto_id=None, sensivel=False):
+                             entidade_rotulo=None, detalhes=None, projeto_id=None, sensivel=False,
+                             usuario_id=None, usuario_nome=None, usuario_email=None):
     """Para eventos que não vêm de insert_row/patch_row/delete_row nem de
-    login/logout — hoje só a limpeza em massa do cronograma (remover-tudo)."""
-    _inserir_log(
+    login/logout — a limpeza em massa do cronograma (remover-tudo), e desde
+    a 83ª rodada também a carga em segundo plano de Comparação Folha (ver
+    app/main.py, _processar_carga_comparacao_folha_picker).
+
+    `usuario_id`/`usuario_nome`/`usuario_email` (83ª rodada): normalmente
+    _inserir_log detecta sozinho o usuário logado via `session` (contexto
+    de requisição HTTP) — mas uma carga em segundo plano roda numa THREAD
+    separada, fora de qualquer requisição, então `session` não existe mais
+    quando o evento é registrado ao final da importação (_usuario_atual()
+    já tolera isso, devolvendo None — ver seu docstring "fora de contexto
+    de requisição (ex.: script batch)" — mas aí o log perderia a autoria).
+    Passando esses três parâmetros explicitamente (capturados ANTES de
+    iniciar a thread, ainda dentro da requisição original) o log mantém a
+    autoria certa mesmo assim. Ignorados (None) nos chamadores normais, que
+    continuam dependendo da detecção automática via `session`."""
+    campos = dict(
         tipo_evento=tipo_evento, entidade=entidade, entidade_id=entidade_id,
         entidade_rotulo=entidade_rotulo, descricao=descricao, detalhes=detalhes,
         projeto_id=projeto_id, sensivel=sensivel,
     )
+    if usuario_id is not None:
+        campos["usuario_id"] = usuario_id
+    if usuario_nome is not None:
+        campos["usuario_nome"] = usuario_nome
+    if usuario_email is not None:
+        campos["usuario_email"] = usuario_email
+    _inserir_log(**campos)
 
 
 def registrar_login(usuario_id, nome, email):

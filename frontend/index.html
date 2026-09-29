@@ -1076,6 +1076,11 @@
         <button class="btn secondary small" id="btn-upload-comparacao" title="Escolhe o arquivo direto do seu computador — sem depender do Google">📤 Enviar arquivo do computador</button>
       </div>
     </div>
+    <!-- 83ª rodada: banner de acompanhamento da carga em segundo plano
+         (Google Picker) — ver cfRenderCargaBanner()/cfVerificarCargaAtual()
+         abaixo. Vazio/hidden quando não há nenhuma carga em andamento nem
+         recém-concluída pra mostrar. -->
+    <div class="card" id="cf-carga-banner" hidden style="margin-bottom:14px;"></div>
     <div class="muted" id="cf-status" style="font-size:12px;margin-bottom:8px;"></div>
     <!-- 65ª rodada: cabeçalho gerado em JS a partir de CF_COLUNAS_GRID (todas
          as ~65 colunas da planilha, não só as 9 de antes) — ver
@@ -2580,6 +2585,22 @@ const API = "/api";
 // mostra um erro claro em vez de quebrar silenciosamente.
 const GOOGLE_PICKER_CLIENT_ID = "900917454486-3oimt68kdvset56rtluv4mh4pg9grg90.apps.googleusercontent.com";
 const GOOGLE_PICKER_API_KEY = "AIzaSyArFQn7cSD2Wj5MaHRa8hv78SXxvac7i5I";
+// 82ª rodada — bug reportado em produção: usuário selecionava o arquivo
+// certo no Picker, autenticava certinho, e mesmo assim a importação falhava
+// com 403 "The user has not granted the app <numero> read access to the
+// file ..." (reason: appNotAuthorizedToFile). Causa: com escopo
+// "drive.file" (o usado aqui — só alcança o que o próprio usuário
+// selecionar, nunca o Drive inteiro), o Google só CONCEDE esse acesso por
+// arquivo no momento da seleção quando o PickerBuilder é construído com
+// .setAppId(...) — sem isso, o Picker abre e deixa escolher o arquivo
+// normalmente (por isso passava despercebido até a importação de verdade),
+// mas a seleção não é registrada como uma concessão de acesso válida, e
+// qualquer chamada posterior à API (o download, aqui) recebe 403. O App ID
+// exigido é o número do projeto do Google Cloud, que é exatamente a parte
+// antes do "-" no Client ID acima (mesmo número "900917454486" que aparece
+// no texto do erro em produção — não é coincidência, é o próprio app se
+// identificando como não autorizado).
+const GOOGLE_PICKER_APP_ID = GOOGLE_PICKER_CLIENT_ID.split("-")[0];
 
 const STATUS_COLOR = {"Não iniciada":"faint","Em andamento":"accent","Bloqueada":"warn","Concluída":"ok",
   "Concluída com atraso":"warn","Concluída com esforço maior":"warn","Concluída com atraso e esforço maior":"danger",
@@ -8881,6 +8902,13 @@ async function audRenderHistoricoRegistro(containerId, entidade, entidadeId){
 // mesma UX de auditoria.
 let CF_PAGINA = 1;
 let CF_TOTAL = 0;
+
+// 83ª rodada — id da última carga (Google Picker) que ESTA aba já mostrou
+// como concluída/erro, pra não ficar re-exibindo o mesmo toast de sucesso
+// a cada poll depois que o usuário já viu (cfRenderCargaBanner só dispara
+// o "efeito colateral" de sucesso/erro uma vez por carga_id).
+let CF_CARGA_POLL_TIMER = null;
+let CF_ULTIMA_CARGA_NOTIFICADA = null;
 const CF_TAMANHO_PAGINA = 50;
 // Guarda os itens já carregados na tela (id -> linha completa, ~65 campos)
 // pra abrir o modal de detalhe sem precisar de outra chamada ao servidor —
@@ -8911,6 +8939,105 @@ function cfQueryString(extra={}){
 async function renderComparacaoFolhaPane(){
   CF_PAGINA = 1;
   await Promise.all([cfCarregarResumo(), cfCarregarLista(false)]);
+  cfVerificarCargaAtual();
+}
+
+// ---------------------------------------------------------------------
+// 83ª rodada — acompanhamento da carga em segundo plano (Google Picker).
+// Antes, POST /comparacao-folha/importar/picker só respondia depois de
+// baixar E importar o arquivo inteiro (até ~300 mil linhas) — o usuário
+// precisava ficar com a aba aberta esperando, podendo levar minutos.
+// Agora o endpoint devolve na hora (a carga roda numa thread no servidor)
+// e este bloco consulta GET /comparacao-folha/carga-atual pra mostrar o
+// andamento — inclusive se o usuário fechou e reabriu a aba depois de
+// iniciar a importação, já que o estado mora no banco, não no navegador.
+// ---------------------------------------------------------------------
+async function cfVerificarCargaAtual(){
+  let carga;
+  try{ carga = await api(`/comparacao-folha/carga-atual?projeto_id=${PROJETO.id}`); }
+  catch(e){ return; }
+  cfRenderCargaBanner(carga);
+  if(carga && carga.status === "em_andamento") cfIniciarPollingCarga();
+}
+
+function cfIniciarPollingCarga(){
+  if(CF_CARGA_POLL_TIMER) return; // já tem um polling rodando, não duplica
+  CF_CARGA_POLL_TIMER = setInterval(async ()=>{
+    let carga;
+    try{ carga = await api(`/comparacao-folha/carga-atual?projeto_id=${PROJETO.id}`); }
+    catch(e){ return; } // erro de rede passageiro — tenta de novo no próximo tick
+    cfRenderCargaBanner(carga);
+    if(!carga || carga.status !== "em_andamento"){
+      clearInterval(CF_CARGA_POLL_TIMER);
+      CF_CARGA_POLL_TIMER = null;
+    }
+  }, 3000);
+}
+
+function cfRenderCargaBanner(carga){
+  const el = $("cf-carga-banner");
+  if(!el) return;
+  if(!carga){ el.hidden = true; return; }
+
+  const hora = iso => { try{ return new Date(iso).toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit'}); }catch(e){ return ""; } };
+  const quem = carga.iniciado_por_nome ? ` por ${esc(carga.iniciado_por_nome)}` : "";
+
+  if(carga.status === "em_andamento"){
+    el.hidden = false;
+    el.innerHTML = `
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div style="width:16px;height:16px;border-radius:50%;border:2px solid var(--border);border-top-color:var(--accent);animation:spin .8s linear infinite;flex:0 0 auto;"></div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:600;">Carga em andamento — "${esc(carga.nome_arquivo||"arquivo")}"</div>
+          <div class="muted" style="font-size:12px;">Iniciada às ${hora(carga.criado_em)}${quem}. Pode continuar usando o sistema normalmente e até fechar esta aba — a importação segue no servidor; esta mensagem se atualiza sozinha.</div>
+        </div>
+      </div>`;
+    return;
+  }
+
+  if(carga.status === "concluido"){
+    el.hidden = false;
+    el.innerHTML = `
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div style="font-size:18px;flex:0 0 auto;">✅</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:600;">Carga concluída — "${esc(carga.nome_arquivo||"arquivo")}"</div>
+          <div class="muted" style="font-size:12px;">Competência ${fmtDate(carga.mesano)}, ${Number(carga.total_linhas||0).toLocaleString('pt-BR')} linha(s) importada(s).${(carga.avisos||[]).length ? " " + carga.avisos.join(" ") : ""}</div>
+        </div>
+        <button class="btn secondary small" onclick="$('cf-carga-banner').hidden=true;" style="flex:0 0 auto;">Dispensar</button>
+      </div>`;
+    // Efeito colateral (uma vez só por carga, não a cada re-render do banner):
+    // atualiza a grade/resumo sozinho, já que os dados no banco mudaram
+    // enquanto o usuário podia estar olhando outra coisa.
+    if(CF_ULTIMA_CARGA_NOTIFICADA !== carga.id){
+      CF_ULTIMA_CARGA_NOTIFICADA = carga.id;
+      toast(`Comparação Folha atualizada: competência ${fmtDate(carga.mesano)}, ${Number(carga.total_linhas||0).toLocaleString('pt-BR')} linha(s).`);
+      CF_PAGINA = 1;
+      cfCarregarResumo();
+      cfCarregarLista(false);
+    }
+    return;
+  }
+
+  if(carga.status === "erro"){
+    el.hidden = false;
+    el.innerHTML = `
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div style="font-size:18px;flex:0 0 auto;">⚠️</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:600;color:var(--danger);">Falha na carga — "${esc(carga.nome_arquivo||"arquivo")}"</div>
+          <div class="muted" style="font-size:12px;">${esc(carga.mensagem_erro||"Erro desconhecido.")}</div>
+        </div>
+        <button class="btn secondary small" onclick="$('cf-carga-banner').hidden=true;" style="flex:0 0 auto;">Dispensar</button>
+      </div>`;
+    if(CF_ULTIMA_CARGA_NOTIFICADA !== carga.id){
+      CF_ULTIMA_CARGA_NOTIFICADA = carga.id;
+      toast(carga.mensagem_erro || "Falha na carga da Comparação Folha.", true);
+    }
+    return;
+  }
+
+  el.hidden = true;
 }
 
 async function cfCarregarResumo(){
@@ -9380,6 +9507,7 @@ async function selecionarComparacaoFolhaNoDrive(){
     const picker = new google.picker.PickerBuilder()
       .setOAuthToken(token)
       .setDeveloperKey(GOOGLE_PICKER_API_KEY)
+      .setAppId(GOOGLE_PICKER_APP_ID)
       .addView(view)
       .setTitle("Selecione o arquivo de Comparação Folha")
       .setCallback(data => {
@@ -9406,13 +9534,20 @@ async function _importarComparacaoFolhaSelecionada(doc, accessToken){
   if(!confirm(
     `Importar "${doc.name}" como Comparação Folha?\n\n` +
     "Isso SUBSTITUI as linhas já importadas da competência detectada no arquivo " +
-    "(as demais competências não são afetadas). Pode demorar alguns minutos " +
-    "(arquivo grande, até ~300 mil linhas)."
+    "(as demais competências não são afetadas). A carga roda em segundo plano no " +
+    "servidor — você pode continuar usando o sistema (e até fechar esta aba) " +
+    "enquanto ela termina."
   )) return;
   const btn = $("btn-atualizar-comparacao");
-  btn.disabled = true; const textoOriginal = btn.textContent; btn.textContent = "Importando… (pode demorar)";
+  btn.disabled = true; const textoOriginal = btn.textContent; btn.textContent = "Iniciando carga…";
   try{
-    const r = await api("/comparacao-folha/importar/picker", {
+    // 83ª rodada — este POST agora só INICIA a carga: responde na hora (202,
+    // com o registro da carga em em_andamento) em vez de segurar a
+    // requisição até baixar+importar o arquivo inteiro (podia levar minutos
+    // pra arquivos grandes, obrigando o usuário a ficar com a aba aberta).
+    // O acompanhamento daqui pra frente é todo via cfVerificarCargaAtual()/
+    // cfIniciarPollingCarga() (banner que consulta GET .../carga-atual).
+    const carga = await api("/comparacao-folha/importar/picker", {
       method: "POST",
       body: JSON.stringify({
         projeto_id: PROJETO.id, file_id: doc.id, mime_type: doc.mimeType,
@@ -9425,15 +9560,14 @@ async function _importarComparacaoFolhaSelecionada(doc, accessToken){
         resource_key: doc.resourceKey || null,
       }),
     });
-    const avisos = (r.avisos||[]).length ? " " + r.avisos.join(" ") : "";
-    toast(`Comparação Folha atualizada: competência ${fmtDate(r.mesano)}, ${r.total_linhas.toLocaleString('pt-BR')} linha(s).${avisos}`);
-    // Volta a competência recém-importada pro topo do filtro de mês, sem
-    // forçar o filtro (o usuário pode querer continuar vendo "todas").
-    await renderComparacaoFolhaPane();
+    cfRenderCargaBanner(carga);
+    cfIniciarPollingCarga();
+    toast("Carga iniciada em segundo plano — acompanhe pelo aviso no topo da lista.");
   }catch(e){
-    // api() já mostra um toast com o erro específico (ex: arquivo sem
-    // coluna MESANO reconhecível, ou token expirado — nesse caso, clique
-    // de novo no botão pra reautenticar).
+    // api() já mostra um toast com o erro específico — inclusive o 409 de
+    // "já existe uma carga em andamento" (índice único parcial no banco,
+    // ver migration_034) ou um token expirado (clique de novo no botão pra
+    // reautenticar).
   }finally{
     btn.disabled = false; btn.textContent = textoOriginal;
   }
