@@ -9115,11 +9115,17 @@ async function cfCarregarResumo(){
   let r;
   try{ r = await api(`/comparacao-folha/resumo?${cfQueryString()}`); }
   catch(e){ return; }
+  // 89ª rodada: "Diferença (Consist − Ergon)" virou dois KPIs (Vantagem e
+  // Desconto) — misturados numa soma só, um desconto "sobrando" no Consist
+  // e uma vantagem "faltando" no Consist empurram o total pro mesmo lado,
+  // escondendo um problema atrás do outro. Ver comentário grande em
+  // comparacao_folha.resumo() (backend) pra como cada um é calculado.
   const itens = [
     ["Linhas (filtro atual)", r.total],
     ["Divergentes", r.total_divergentes],
     ["Não divergentes", r.total - r.total_divergentes],
-    ["Diferença (Consist − Ergon)", fmtMoeda(r.soma_diferenca)],
+    ["Diferença de Vantagem (Consist − Ergon)", fmtMoeda(r.diferenca_vantagem)],
+    ["Diferença de Desconto (Consist − Ergon)", fmtMoeda(r.diferenca_desconto)],
   ];
   $("cf-kpis").innerHTML = itens.map(([rotulo,valor])=>`
     <div><div style="font-size:20px;font-weight:600;">${valor}</div><div class="muted" style="font-size:11.5px;">${esc(rotulo)}</div></div>

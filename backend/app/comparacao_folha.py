@@ -107,13 +107,32 @@ def resumo(projeto_id=None, **filtros):
     KPI continuava mostrando o total geral do projeto). Os filtros agora
     valem pra `where` (totais e por_situacao); `where_projeto` continua só
     com projeto_id, de propósito, pra não esconder opção nenhuma dos
-    combos (ver parágrafo acima)."""
+    combos (ver parágrafo acima).
+
+    89ª rodada — pedido do usuário: o KPI único "Diferença (Consist −
+    Ergon)" (soma de `dif_consist_ergon`, coluna que já vem PRONTA do
+    arquivo de origem — ver comparacao_folha_import.py) misturava Vantagem
+    e Desconto numa soma só, sem muito significado prático (naturezas
+    opostas — um desconto "sobrando" no Consist e uma vantagem "faltando"
+    no Consist empurram o total pro mesmo lado, mascarando um problema com
+    o outro). Virou dois KPIs, um por tipo de rubrica (Vantagem/Desconto),
+    e cada um agora é calculado por NÓS — soma de `valor_consist` menos
+    soma de `valor_ergon`, filtrado por tiporubr — em vez de somar a
+    coluna `dif_consist_ergon` pronta, pra não depender de aquela coluna
+    do arquivo de origem representar exatamente essa mesma conta (nunca
+    conferimos isso). Linhas sem tiporubr 'VANTAGEM' nem 'DESCONTO'
+    (outros tipos, ou tipo não informado) não entram em nenhum dos dois —
+    ficam de fora desses dois KPIs (mas continuam contadas normalmente em
+    "Linhas"/"Divergentes" e na grade)."""
     where = _where_filtros(projeto_id=projeto_id, **filtros)
     row = db.fetch_one(f"""
         SELECT
           COUNT(*) AS total,
           COUNT(*) FILTER (WHERE UPPER(situacao) <> 'NÃO DIVERGENTE') AS total_divergentes,
-          COALESCE(SUM(dif_consist_ergon), 0) AS soma_diferenca
+          COALESCE(SUM(valor_consist) FILTER (WHERE UPPER(tiporubr) = 'VANTAGEM'), 0)
+            - COALESCE(SUM(valor_ergon) FILTER (WHERE UPPER(tiporubr) = 'VANTAGEM'), 0) AS diferenca_vantagem,
+          COALESCE(SUM(valor_consist) FILTER (WHERE UPPER(tiporubr) = 'DESCONTO'), 0)
+            - COALESCE(SUM(valor_ergon) FILTER (WHERE UPPER(tiporubr) = 'DESCONTO'), 0) AS diferenca_desconto
         FROM comparacao_folha{where}
     """)
     where_projeto = _where_filtros(projeto_id=projeto_id)
@@ -149,7 +168,8 @@ def resumo(projeto_id=None, **filtros):
     return {
         "total": (row or {}).get("total", 0),
         "total_divergentes": (row or {}).get("total_divergentes", 0),
-        "soma_diferenca": (row or {}).get("soma_diferenca", 0),
+        "diferenca_vantagem": (row or {}).get("diferenca_vantagem", 0),
+        "diferenca_desconto": (row or {}).get("diferenca_desconto", 0),
         "por_situacao": por_situacao,
         "meses_disponiveis": [m["mesano"] for m in meses],
         "tipos_rubrica_disponiveis": [t["tiporubr"] for t in tipos_rubrica],
