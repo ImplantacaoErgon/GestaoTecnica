@@ -265,12 +265,25 @@ def dashboard(projeto_id, mesano=None):
     # no front-end), mostrando o detalhe por situação sob demanda, sem
     # pré-computar todas as combinações de empresa×rubrica×situação (que
     # seria ainda maior que esta aqui) de uma vez só.
+    #
+    # 86ª rodada — pedido do usuário: mostrar também o Tipo de Rubrica (antes
+    # da coluna Rubrica Ergon) e ordenar priorizando VANTAGEM primeiro, depois
+    # DESCONTO (dentro de cada grupo, mantém a ordenação por divergência já
+    # existente). `MAX(tiporubr)` dentro do CTE (não entra no GROUP BY) — em
+    # tese tiporubr é uma propriedade da própria rubrica, então todo mundo
+    # numa combinação empresa+rubrica_ergon já compartilha o mesmo tipo; usar
+    # MAX() em vez de adicionar ao GROUP BY evita que uma eventual
+    # inconsistência de dados (mesma rubrica com tiporubr gravado diferente
+    # em linhas diferentes) quebre a combinação em duas linhas separadas no
+    # quadro. O CASE de prioridade usa UPPER() pra não depender de como o
+    # arquivo de origem grava o valor (maiúsculo/minúsculo).
     por_empresa_rubrica = db.fetch_all(f"""
         WITH combinacoes AS (
           SELECT
             COALESCE(empresa_consist, '(sem empresa)') AS empresa,
             rubrica_ergon,
             MAX(rubrica_nome_ergon) AS rubrica_nome_ergon,
+            COALESCE(MAX(tiporubr), '(sem tipo)') AS tiporubr,
             COUNT(*) AS total_linhas,
             COUNT(*) FILTER (WHERE UPPER(situacao) = 'NÃO DIVERGENTE') AS total_sem_divergencia,
             COUNT(*) FILTER (WHERE UPPER(situacao) <> 'NÃO DIVERGENTE') AS total_divergente
@@ -279,12 +292,18 @@ def dashboard(projeto_id, mesano=None):
           HAVING COUNT(*) FILTER (WHERE UPPER(situacao) <> 'NÃO DIVERGENTE') > 0
         )
         SELECT
-          empresa, rubrica_ergon, rubrica_nome_ergon, total_linhas, total_sem_divergencia, total_divergente,
+          empresa, tiporubr, rubrica_ergon, rubrica_nome_ergon, total_linhas, total_sem_divergencia, total_divergente,
           ROUND(100.0 * total_sem_divergencia / GREATEST(total_linhas, 1), 1) AS pct_sem_divergencia,
           ROUND(100.0 * total_divergente / GREATEST(total_linhas, 1), 1) AS pct_divergente,
           COUNT(*) OVER() AS total_combinacoes_com_divergencia
         FROM combinacoes
-        ORDER BY total_divergente DESC, total_linhas DESC
+        ORDER BY
+          CASE
+            WHEN UPPER(tiporubr) = 'VANTAGEM' THEN 1
+            WHEN UPPER(tiporubr) = 'DESCONTO' THEN 2
+            ELSE 3
+          END,
+          total_divergente DESC, total_linhas DESC
         LIMIT {LIMITE_EMPRESA_RUBRICA}
     """)
     total_combinacoes_empresa_rubrica = (por_empresa_rubrica[0]["total_combinacoes_com_divergencia"]

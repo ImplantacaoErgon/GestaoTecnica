@@ -1140,9 +1140,9 @@
         <h3>🎯 Top divergências por Empresa × Rubrica Ergon</h3>
         <span class="muted" id="cfd-emprub-contagem" style="font-size:11.5px;"></span>
       </div>
-      <div class="view-sub" style="margin-top:-6px;">As combinações com mais linhas divergentes primeiro — onde focar o esforço de correção. Clique numa linha para ver o detalhe (por situação) na aba Comparação Folha.</div>
+      <div class="view-sub" style="margin-top:-6px;">Combinações com Vantagem primeiro, depois Desconto (dentro de cada grupo, as com mais linhas divergentes primeiro) — onde focar o esforço de correção. Clique numa linha para ver o detalhe (por situação) na aba Comparação Folha.</div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Empresa</th><th>Rubrica Ergon</th><th>Total</th><th>Sem divergência</th><th>Divergente</th><th>% sem div.</th><th>% divergente</th></tr></thead>
+        <thead><tr><th>Empresa</th><th>Tipo de Rubrica</th><th>Rubrica Ergon</th><th>Total</th><th>Sem divergência</th><th>Divergente</th><th>% sem div.</th><th>% divergente</th></tr></thead>
         <tbody id="cfd-emprub-tbody"></tbody>
       </table></div>
     </div>
@@ -9440,10 +9440,13 @@ async function cfdCarregarDados(){
 
   // 84ª rodada — quadro "Top divergências por Empresa × Rubrica Ergon" (ver
   // comentário grande em app/comparacao_folha.py, dashboard()). Só as
-  // LIMITE_EMPRESA_RUBRICA piores combinações (as que têm divergência,
-  // ordenadas pela quantidade); total_combinacoes_empresa_rubrica é quantas
-  // existem ao todo (com divergência), pra "mostrando X de Y" não dar a
-  // entender que é a lista completa.
+  // LIMITE_EMPRESA_RUBRICA piores combinações (as que têm divergência);
+  // total_combinacoes_empresa_rubrica é quantas existem ao todo (com
+  // divergência), pra "mostrando X de Y" não dar a entender que é a lista
+  // completa. 86ª rodada: coluna Tipo de Rubrica adicionada antes da Rubrica
+  // Ergon, e a ordenação (feita no backend) passou a priorizar Vantagem,
+  // depois Desconto, antes do critério de quantidade — ver comentário de
+  // por_empresa_rubrica em comparacao_folha.py.
   const porEmpresaRubrica = r.por_empresa_rubrica || [];
   const totalCombosDivergentes = r.total_combinacoes_empresa_rubrica || 0;
   $("cfd-emprub-contagem").textContent = totalCombosDivergentes
@@ -9452,13 +9455,14 @@ async function cfdCarregarDados(){
   $("cfd-emprub-tbody").innerHTML = porEmpresaRubrica.length ? porEmpresaRubrica.map(x=>`
     <tr style="cursor:pointer;" title="Ver detalhe na Comparação Folha" onclick="cfdAbrirDetalheEmpresaRubrica(${attrArgs(x.empresa, x.rubrica_ergon)})">
       <td>${esc(x.empresa)}</td>
+      <td>${esc(x.tiporubr)}</td>
       <td class="mono" title="${esc(x.rubrica_nome_ergon||"")}">${esc(x.rubrica_ergon)}${x.rubrica_nome_ergon?` — ${esc(x.rubrica_nome_ergon)}`:""}</td>
       <td class="mono">${Number(x.total_linhas||0).toLocaleString('pt-BR')}</td>
       <td class="mono">${Number(x.total_sem_divergencia||0).toLocaleString('pt-BR')}</td>
       <td class="mono">${Number(x.total_divergente||0).toLocaleString('pt-BR')}</td>
       <td>${x.pct_sem_divergencia==null ? "—" : x.pct_sem_divergencia+"%"}</td>
       <td>${x.pct_divergente==null ? "—" : x.pct_divergente+"%"}</td>
-    </tr>`).join("") : `<tr class="empty-row"><td colspan="7">Nenhuma divergência encontrada. 🎉</td></tr>`;
+    </tr>`).join("") : `<tr class="empty-row"><td colspan="8">Nenhuma divergência encontrada. 🎉</td></tr>`;
 
   const porEmpresa = r.por_empresa || [];
   $("cfd-empresa-tbody").innerHTML = porEmpresa.length ? porEmpresa.map(e=>`
