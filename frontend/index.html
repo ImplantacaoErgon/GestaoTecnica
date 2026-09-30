@@ -1153,8 +1153,14 @@
       <div class="card">
         <h3>Comparação por Tipo de Rubrica</h3>
         <div class="view-sub" style="margin-top:-6px;">Mesma pergunta de "onde focar primeiro", quebrada por Tipo de Rubrica — os % são sobre o total de CADA tipo, não do total geral, pra dar pra comparar taxa de acerto entre tipos, não só volume.</div>
+        <!-- 94ª rodada — pedido do usuário: par de colunas "Não prog./cadastr."
+             (quantidade + %), DEDUZIDO de Divergente (não somado à parte) —
+             ver comentário grande em comparacao_folha.dashboard() (backend,
+             por_tiporubr) pros valores exatos de SITUACAO que entram nessa
+             categoria. Rótulo "Sem divergência" renomeado pra "Convergente"
+             nesta mesma rodada (pedido do usuário). -->
         <div class="table-wrap"><table>
-          <thead><tr><th>Tipo de Rubrica</th><th>Total</th><th>Sem divergência</th><th>Divergente</th><th>% sem div.</th><th>% divergente</th></tr></thead>
+          <thead><tr><th>Tipo de Rubrica</th><th>Total</th><th>Convergente</th><th>Não prog./cadastr.</th><th>Divergente</th><th>% convergente</th><th>% não prog./cadastr.</th><th>% divergente</th></tr></thead>
           <tbody id="cfd-tiporubr-tbody"></tbody>
         </table></div>
       </div>
@@ -1175,7 +1181,7 @@
       </div>
       <div class="view-sub" style="margin-top:-6px;">Combinações com Vantagem primeiro, depois Desconto (dentro de cada grupo, as com mais linhas divergentes primeiro) — onde focar o esforço de correção. Clique numa linha para ver o detalhe (por situação) na aba Comparação Folha.</div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Empresa</th><th>Tipo de Rubrica</th><th>Rubrica Ergon</th><th>Total</th><th>Sem divergência</th><th>Divergente</th><th>% sem div.</th><th>% divergente</th></tr></thead>
+        <thead><tr><th>Empresa</th><th>Tipo de Rubrica</th><th>Rubrica Ergon</th><th>Total</th><th>Convergente</th><th>Divergente</th><th>% convergente</th><th>% divergente</th></tr></thead>
         <tbody id="cfd-emprub-tbody"></tbody>
       </table></div>
     </div>
@@ -9604,7 +9610,7 @@ function cfdMostrarAguardandoCompetencia(){
   const aviso = `<div class="muted" style="font-size:13px;">Selecione uma competência acima para carregar os dados.</div>`;
   $("cfd-kpis").innerHTML = aviso;
   $("cfd-situacao").innerHTML = aviso;
-  $("cfd-tiporubr-tbody").innerHTML = `<tr class="empty-row"><td colspan="6">Selecione uma competência acima.</td></tr>`;
+  $("cfd-tiporubr-tbody").innerHTML = `<tr class="empty-row"><td colspan="8">Selecione uma competência acima.</td></tr>`;
   $("cfd-emprub-contagem").textContent = "";
   $("cfd-emprub-tbody").innerHTML = `<tr class="empty-row"><td colspan="8">Selecione uma competência acima.</td></tr>`;
   $("cfd-empresa-tbody").innerHTML = `<tr class="empty-row"><td colspan="5">Selecione uma competência acima.</td></tr>`;
@@ -9630,7 +9636,7 @@ async function cfdCarregarDados(){
   const g = r.geral || {};
   $("cfd-kpis").innerHTML = [
     ["Linhas comparadas", (g.total||0).toLocaleString('pt-BR')],
-    ["Sem divergência", (g.total_nao_divergentes||0).toLocaleString('pt-BR')],
+    ["Convergente", (g.total_nao_divergentes||0).toLocaleString('pt-BR')],
     ["% sem divergência (geral)", g.pct_nao_divergente==null ? "—" : `${g.pct_nao_divergente}%`],
     ["% com divergência (geral)", g.pct_divergente==null ? "—" : `${g.pct_divergente}%`],
   ].map(([l,v])=>`<div><div style="font-size:20px;font-weight:600;">${v}</div><div class="muted" style="font-size:11.5px;">${esc(l)}</div></div>`).join("");
@@ -9646,18 +9652,23 @@ async function cfdCarregarDados(){
   }).join("") : `<div class="muted" style="font-size:12.5px;">Nenhum dado para esta competência.</div>`;
 
   // 81ª rodada: quadro "Comparação por Tipo de Rubrica", ao lado do de
-  // Situação — tabela (não barra) porque tem 5 números por linha, diferente
-  // do de Situação que só tem 1 (o total do total geral).
+  // Situação — tabela (não barra) porque tem vários números por linha,
+  // diferente do de Situação que só tem 1 (o total do total geral).
+  // 94ª rodada — coluna "Não prog./cadastr." (quantidade + %) adicionada,
+  // deduzida de Divergente (ver comparacao_folha.dashboard()/por_tiporubr
+  // no backend pro cálculo) — "Sem divergência" renomeado pra "Convergente".
   const porTipoRubr = r.por_tiporubr || [];
   $("cfd-tiporubr-tbody").innerHTML = porTipoRubr.length ? porTipoRubr.map(t=>`
     <tr>
       <td>${esc(t.tiporubr)}</td>
       <td class="mono">${Number(t.total_linhas||0).toLocaleString('pt-BR')}</td>
       <td class="mono">${Number(t.total_sem_divergencia||0).toLocaleString('pt-BR')}</td>
+      <td class="mono">${Number(t.total_nao_programada||0).toLocaleString('pt-BR')}</td>
       <td class="mono">${Number(t.total_divergente||0).toLocaleString('pt-BR')}</td>
       <td>${t.pct_sem_divergencia==null ? "—" : t.pct_sem_divergencia+"%"}</td>
+      <td>${t.pct_nao_programada==null ? "—" : t.pct_nao_programada+"%"}</td>
       <td>${t.pct_divergente==null ? "—" : t.pct_divergente+"%"}</td>
-    </tr>`).join("") : `<tr class="empty-row"><td colspan="6">Nenhum dado para esta competência.</td></tr>`;
+    </tr>`).join("") : `<tr class="empty-row"><td colspan="8">Nenhum dado para esta competência.</td></tr>`;
 
   // 84ª rodada — quadro "Top divergências por Empresa × Rubrica Ergon" (ver
   // comentário grande em app/comparacao_folha.py, dashboard()). Só as

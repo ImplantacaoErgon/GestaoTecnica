@@ -18,6 +18,18 @@ Confirmado com o usuário (AskUserQuestion, 55ª rodada): a tela é só consulta
 """
 from . import db
 
+# 94ª rodada — pedido do usuário: no quadro "Comparação por Tipo de Rubrica"
+# do Dashboard, os valores de SITUACAO abaixo passaram a contar como uma
+# categoria própria ("Não programada/cadastrada", ver dashboard() mais
+# abaixo), deduzida da contagem de Divergente — são casos em que a rubrica
+# nem chegou a ser comparada de verdade (não está programada/cadastrada no
+# lado Ergon), diferente de uma divergência de VALOR. Confirmado com o
+# usuário (AskUserQuestion) quais valores reais de SITUACAO entram aqui —
+# lista fechada de propósito (não um padrão tipo "contém NÃO PROGRAMADA"),
+# pra não capturar nenhum outro valor de SITUACAO por engano.
+SITUACOES_NAO_PROGRAMADA = ("RUBRICA SIGEP NÃO CADASTRADA", "RUBRICA SIGEP NÃO PROGRAMADA")
+_SITUACOES_NAO_PROGRAMADA_SQL = "(" + ", ".join(db.q(s) for s in SITUACOES_NAO_PROGRAMADA) + ")"
+
 
 def _where_filtros(projeto_id=None, mesano=None, situacao=None, tipo_comparacao=None,
                     tiporubr=None, empresa=None, tipovinc=None, rubrica_ergon=None,
@@ -365,14 +377,29 @@ def dashboard(projeto_id, mesano=None):
     # com sua própria contagem e percentual (sobre o total DAQUELE tipo de
     # rubrica, não do total geral) — é o que permite comparar tipos de
     # rubrica entre si por taxa de acerto, não só por volume.
+    #
+    # 94ª rodada — pedido do usuário: "Não programada/cadastradas" virou uma
+    # terceira categoria neste quadro, DEDUZIDA da contagem/% de Divergente
+    # (não somada à parte) — linhas cuja SITUACAO indica que a rubrica nem
+    # chegou a ser comparada de verdade (não programada/cadastrada no lado
+    # Ergon), diferente de uma divergência de VALOR de verdade. Confirmado
+    # com o usuário (AskUserQuestion) os valores reais de SITUACAO que
+    # entram aqui: "RUBRICA SIGEP NÃO CADASTRADA" e "RUBRICA SIGEP NÃO
+    # PROGRAMADA" (ver SITUACOES_NAO_PROGRAMADA no topo do arquivo). O
+    # rótulo "Sem divergência" também virou "Convergente" nesta rodada —
+    # só no front-end (o nome do campo aqui, total_sem_divergencia, foi
+    # mantido de propósito, pra não obrigar mudança em nenhum outro lugar
+    # que já lê esse mesmo campo).
     por_tiporubr = db.fetch_all(f"""
         SELECT
           COALESCE(tiporubr, '(sem tipo)') AS tiporubr,
           COUNT(*) AS total_linhas,
           COUNT(*) FILTER (WHERE UPPER(situacao) = 'NÃO DIVERGENTE') AS total_sem_divergencia,
-          COUNT(*) FILTER (WHERE UPPER(situacao) <> 'NÃO DIVERGENTE') AS total_divergente,
+          COUNT(*) FILTER (WHERE UPPER(situacao) IN {_SITUACOES_NAO_PROGRAMADA_SQL}) AS total_nao_programada,
+          COUNT(*) FILTER (WHERE UPPER(situacao) <> 'NÃO DIVERGENTE' AND UPPER(situacao) NOT IN {_SITUACOES_NAO_PROGRAMADA_SQL}) AS total_divergente,
           ROUND(100.0 * COUNT(*) FILTER (WHERE UPPER(situacao) = 'NÃO DIVERGENTE') / GREATEST(COUNT(*), 1), 1) AS pct_sem_divergencia,
-          ROUND(100.0 * COUNT(*) FILTER (WHERE UPPER(situacao) <> 'NÃO DIVERGENTE') / GREATEST(COUNT(*), 1), 1) AS pct_divergente
+          ROUND(100.0 * COUNT(*) FILTER (WHERE UPPER(situacao) IN {_SITUACOES_NAO_PROGRAMADA_SQL}) / GREATEST(COUNT(*), 1), 1) AS pct_nao_programada,
+          ROUND(100.0 * COUNT(*) FILTER (WHERE UPPER(situacao) <> 'NÃO DIVERGENTE' AND UPPER(situacao) NOT IN {_SITUACOES_NAO_PROGRAMADA_SQL}) / GREATEST(COUNT(*), 1), 1) AS pct_divergente
         FROM comparacao_folha{where}
         GROUP BY tiporubr ORDER BY total_linhas DESC
     """)
