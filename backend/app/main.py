@@ -889,6 +889,58 @@ def _marcar_carga_comparacao_folha_erro(carga_id, mensagem):
         traceback.print_exc()
 
 
+# 90ª rodada — mesmo motivo/padrão de _processar_carga_comparacao_folha_picker
+# acima, agora pro upload manual (POST /comparacao-folha/importar/upload):
+# usuário reportou (mesma reclamação de antes, agora pro botão "📤 Enviar
+# arquivo do computador") que precisava ficar com a aba aberta esperando o
+# arquivo (csv OU xlsx — formato detectado pelo conteúdo, ver _parece_xlsx()
+# em comparacao_folha_import.py) importar inteiro, até ~300 mil linhas.
+#
+# Diferença pro picker: aqui não tem download — o conteúdo do arquivo
+# (`conteudo`, bytes) já foi lido DENTRO da requisição, antes de disparar
+# esta thread, porque request.files só existe durante a requisição HTTP (não
+# dá pra ler o arquivo de dentro de uma thread separada).
+def _processar_carga_comparacao_folha_upload(
+    carga_id, projeto_id, conteudo, nome_arquivo, usuario_id, usuario_nome, usuario_email,
+):
+    try:
+        resultado = comparacao_folha_import.importar_comparacao_folha(projeto_id, conteudo)
+    except comparacao_folha_import.ComparacaoFolhaImportError as e:
+        _marcar_carga_comparacao_folha_erro(carga_id, f'{e} (arquivo enviado: "{nome_arquivo}")')
+        return
+    except Exception as e:
+        _marcar_carga_comparacao_folha_erro(carga_id, f'Falha ao importar a planilha "{nome_arquivo}": {e}')
+        return
+
+    try:
+        db.execute(
+            "UPDATE cargas_comparacao_folha SET "
+            f"status = 'concluido', mesano = {db.q(resultado['mesano'])}, "
+            f"total_linhas = {db.q(resultado['total_linhas'])}, "
+            f"avisos = {db.q(json.dumps(resultado['avisos']))}::jsonb, concluido_em = now() "
+            f"WHERE id = {db.q(carga_id)}"
+        )
+        auditoria.registrar_evento_manual(
+            "edicao", f"Atualizou Comparação Folha (upload manual) — competência "
+            f"{resultado['mesano'][:7]} ({resultado['total_linhas']} linhas, arquivo \"{nome_arquivo}\")",
+            entidade="comparacao_folha", entidade_rotulo=resultado["mesano"][:7],
+            projeto_id=projeto_id, sensivel=False,
+            usuario_id=usuario_id, usuario_nome=usuario_nome, usuario_email=usuario_email,
+        )
+    except Exception:
+        # Mesma lógica do picker: a importação já terminou (dados gravados),
+        # falha aqui é só no registro de status/auditoria.
+        print("[comparacao_folha] falha ao marcar carga (upload) como concluída:", flush=True)
+        traceback.print_exc()
+        try:
+            db.execute(
+                "UPDATE cargas_comparacao_folha SET status = 'concluido', concluido_em = now() "
+                f"WHERE id = {db.q(carga_id)}"
+            )
+        except Exception:
+            pass
+
+
 def create_app():
     app = Flask(__name__, static_folder=None)
     os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -2735,7 +2787,19 @@ def create_app():
         configuração do Google (Client ID, Chave de API, tela de
         consentimento OAuth, resource key...). Único passo, sem prévia —
         mesmo motivo do /importar/picker (arquivo grande demais, até ~300
-        mil linhas, pra renderizar prévia linha a linha)."""
+        mil linhas, pra renderizar prévia linha a linha).
+
+        90ª rodada — passou a rodar em segundo plano, no mesmo padrão já
+        usado pelo Picker (ver comentário grande em cima de
+        _processar_carga_comparacao_folha_picker/_upload): antes, este
+        endpoint importava o arquivo inteiro DENTRO da mesma requisição HTTP
+        (csv ou xlsx, ~300 mil linhas), obrigando o usuário a ficar com a
+        aba aberta esperando. Agora só valida a entrada, lê o conteúdo do
+        arquivo (precisa ser aqui — request.files só existe durante a
+        requisição), grava uma linha em cargas_comparacao_folha (status
+        em_andamento) e dispara a importação de verdade numa THREAD
+        separada — devolve 202 na hora. Front-end acompanha pelo mesmo
+        banner/polling do Picker (GET /comparacao-folha/carga-atual)."""
         projeto_id = request.form.get("projeto_id")
         file = request.files.get("file")
         if not projeto_id:
@@ -2744,20 +2808,34 @@ def create_app():
             return jsonify({"erro": "Selecione o arquivo."}), 400
         nome_arquivo = file.filename
         conteudo = file.read()
+
+        usuario_atual = auth.buscar_usuario_publico(session.get("usuario_id")) or {}
+
         try:
-            resultado = comparacao_folha_import.importar_comparacao_folha(projeto_id, conteudo)
-        except comparacao_folha_import.ComparacaoFolhaImportError as e:
-            return jsonify({"erro": f'{e} (arquivo enviado: "{nome_arquivo}")'}), 400
-        except Exception as e:
-            return jsonify({"erro": f'Falha ao importar a planilha "{nome_arquivo}": {e}'}), 400
-        resultado["arquivo_origem"] = {"nome": nome_arquivo}
-        auditoria.registrar_evento_manual(
-            "edicao", f"Atualizou Comparação Folha (upload manual) — competência "
-            f"{resultado['mesano'][:7]} ({resultado['total_linhas']} linhas, arquivo \"{nome_arquivo}\")",
-            entidade="comparacao_folha", entidade_rotulo=resultado["mesano"][:7],
-            projeto_id=projeto_id, sensivel=False,
+            carga = db.execute_returning_one(
+                "INSERT INTO cargas_comparacao_folha (projeto_id, nome_arquivo, iniciado_por, iniciado_por_nome) "
+                f"VALUES ({db.q(projeto_id)}, {db.q(nome_arquivo)}, {db.q(usuario_atual.get('id'))}, "
+                f"{db.q(usuario_atual.get('nome'))}) RETURNING *"
+            )
+        except db.DbError as e:
+            if "idx_cargas_comparacao_folha_ativa" in str(e) or "duplicate key" in str(e):
+                return jsonify({
+                    "erro": "Já existe uma carga de Comparação Folha em andamento para este "
+                    "projeto — aguarde ela terminar (ou consulte o andamento na tela) antes "
+                    "de iniciar outra."
+                }), 409
+            raise
+
+        thread = threading.Thread(
+            target=_processar_carga_comparacao_folha_upload,
+            args=(
+                carga["id"], projeto_id, conteudo, nome_arquivo,
+                usuario_atual.get("id"), usuario_atual.get("nome"), usuario_atual.get("email"),
+            ),
+            daemon=True,
         )
-        return jsonify(resultado)
+        thread.start()
+        return jsonify(carga), 202
 
     # ------------------------------------------------------------------ marcos
     @app.get("/api/marcos")

@@ -1077,7 +1077,8 @@
       </div>
     </div>
     <!-- 83ª rodada: banner de acompanhamento da carga em segundo plano
-         (Google Picker) — ver cfRenderCargaBanner()/cfVerificarCargaAtual()
+         (Google Picker; 90ª rodada: também usado pelo upload direto do
+         computador) — ver cfRenderCargaBanner()/cfVerificarCargaAtual()
          abaixo. Vazio/hidden quando não há nenhuma carga em andamento nem
          recém-concluída pra mostrar. -->
     <div class="card" id="cf-carga-banner" hidden style="margin-bottom:14px;"></div>
@@ -9503,6 +9504,14 @@ function wireComparacaoFolhaDashboard(){
 // Chave de API, tela de consentimento OAuth, etc.). Mesmo padrão já usado
 // em Rubricas (ver analisarRubricas()) — FormData com projeto_id + file.
 // ---------------------------------------------------------------------
+// 90ª rodada — este upload deixou de importar o arquivo inteiro (csv OU
+// xlsx, até ~300 mil linhas) DENTRO da mesma requisição: agora, igual ao
+// Picker (_importarComparacaoFolhaSelecionada abaixo), o POST só INICIA a
+// carga (responde 202 na hora, com o registro em_andamento) e a importação
+// de verdade roda numa thread no servidor. Acompanhamento daqui pra frente é
+// todo via cfRenderCargaBanner()/cfIniciarPollingCarga() (banner que
+// consulta GET .../carga-atual) — o mesmo caminho pra csv e pra xlsx, já
+// que o formato é detectado pelo conteúdo no backend, não pela extensão.
 async function uploadComparacaoFolhaDoComputador(){
   const input = $("cf-upload-file");
   const file = input.files[0];
@@ -9511,23 +9520,27 @@ async function uploadComparacaoFolhaDoComputador(){
   if(!confirm(
     `Importar "${file.name}" como Comparação Folha?\n\n` +
     "Isso SUBSTITUI as linhas já importadas da competência detectada no arquivo " +
-    "(as demais competências não são afetadas). Pode demorar alguns minutos " +
-    "(arquivo grande, até ~300 mil linhas)."
+    "(as demais competências não são afetadas). A carga roda em segundo plano no " +
+    "servidor — você pode continuar usando o sistema (e até fechar esta aba) " +
+    "enquanto ela termina."
   )) return;
   const btn = $("btn-upload-comparacao");
-  btn.disabled = true; const textoOriginal = btn.textContent; btn.textContent = "Importando… (pode demorar)";
+  btn.disabled = true; const textoOriginal = btn.textContent; btn.textContent = "Iniciando carga…";
   try{
     const fd = new FormData();
     fd.append("projeto_id", PROJETO.id);
     fd.append("file", file);
-    const r = await api("/comparacao-folha/importar/upload", {method: "POST", body: fd});
-    const avisos = (r.avisos||[]).length ? " " + r.avisos.join(" ") : "";
-    toast(`Comparação Folha atualizada: competência ${fmtDate(r.mesano)}, ${r.total_linhas.toLocaleString('pt-BR')} linha(s).${avisos}`);
-    await renderComparacaoFolhaPane();
+    const carga = await api("/comparacao-folha/importar/upload", {method: "POST", body: fd});
+    cfRenderCargaBanner(carga);
+    cfIniciarPollingCarga();
+    toast("Carga iniciada em segundo plano — acompanhe pelo aviso no topo da lista.");
   }catch(e){
-    // api() já mostra um toast com o erro específico
+    // api() já mostra um toast com o erro específico — inclusive o 409 de
+    // "já existe uma carga em andamento" (índice único parcial no banco,
+    // ver migration_034).
+  }finally{
+    btn.disabled = false; btn.textContent = textoOriginal;
   }
-  btn.disabled = false; btn.textContent = textoOriginal;
 }
 
 // ---------------------------------------------------------------------
