@@ -2672,6 +2672,19 @@ def create_app():
         filtros = _filtros_comparacao_folha()
         return jsonify(comparacao_folha.resumo(projeto_id=pid, **filtros))
 
+    @app.get("/api/comparacao-folha/competencias")
+    def comparacao_folha_competencias():
+        """93ª rodada — consulta enxuta só pra popular o <select> de
+        Competência nas abas Comparação Folha/Dashboard, ANTES do usuário
+        escolher alguma coisa (pedido do usuário: não carregar nada
+        automaticamente até ele escolher a Competência). Ver
+        comparacao_folha.competencias_disponiveis() pro motivo de não
+        reaproveitar resumo()/dashboard() pra isso."""
+        pid = request.args.get("projeto_id")
+        if not pid:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        return jsonify({"meses_disponiveis": comparacao_folha.competencias_disponiveis(pid)})
+
     @app.get("/api/comparacao-folha/consulta-dinamica")
     def comparacao_folha_consulta_dinamica():
         """92ª rodada — pedido do usuário (verbatim): "quero informar o tipo

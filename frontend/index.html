@@ -8967,6 +8967,13 @@ async function audRenderHistoricoRegistro(containerId, entidade, entidadeId){
 // mesma UX de auditoria.
 let CF_PAGINA = 1;
 let CF_TOTAL = 0;
+// 93ª rodada — true assim que um cfCarregarResumo() de VERDADE roda (ver
+// função abaixo) — ou seja, o usuário já escolheu uma Competência e saiu
+// da tela de aviso "Selecione uma competência...". Usado pelo efeito
+// colateral de cfRenderCargaBanner() (carga concluída) pra saber se pode
+// recarregar a grade sozinho ou se isso violaria a regra de "aguardar
+// escolher a competência" (ver renderComparacaoFolhaPane()).
+let CF_CARREGADO = false;
 
 // 83ª rodada — id da última carga (Google Picker) que ESTA aba já mostrou
 // como concluída/erro, pra não ficar re-exibindo o mesmo toast de sucesso
@@ -9005,13 +9012,19 @@ async function renderComparacaoFolhaPane(filtroInicial){
   CF_PAGINA = 1;
   if(filtroInicial){
     // 84ª rodada — vindo de um drill-down (clique numa linha do quadro
-    // Empresa × Rubrica Ergon no Dashboard): precisa que as <option> dos
-    // selects existam ANTES de aplicar o filtro (um valor sem <option>
-    // correspondente faz o <select> resetar pra "" sozinho), então aqui
-    // roda em SEQUÊNCIA — espera cfCarregarResumo() popular os selects,
-    // só então aplica os valores e carrega a lista — diferente do caminho
-    // normal abaixo, que roda em paralelo (mais rápido) porque não precisa
-    // mexer nos filtros.
+    // Empresa × Rubrica Ergon no Dashboard): o usuário já escolheu uma
+    // Competência lá no Dashboard (é o mesmo valor repassado em
+    // filtroInicial.mesano) — carrega direto, sem esperar mais nada (a
+    // regra da 93ª rodada abaixo, "aguardar escolher a competência", é só
+    // pro caminho normal de entrar na aba, não pra quem já veio de um
+    // clique que implica uma competência escolhida).
+    //
+    // Precisa que as <option> dos selects existam ANTES de aplicar o
+    // filtro (um valor sem <option> correspondente faz o <select> resetar
+    // pra "" sozinho), então aqui roda em SEQUÊNCIA — espera
+    // cfCarregarResumo() popular os selects, só então aplica os valores e
+    // carrega a lista — diferente do caminho normal abaixo, que roda em
+    // paralelo (mais rápido) porque não precisa mexer nos filtros.
     // IMPORTANTE: cfCarregarResumo() também recalcula os KPIs do topo
     // (#cf-kpis) com base no filtro ATUAL no momento em que roda — como
     // nesse primeiro await os filtros de empresa/rubrica ainda não foram
@@ -9024,10 +9037,55 @@ async function renderComparacaoFolhaPane(filtroInicial){
     if(filtroInicial.empresa !== undefined) $("cf-f-empresa").value = filtroInicial.empresa;
     if(filtroInicial.rubricaErgon !== undefined) $("cf-f-rubrica-ergon").value = filtroInicial.rubricaErgon;
     await Promise.all([cfCarregarResumo(), cfCarregarLista(false)]);
-  }else{
-    await Promise.all([cfCarregarResumo(), cfCarregarLista(false)]);
+    cfVerificarCargaAtual();
+    return;
   }
+  // 93ª rodada — pedido do usuário (verbatim): "Na comparação da folha e no
+  // dashboard não carregar nada de forma automática. aguardar escolher a
+  // competência." Antes, entrar nesta aba já disparava cfCarregarResumo()
+  // (sem filtro de mês — "todas") + cfCarregarLista() na hora, o que
+  // significava agregar/paginar a tabela inteira (todas as competências
+  // já importadas, ~300 mil linhas cada) antes mesmo do usuário pedir
+  // qualquer coisa. Agora só popula o <select> de Competência (consulta
+  // enxuta, ver cfCarregarCompetencias()) e mostra um aviso no lugar dos
+  // KPIs/grade — a carga de verdade só acontece quando o <select> de
+  // Competência mudar (ver wireComparacaoFolhaPane()). O <select> é
+  // resetado pra "" aqui (não preserva a última escolha) de propósito:
+  // senão, ao voltar pra esta aba já com uma competência selecionada de
+  // antes, trocar pra ELA MESMA de novo não dispararia o evento "change"
+  // (o valor não mudou) e a tela ficaria presa no aviso sem meio de sair.
+  CF_CARREGADO = false;
+  $("cf-f-mesano").value = "";
+  await cfCarregarCompetencias();
+  cfMostrarAguardandoCompetencia();
   cfVerificarCargaAtual();
+}
+
+// 93ª rodada — ver comentário grande em renderComparacaoFolhaPane() acima.
+// Popula SÓ o <select> de Competência (GET /comparacao-folha/competencias
+// — consulta enxuta, sem agregação pesada) — os demais <select>s de
+// filtro (Situação, Tipo de Rubrica, Empresa etc.) continuam vazios até o
+// primeiro cfCarregarResumo() de verdade, disparado pela troca do
+// <select> de Competência.
+async function cfCarregarCompetencias(){
+  let meses = [];
+  try{
+    const r = await api(`/comparacao-folha/competencias?projeto_id=${PROJETO.id}`);
+    meses = r.meses_disponiveis || [];
+  }catch(e){ /* api() já mostra um toast com o erro específico */ }
+  const sel = $("cf-f-mesano");
+  const atual = sel.value;
+  sel.innerHTML = `<option value="">Competência (todas)</option>` +
+    meses.map(m=>`<option value="${m}">${m}</option>`).join("");
+  sel.value = atual;
+}
+
+function cfMostrarAguardandoCompetencia(){
+  $("cf-kpis").innerHTML = `<div class="muted" style="font-size:13px;">Selecione uma competência acima para carregar os dados.</div>`;
+  $("cf-status").textContent = "";
+  cfMontarThead();
+  $("cf-tbody").innerHTML = `<tr class="empty-row"><td colspan="${CF_COLUNAS_GRID.length}">Selecione uma competência acima para carregar a grade.</td></tr>`;
+  $("cf-carregar-mais").hidden = true;
 }
 
 // 84ª rodada — drill-down do quadro "Top divergências por Empresa × Rubrica
@@ -9116,9 +9174,21 @@ function cfRenderCargaBanner(carga){
     if(CF_ULTIMA_CARGA_NOTIFICADA !== carga.id){
       CF_ULTIMA_CARGA_NOTIFICADA = carga.id;
       toast(`Comparação Folha atualizada: competência ${fmtDate(carga.mesano)}, ${Number(carga.total_linhas||0).toLocaleString('pt-BR')} linha(s).`);
-      CF_PAGINA = 1;
-      cfCarregarResumo();
-      cfCarregarLista(false);
+      // 93ª rodada — só recarrega a grade/resumo sozinho se o usuário JÁ
+      // tinha escolhido uma competência (CF_CARREGADO) — carregar aqui
+      // incondicionalmente violaria a regra de "aguardar escolher a
+      // competência" pedida pelo usuário: bastaria uma carga terminar em
+      // segundo plano, com a tela ainda no aviso inicial, pra puxar a
+      // tabela inteira sem nenhuma ação do usuário. Se ainda não tinha
+      // escolhido, só atualiza a lista de competências disponíveis (pro
+      // mês recém-importado aparecer como opção no <select>).
+      if(CF_CARREGADO){
+        CF_PAGINA = 1;
+        cfCarregarResumo();
+        cfCarregarLista(false);
+      }else{
+        cfCarregarCompetencias();
+      }
     }
     return;
   }
@@ -9145,6 +9215,7 @@ function cfRenderCargaBanner(carga){
 }
 
 async function cfCarregarResumo(){
+  CF_CARREGADO = true; // 93ª rodada — ver comentário na declaração de CF_CARREGADO
   let r;
   try{ r = await api(`/comparacao-folha/resumo?${cfQueryString()}`); }
   catch(e){ return; }
@@ -9497,20 +9568,50 @@ function wireComparacaoFolhaPane(){
 // servidor (ver app/comparacao_folha.dashboard()). Prefixo "cfd" (distinto
 // de "cf" da aba de consulta) — telas irmãs, mas estado independente.
 // ---------------------------------------------------------------------
+// 93ª rodada — pedido do usuário (verbatim): "Na comparação da folha e no
+// dashboard não carregar nada de forma automática. aguardar escolher a
+// competência." Antes, abrir esta aba já disparava cfdCarregarMeses() (que
+// chamava /comparacao-folha/resumo SEM filtro de mês só pra descobrir os
+// meses existentes — mesmo problema da aba Comparação Folha: agregava a
+// tabela inteira à toa) seguido de cfdCarregarDados() (mais pesado ainda:
+// todos os quadros do dashboard calculados sobre TODAS as competências).
+// Agora só popula o <select> (consulta enxuta) e mostra um aviso — a carga
+// de verdade só acontece quando o usuário trocar o <select> de Competência
+// (ver wireComparacaoFolhaDashboard()). <select> resetado pra "" aqui pelo
+// mesmo motivo já explicado em renderComparacaoFolhaPane(): senão reentrar
+// na aba já com uma competência escolhida antes não dispararia "change" ao
+// escolher a MESMA de novo, e a tela ficaria presa no aviso.
 async function renderComparacaoFolhaDashboard(){
-  await cfdCarregarMeses();
-  await cfdCarregarDados();
+  $("cfd-f-mesano").value = "";
+  await cfdCarregarCompetencias();
+  cfdMostrarAguardandoCompetencia();
 }
 
-async function cfdCarregarMeses(){
-  let r;
-  try{ r = await api(`/comparacao-folha/resumo?projeto_id=${PROJETO.id}`); }
-  catch(e){ return; }
+async function cfdCarregarCompetencias(){
+  let meses = [];
+  try{
+    const r = await api(`/comparacao-folha/competencias?projeto_id=${PROJETO.id}`);
+    meses = r.meses_disponiveis || [];
+  }catch(e){ /* api() já mostra um toast com o erro específico */ }
   const sel = $("cfd-f-mesano");
   const atual = sel.value;
   sel.innerHTML = `<option value="">Competência (todas)</option>` +
-    (r.meses_disponiveis||[]).map(m=>`<option value="${m}">${m}</option>`).join("");
+    meses.map(m=>`<option value="${m}">${m}</option>`).join("");
   sel.value = atual;
+}
+
+function cfdMostrarAguardandoCompetencia(){
+  const aviso = `<div class="muted" style="font-size:13px;">Selecione uma competência acima para carregar os dados.</div>`;
+  $("cfd-kpis").innerHTML = aviso;
+  $("cfd-situacao").innerHTML = aviso;
+  $("cfd-tiporubr-tbody").innerHTML = `<tr class="empty-row"><td colspan="6">Selecione uma competência acima.</td></tr>`;
+  $("cfd-emprub-contagem").textContent = "";
+  $("cfd-emprub-tbody").innerHTML = `<tr class="empty-row"><td colspan="8">Selecione uma competência acima.</td></tr>`;
+  $("cfd-empresa-tbody").innerHTML = `<tr class="empty-row"><td colspan="5">Selecione uma competência acima.</td></tr>`;
+  $("cfd-rubricas-sem-uso-tbody").innerHTML = `<tr class="empty-row"><td colspan="3">Selecione uma competência acima.</td></tr>`;
+  $("cfd-verbas-sem-uso-tbody").innerHTML = `<tr class="empty-row"><td colspan="3">Selecione uma competência acima.</td></tr>`;
+  $("cfd-rubricas-sem-param-tbody").innerHTML = `<tr class="empty-row"><td colspan="3">Selecione uma competência acima.</td></tr>`;
+  $("cfd-verbas-sem-param-tbody").innerHTML = `<tr class="empty-row"><td colspan="3">Selecione uma competência acima.</td></tr>`;
 }
 
 function cfdListaCoberturaHtml(lista, campoLinhas, colspan){

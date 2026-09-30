@@ -78,6 +78,26 @@ def contar(**filtros):
     return (row or {}).get("total", 0)
 
 
+def competencias_disponiveis(projeto_id):
+    """93ª rodada — pedido do usuário: as abas Comparação Folha e Dashboard
+    não podem mais carregar nada automaticamente ao abrir — só depois que o
+    usuário escolher uma Competência. Até aqui, as duas telas populavam o
+    <select> de Competência chamando resumo()/dashboard() SEM filtro de mês
+    (pra saber quais meses existem antes mesmo do usuário escolher algo),
+    o que disparava a agregação pesada (COUNT/SUM/GROUP BY em cima da
+    tabela inteira, todas as competências) exatamente no momento que o
+    pedido quer evitar. Esta consulta serve só pra isso — popular o
+    combo — e é enxuta de propósito: usa o índice
+    idx_comparacao_folha_projeto_mesano (ver migration_030), sem nenhuma
+    agregação além do DISTINCT."""
+    meses = db.fetch_all(f"""
+        SELECT DISTINCT to_char(mesano, 'YYYY-MM') AS mesano
+        FROM comparacao_folha WHERE projeto_id = {db.q(projeto_id)} AND mesano IS NOT NULL
+        ORDER BY 1 DESC
+    """)
+    return [m["mesano"] for m in meses]
+
+
 def resumo(projeto_id=None, **filtros):
     """KPIs pro topo da tela: total de linhas, quantas são divergentes
     (situação diferente de "Não Divergente"), soma da diferença, e as listas
