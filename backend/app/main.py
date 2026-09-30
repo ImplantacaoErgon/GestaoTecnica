@@ -10,7 +10,7 @@ from datetime import datetime, date, timedelta
 
 from flask import Flask, request, jsonify, send_from_directory, send_file, abort, session
 
-from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_renumeracao, cronograma_anomalias, cronograma_export, cronograma_export_xml, cronograma_comparacao, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, drive_rubricas, comparacao_folha, comparacao_folha_import, google_drive, migracao_quadro_export
+from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_renumeracao, cronograma_anomalias, cronograma_export, cronograma_export_xml, cronograma_comparacao, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, drive_rubricas, comparacao_folha, comparacao_folha_import, google_drive, migracao_quadro_export, requisitos_ia
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 FRONTEND_DIR = os.environ.get(
@@ -2148,6 +2148,42 @@ def create_app():
             db.execute(f"UPDATE requisitos_tr SET analisado_em = now() WHERE id = {db.q(rid)}")
             resultado.append({"requisito_id": rid, "encontradas": len(referencias)})
         return jsonify({"resultado": resultado})
+
+    @app.post("/api/requisitos/perguntar-ia")
+    def requisitos_perguntar_ia():
+        """99ª rodada: pergunta livre (IA) sobre os requisitos que estão na
+        tela no momento (filtrados ou selecionados pelo consultor) — ver
+        app/requisitos_ia.py. A resposta é sempre um candidato para revisão
+        do consultor, nunca uma decisão automática de escopo."""
+        data = request.get_json(force=True) or {}
+        projeto_id = data.get("projeto_id")
+        if not projeto_id:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        usuario_atual = auth.buscar_usuario_publico(session.get("usuario_id")) or {}
+        try:
+            row = requisitos_ia.perguntar(
+                projeto_id, data.get("requisito_ids"), data.get("pergunta"),
+                perguntado_por_id=usuario_atual.get("id"), perguntado_por_nome=usuario_atual.get("nome"),
+            )
+        except requisitos_ia.RequisitosIAError as e:
+            return jsonify({"erro": str(e)}), 400
+        except db.DbError:
+            raise
+        except Exception as e:
+            print(f"[requisitos_ia] ERRO INESPERADO: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            return jsonify({"erro": f"Falha inesperada ao perguntar: {e}"}), 500
+        return jsonify(row), 201
+
+    @app.get("/api/requisitos/perguntas-ia")
+    def requisitos_perguntas_ia_listar():
+        """Histórico de perguntas (IA) já feitas neste projeto — usado para
+        popular a lista de histórico do painel na tela Analisar Requisitos."""
+        pid = request.args.get("projeto_id")
+        if not pid:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        return jsonify(requisitos_ia.listar_historico(pid))
 
     @app.post("/api/requisitos/<id>/referencias")
     def add_referencia_manual(id):

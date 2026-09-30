@@ -196,6 +196,16 @@
   .card--zona-ambar{background:var(--warn-soft);}
   .card--zona-verde{background:var(--ok-soft);}
 
+  /* 98ª rodada — pedido do usuário: o par "% de comparação por Situação"
+     (esquerda) × "Comparação por Tipo de Rubrica" (direita) herdava a
+     proporção padrão de .grid-2 (1.3fr/1fr, pensada pro caso comum de
+     coluna esquerda maior). Aqui é o contrário: a tabela da direita tem 8
+     colunas e precisa de mais espaço, enquanto a esquerda só lista algumas
+     linhas de texto curto. Escopado só nesse par (não mexe no .grid-2
+     genérico, usado em outros lugares, inclusive dentro do próprio quadro
+     de Cobertura, onde a proporção 1.3fr/1fr continua fazendo sentido). */
+  .cfd-situacao-tiporubr-grid{grid-template-columns:0.8fr 1.5fr;}
+
   /* ---- resumo frente bars ---- */
   .frente-row{display:flex;align-items:center;gap:10px;padding:7px 0;font-size:12.5px;}
   .frente-row .nome{width:150px;flex-shrink:0;color:var(--text-muted);}
@@ -963,6 +973,37 @@
       <button class="btn secondary small" id="ar-analisar-selecionados" disabled>🔍 Analisar selecionados (<span id="ar-qtd-selecionados">0</span>)</button>
       <button class="btn small" id="ar-analisar-filtrados">🔍 Analisar todos os filtrados</button>
     </div>
+    <!-- 99ª rodada: "Perguntar à IA" — pergunta livre (Anthropic) sobre os
+         requisitos que estão na tela AGORA (respeitando os filtros ou a
+         seleção do consultor) — não é o TR inteiro (isso fica para uma
+         evolução futura, mais semântica). Mesmo espírito da busca por
+         palavra-chave acima: a resposta é sempre um CANDIDATO para revisão
+         do consultor, nunca uma decisão automática — ver
+         app/requisitos_ia.py. Painel fechado por padrão (details), pra não
+         disputar atenção com o fluxo principal da tela. -->
+    <details class="card card--zona-azul" id="ariq-painel" style="margin-bottom:14px;">
+      <summary style="cursor:pointer;font-weight:600;">🤖 Perguntar à IA sobre estes requisitos</summary>
+      <div class="muted" style="font-size:12px;margin:8px 0 12px;">
+        Pergunte algo sobre os requisitos considerados abaixo (ex.: "algum destes trata de integração com o eSocial?" ou "resuma o que estes requisitos pedem sobre férias"). A IA responde só com base no texto desses requisitos — é um candidato para revisão do consultor, não uma resposta oficial, e consome créditos da API da Anthropic (custo estimado mostrado após cada pergunta).
+      </div>
+      <div class="filters" style="margin-bottom:0;">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;white-space:nowrap;">
+          <input type="radio" name="ariq-escopo" id="ariq-escopo-filtrados" value="filtrados" checked>
+          Requisitos filtrados na tela (<span id="ariq-qtd-filtrados">0</span>)
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;white-space:nowrap;">
+          <input type="radio" name="ariq-escopo" id="ariq-escopo-selecionados" value="selecionados">
+          Só os selecionados (<span id="ariq-qtd-selecionados">0</span>)
+        </label>
+      </div>
+      <textarea id="ariq-pergunta" placeholder="Digite sua pergunta sobre os requisitos acima…" style="width:100%;margin-top:10px;min-height:64px;font-family:inherit;font-size:13px;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);"></textarea>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:10px;flex-wrap:wrap;">
+        <span class="muted" id="ariq-status" style="font-size:12px;"></span>
+        <button class="btn small" id="ariq-btn-perguntar">Perguntar</button>
+      </div>
+      <div id="ariq-resultado" style="margin-top:12px;"></div>
+      <div id="ariq-historico" style="margin-top:16px;"></div>
+    </details>
     <div class="table-wrap">
       <table>
         <thead><tr>
@@ -1202,7 +1243,7 @@
       <select id="cfd-f-mesano"><option value="">Competência (todas)</option></select>
     </div>
     <div class="kpis" id="cfd-kpis"></div>
-    <div class="grid-2">
+    <div class="grid-2 cfd-situacao-tiporubr-grid">
       <div class="card card--zona-azul">
         <h3>% de comparação por Situação</h3>
         <div class="view-sub" style="margin-top:-6px;">Tudo que foi comparado entre os dois sistemas — quebrado por situação, pra mostrar onde focar primeiro.</div>
@@ -10360,10 +10401,12 @@ function renderAnalisarRequisitos(){
   });
   $("ar-check-all").checked = list.length>0 && list.every(r=>AR_SELECIONADOS.has(r.id));
   atualizarContadorSelecionadosAr();
+  ariqAtualizarContadores(list.length);
 }
 function atualizarContadorSelecionadosAr(){
   $("ar-qtd-selecionados").textContent = AR_SELECIONADOS.size;
   $("ar-analisar-selecionados").disabled = AR_SELECIONADOS.size===0;
+  ariqAtualizarContadorSelecionados();
 }
 
 async function arAnalisarUm(id, mostrarToast){
@@ -10452,6 +10495,108 @@ function preencherAnalisarDetalhe(r){
   $("ard-resposta-oficial").value = r.resposta_oficial || "";
 }
 
+// ================= Perguntar à IA sobre requisitos (99ª rodada) =================
+// Pergunta livre (Anthropic) sobre o conjunto de requisitos que está na tela
+// AGORA — filtrados ou só os selecionados, conforme o rádio escolhido. Fase
+// 1 (acordada com o usuário): objetiva, sobre um conjunto já delimitado pelo
+// consultor — a busca semântica sobre o TR inteiro fica para uma evolução
+// futura. Ver app/requisitos_ia.py (POST /requisitos/perguntar-ia) pro
+// detalhe de como a pergunta é montada e por que a resposta é sempre um
+// candidato pra revisão humana, nunca uma decisão automática de escopo.
+let ARIQ_HISTORICO_CARREGADO = false;
+
+function ariqAtualizarContadores(qtdFiltrados){
+  if(!$("ariq-qtd-filtrados")) return; // painel ainda não montado
+  $("ariq-qtd-filtrados").textContent = qtdFiltrados;
+  ariqAtualizarContadorSelecionados();
+}
+// Separado de ariqAtualizarContadores() porque a contagem de SELECIONADOS
+// muda a cada clique num checkbox da tabela (ver atualizarContadorSelecionadosAr()),
+// sem que a lista filtrada mude — chamar só esta parte ali evita um
+// re-render caro da tabela inteira a cada clique, mas ainda mantém o rádio
+// "Só os selecionados" e seu contador sempre em dia.
+function ariqAtualizarContadorSelecionados(){
+  if(!$("ariq-qtd-selecionados")) return; // painel ainda não montado
+  $("ariq-qtd-selecionados").textContent = AR_SELECIONADOS.size;
+  $("ariq-escopo-selecionados").disabled = AR_SELECIONADOS.size===0;
+  if(AR_SELECIONADOS.size===0 && $("ariq-escopo-selecionados").checked){
+    $("ariq-escopo-filtrados").checked = true;
+  }
+}
+
+function ariqEscopoIds(){
+  if($("ariq-escopo-selecionados").checked) return [...AR_SELECIONADOS];
+  return arListaFiltrada().map(r=>r.id);
+}
+
+function ariqFmtUsd(v){
+  if(v==null) return "—";
+  return "US$ " + Number(v).toFixed(4);
+}
+
+function ariqRenderResultado(row){
+  $("ariq-resultado").innerHTML = `
+    <div class="card" style="margin:0;padding:12px 14px;background:var(--surface);">
+      <div style="font-size:12.5px;white-space:pre-wrap;line-height:1.55;">${esc(row.resposta)}</div>
+      <div class="muted" style="font-size:11px;margin-top:10px;">
+        ${row.qtd_requisitos} requisito${row.qtd_requisitos>1?"s":""} considerado${row.qtd_requisitos>1?"s":""} ·
+        ${row.tokens_entrada}+${row.tokens_saida} tokens (entrada+saída) ·
+        custo estimado ${ariqFmtUsd(row.custo_usd_estimado)} · ${row.modelo_ia}
+      </div>
+    </div>`;
+}
+
+function ariqRenderHistorico(rows){
+  if(!rows || !rows.length){
+    $("ariq-historico").innerHTML = "";
+    return;
+  }
+  $("ariq-historico").innerHTML = `
+    <div class="muted" style="font-size:11.5px;margin-bottom:6px;">Perguntas anteriores neste projeto:</div>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      ${rows.map(r=>`
+        <details class="card" style="margin:0;padding:8px 12px;background:var(--surface);">
+          <summary style="cursor:pointer;font-size:12.5px;">${esc(r.pergunta)}
+            <span class="muted" style="font-size:11px;">— ${fmtDateTime(r.criado_em)}${r.perguntado_por_nome?" · "+esc(r.perguntado_por_nome):""}</span>
+          </summary>
+          <div style="font-size:12.5px;white-space:pre-wrap;line-height:1.55;margin-top:8px;">${esc(r.resposta)}</div>
+          <div class="muted" style="font-size:11px;margin-top:8px;">
+            ${r.qtd_requisitos} requisito${r.qtd_requisitos>1?"s":""} · ${r.tokens_entrada}+${r.tokens_saida} tokens · custo estimado ${ariqFmtUsd(r.custo_usd_estimado)}
+          </div>
+        </details>`).join("")}
+    </div>`;
+}
+
+async function ariqCarregarHistorico(){
+  try{
+    const rows = await api(`/requisitos/perguntas-ia?projeto_id=${PROJETO.id}`);
+    ariqRenderHistorico(rows);
+  }catch(e){}
+}
+
+async function ariqPerguntar(){
+  const pergunta = $("ariq-pergunta").value.trim();
+  if(!pergunta){ toast("Digite uma pergunta.", true); return; }
+  const ids = ariqEscopoIds();
+  if(!ids.length){ toast("Nenhum requisito no escopo escolhido.", true); return; }
+  const btn = $("ariq-btn-perguntar");
+  btn.disabled = true;
+  $("ariq-status").textContent = `Consultando a IA sobre ${ids.length} requisito${ids.length>1?"s":""}…`;
+  $("ariq-resultado").innerHTML = "";
+  try{
+    const row = await api("/requisitos/perguntar-ia", {method:"POST", body: JSON.stringify({
+      projeto_id: PROJETO.id, requisito_ids: ids, pergunta
+    })});
+    ariqRenderResultado(row);
+    $("ariq-status").textContent = "";
+    await ariqCarregarHistorico();
+  }catch(e){
+    $("ariq-status").textContent = "";
+  }finally{
+    btn.disabled = false;
+  }
+}
+
 function wireAnalisarRequisitos(){
   ["ar-search","ar-frente","ar-classificacao","ar-atendimento","ar-status","ar-so-sem-analise"].forEach(id=>{
     $(id).addEventListener("input", renderAnalisarRequisitos);
@@ -10498,6 +10643,17 @@ function wireAnalisarRequisitos(){
       toast("Resposta oficial salva.");
       renderAnalisarRequisitos();
     }catch(e){}
+  });
+
+  $("ariq-btn-perguntar").addEventListener("click", ariqPerguntar);
+  // Histórico só é buscado quando o painel é aberto pela primeira vez (é um
+  // <details>) — evita uma chamada extra ao servidor toda vez que a tela
+  // "Analisar Requisitos" é carregada, mesmo sem o consultor usar o recurso.
+  $("ariq-painel").addEventListener("toggle", ()=>{
+    if($("ariq-painel").open && !ARIQ_HISTORICO_CARREGADO){
+      ARIQ_HISTORICO_CARREGADO = true;
+      ariqCarregarHistorico();
+    }
   });
 }
 
