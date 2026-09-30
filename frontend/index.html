@@ -173,6 +173,29 @@
   .cfd-cobertura-painel--parametrizada{background:var(--accent-soft);}
   .cfd-cobertura-painel--usada{background:var(--warn-soft);}
 
+  /* 97ª rodada — pedido do usuário: estender a separação por cor pros
+     demais quadros da aba Comparação Folha e da aba Dashboard Comparação
+     Folha (não só o quadro de Cobertura, feito na 96ª). Mesmos tokens
+     semânticos do tema, sem inventar cor nova. O .table-wrap de cada
+     quadro continua com fundo --surface (opaco) por cima do tom suave do
+     .card, então a cor só aparece ao redor (título/legenda) — não interfere
+     na leitura dos dados da tabela, mesmo tratamento já validado no quadro
+     de Cobertura.
+     Critério de cor (não é decorativo aleatório):
+       azul (accent-soft)  = quadro informativo/diagnóstico ("onde estou")
+       âmbar (warn-soft)   = quadro de ação ("o que corrigir primeiro")
+       verde (ok-soft)     = quadro de cobertura/abrangência
+     Os cartões de KPI (cf-kpis/cfd-kpis) ficaram de fora de propósito: cada
+     valor já tem sua própria cor (ok/danger — ver .kpi .value.ok/
+     .danger), um fundo único no cartão inteiro ia contra esse código de
+     cor que já existe, não a favor. O cartão externo de "Cobertura de
+     mapeamento" também ficou neutro, de propósito — os 4 painéis internos
+     dele já têm cor própria desde a 96ª rodada; colorir o cartão externo
+     também ia competir com essa cor interna em vez de ajudar. */
+  .card--zona-azul{background:var(--accent-soft);}
+  .card--zona-ambar{background:var(--warn-soft);}
+  .card--zona-verde{background:var(--ok-soft);}
+
   /* ---- resumo frente bars ---- */
   .frente-row{display:flex;align-items:center;gap:10px;padding:7px 0;font-size:12.5px;}
   .frente-row .nome{width:150px;flex-shrink:0;color:var(--text-muted);}
@@ -1102,7 +1125,7 @@
          servidor). Ver cfqConsultar()/cfqRenderResultado() mais abaixo e
          comparacao_folha.consulta_dinamica() no backend pra regra
          completa. -->
-    <details class="card" id="cfq-painel" style="margin-bottom:14px;">
+    <details class="card card--zona-azul" id="cfq-painel" style="margin-bottom:14px;">
       <summary style="cursor:pointer;font-weight:600;">🔎 Consulta dinâmica de quantidades</summary>
       <div class="muted" style="font-size:12px;margin:8px 0 12px;">
         Preencha os campos que quiser usar como filtro — os que deixar em branco aparecem quebrados (agrupados) no resultado, com a quantidade de cada valor encontrado. Se preencher os 5, o resultado é um total só.
@@ -1180,12 +1203,12 @@
     </div>
     <div class="kpis" id="cfd-kpis"></div>
     <div class="grid-2">
-      <div class="card">
+      <div class="card card--zona-azul">
         <h3>% de comparação por Situação</h3>
         <div class="view-sub" style="margin-top:-6px;">Tudo que foi comparado entre os dois sistemas — quebrado por situação, pra mostrar onde focar primeiro.</div>
         <div id="cfd-situacao"></div>
       </div>
-      <div class="card">
+      <div class="card card--zona-azul">
         <h3>Comparação por Tipo de Rubrica</h3>
         <div class="view-sub" style="margin-top:-6px;">Mesma pergunta de "onde focar primeiro", quebrada por Tipo de Rubrica — os % são sobre o total de CADA tipo, não do total geral, pra dar pra comparar taxa de acerto entre tipos, não só volume.</div>
         <!-- 94ª rodada — pedido do usuário: par de colunas "Não prog./cadastr."
@@ -1209,7 +1232,7 @@
          com o segundo quadro substituído por um drill-down ao clicar (ver
          cfdAbrirDetalheEmpresaRubrica abaixo) em vez de uma segunda tabela
          estática gigante. -->
-    <div class="card">
+    <div class="card card--zona-ambar">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
         <h3>🎯 Top divergências por Empresa × Rubrica Ergon</h3>
         <span class="muted" id="cfd-emprub-contagem" style="font-size:11.5px;"></span>
@@ -1220,7 +1243,7 @@
         <tbody id="cfd-emprub-tbody"></tbody>
       </table></div>
     </div>
-    <div class="card">
+    <div class="card card--zona-verde">
       <h3>Rubricas Ergon × Verbas Consist, por empresa</h3>
       <div class="view-sub" style="margin-top:-6px;">Quantidade de códigos distintos de cada lado aparecendo na comparação, por empresa — não é valor financeiro. Uma diferença grande entre as duas colunas é sinal de mapeamento incompleto naquela empresa.</div>
       <div class="table-wrap"><table>
@@ -9187,6 +9210,10 @@ function cfRenderCargaBanner(carga){
 
   if(carga.status === "em_andamento"){
     el.hidden = false;
+    // 97ª rodada — fundo do banner acompanha o status (mesma paleta suave
+    // do resto da aba), reforçando o que o ícone/cor do texto já mostra em
+    // vez de competir com eles.
+    el.style.background = "var(--accent-soft)";
     el.innerHTML = `
       <div style="display:flex;align-items:center;gap:12px;">
         <div style="width:16px;height:16px;border-radius:50%;border:2px solid var(--border);border-top-color:var(--accent);animation:spin .8s linear infinite;flex:0 0 auto;"></div>
@@ -9200,6 +9227,7 @@ function cfRenderCargaBanner(carga){
 
   if(carga.status === "concluido"){
     el.hidden = false;
+    el.style.background = "var(--ok-soft)";
     el.innerHTML = `
       <div style="display:flex;align-items:center;gap:12px;">
         <div style="font-size:18px;flex:0 0 auto;">✅</div>
@@ -9236,6 +9264,7 @@ function cfRenderCargaBanner(carga){
 
   if(carga.status === "erro"){
     el.hidden = false;
+    el.style.background = "var(--danger-soft)";
     el.innerHTML = `
       <div style="display:flex;align-items:center;gap:12px;">
         <div style="font-size:18px;flex:0 0 auto;">⚠️</div>
