@@ -138,6 +138,41 @@
   .grid-2{display:grid;grid-template-columns:1.3fr 1fr;gap:16px;}
   @media (max-width:900px){.grid-2{grid-template-columns:1fr;}}
 
+  /* 96ª rodada — quadro "Cobertura de mapeamento" (Dashboard Comparação
+     Folha): o usuário reportou os dois painéis da direita "fugindo" da
+     borda da tela. Causa: a regra global `table{min-width:900px}` (linha
+     ~170) é pensada pra tabela grande de verdade (grid principal, com
+     dezenas de colunas) — essas 4 tabelinhas do cruzamento (só 3 colunas
+     estreitas: Código/Nome/Linhas) não precisam disso, mas herdavam o
+     mesmo mínimo. Como .grid-2 é CSS Grid, o item da direita (1fr) não
+     consegue encolher abaixo do min-content do filho (a tabela de 900px),
+     e a coluna acaba estourando pra fora da viewport em vez de só rolar
+     dentro do .table-wrap (que já tem overflow:auto). `min-width:0` nos
+     itens do grid + remover o min-width herdado da tabela resolve sem
+     mexer na regra global (que continua valendo pras tabelas grandes).
+     Aproveitado o ajuste pra também dar fundo suave a cada par de painel
+     (pedido do usuário, cosmético) — reusa os tokens semânticos que já
+     existem no tema (--accent-soft/--warn-soft, funcionam em claro e
+     escuro) em vez de inventar cor nova: tom azul nos dois painéis de
+     "parametrizada sem uso" (achado mais neutro/informativo) e tom âmbar
+     nos dois de "usada sem parametrização" (achado que pede ação —
+     levantamento pendente). */
+  .cfd-cobertura-grid{align-items:start;}
+  .cfd-cobertura-grid > div{min-width:0;}
+  .cfd-cobertura-grid table{min-width:0;}
+  /* mesmo bug de CSS Grid (item não encolhe abaixo do min-content do
+     filho), achado ao testar o ajuste acima: qualquer `.card` usado como
+     coluna de `.grid-2` que tenha uma tabela grande dentro (ex.: "Comparação
+     por Tipo de Rubrica", ao lado de "% de comparação por Situação" — 8
+     colunas desde a 94ª rodada) também empurra a página inteira pra rolar
+     na horizontal em vez de só rolar dentro do próprio .table-wrap. Fix
+     padrão e seguro do CSS Grid (`min-width:0` no item) — não muda nada
+     visualmente quando já cabia, só corrige quando não cabia. */
+  .grid-2 > .card{min-width:0;}
+  .cfd-cobertura-painel{border-radius:10px;padding:10px 12px 12px;}
+  .cfd-cobertura-painel--parametrizada{background:var(--accent-soft);}
+  .cfd-cobertura-painel--usada{background:var(--warn-soft);}
+
   /* ---- resumo frente bars ---- */
   .frente-row{display:flex;align-items:center;gap:10px;padding:7px 0;font-size:12.5px;}
   .frente-row .nome{width:150px;flex-shrink:0;color:var(--text-muted);}
@@ -1199,15 +1234,15 @@
         <span class="muted" style="font-size:11.5px;" title="Cruza com a aba Rubricas (parametrização oficial de-para Ergon × legado). Rubricas com status Excluída não contam como parametrização válida.">ⓘ como funciona</span>
       </div>
       <div class="view-sub" style="margin-top:-6px;">Consultas pensadas pra apontar exatamente onde agir pra aumentar a convergência: código já parametrizado que nunca aparece na comparação (regra parada, ou de-para errado) e código que aparece na comparação sem nenhuma parametrização correspondente (rubrica nova, ainda não levantada, ou erro de código).</div>
-        <div class="grid-2" style="margin-top:10px;">
-          <div>
+        <div class="grid-2 cfd-cobertura-grid" style="margin-top:10px;">
+          <div class="cfd-cobertura-painel cfd-cobertura-painel--parametrizada">
             <h4 style="margin:0 0 6px;font-size:13px;">Rubricas Ergon parametrizadas sem uso na Comparação</h4>
             <div class="table-wrap"><table>
               <thead><tr><th>Código</th><th>Nome</th><th>Linhas parametrizadas</th></tr></thead>
               <tbody id="cfd-rubricas-sem-uso-tbody"></tbody>
             </table></div>
           </div>
-          <div>
+          <div class="cfd-cobertura-painel cfd-cobertura-painel--parametrizada">
             <h4 style="margin:0 0 6px;font-size:13px;">Verbas Consist parametrizadas sem uso na Comparação</h4>
             <div class="table-wrap"><table>
               <thead><tr><th>Código</th><th>Nome</th><th>Linhas parametrizadas</th></tr></thead>
@@ -1215,15 +1250,15 @@
             </table></div>
           </div>
         </div>
-        <div class="grid-2" style="margin-top:14px;">
-          <div>
+        <div class="grid-2 cfd-cobertura-grid" style="margin-top:14px;">
+          <div class="cfd-cobertura-painel cfd-cobertura-painel--usada">
             <h4 style="margin:0 0 6px;font-size:13px;">Rubricas Ergon usadas na Comparação sem parametrização</h4>
             <div class="table-wrap"><table>
               <thead><tr><th>Código</th><th>Nome</th><th>Linhas na Comparação</th></tr></thead>
               <tbody id="cfd-rubricas-sem-param-tbody"></tbody>
             </table></div>
           </div>
-          <div>
+          <div class="cfd-cobertura-painel cfd-cobertura-painel--usada">
             <h4 style="margin:0 0 6px;font-size:13px;">Verbas Consist usadas na Comparação sem parametrização</h4>
             <div class="table-wrap"><table>
               <thead><tr><th>Código</th><th>Nome</th><th>Linhas na Comparação</th></tr></thead>

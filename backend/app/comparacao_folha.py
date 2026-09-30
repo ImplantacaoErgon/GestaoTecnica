@@ -30,6 +30,56 @@ from . import db
 SITUACOES_NAO_PROGRAMADA = ("RUBRICA SIGEP NÃO CADASTRADA", "RUBRICA SIGEP NÃO PROGRAMADA")
 _SITUACOES_NAO_PROGRAMADA_SQL = "(" + ", ".join(db.q(s) for s in SITUACOES_NAO_PROGRAMADA) + ")"
 
+# 95ª rodada — pedido do usuário (verbatim): "as rubricas não programadas e
+# não cadastradas tem dois conceitos. Se na tabela de Rubricas elas
+# estiverem em levantamento posso considerar como não divergentes, mas se
+# elas estiverem Enviadas para a Techne aí são consideradas como
+# Divergentes." Ou seja: o carve-out "Não prog./cadastr." da 94ª rodada
+# (linhas com SITUACAO em SITUACOES_NAO_PROGRAMADA) só faz sentido de
+# verdade pras linhas cuja rubrica correspondente ainda está "Em
+# levantamento" no cadastro de Rubricas — aí sim é esperado que ainda não
+# esteja programada/cadastrada no Ergon, não é um problema real. O
+# cruzamento usa o mesmo de-para já usado em "cobertura_mapeamento" logo
+# abaixo (codigo_ergon = rubrica_ergon, mesmo projeto).
+#
+# Os únicos dois pontos que o usuário deu exemplo (Em levantamento / Enviada
+# à Techne) não cobrem os 4 status restantes do enum (Liberada para testes,
+# Em homologação, Homologada, Excluída) nem o caso de NENHUMA rubrica
+# correspondente — como o pedido explicitamente pediu pra eu pensar em como
+# demonstrar isso ("Pense em como podemos demonstrar isso"), decidi pelos
+# critérios abaixo, documentados aqui pra ficarem fáceis de revisar:
+#   - só 'Em levantamento' (nenhuma linha correspondente mais adiantada) →
+#     mantém no carve-out (não conta como Divergente) — exatamente o 1º
+#     exemplo do usuário.
+#   - 'Enviada à Techne', 'Liberada para testes', 'Em homologação' ou
+#     'Homologada' → sai do carve-out, conta como Divergente de verdade —
+#     já foi comprometida a ser construída e ainda não aparece programada/
+#     cadastrada no Ergon; é o 2º exemplo do usuário, estendido pro resto
+#     do fluxo (que só anda pra frente, nunca volta a "Em levantamento").
+#   - SEM nenhuma rubrica correspondente cadastrada → Divergente — é o caso
+#     mais grave (ninguém nem começou a levantar essa rubrica), não dá pra
+#     dar o benefício da dúvida.
+#   - só 'Excluída' (sem nenhuma linha correspondente em outro status) →
+#     tratado como "sem correspondência", ou seja Divergente — mesmo
+#     critério que "cobertura_mapeamento" já usa mais abaixo (rubrica
+#     'Excluída' não conta como parametrização válida).
+# Se a mesma rubrica_ergon tiver linhas em mais de uma empresa com status
+# diferentes (codigo_ergon não é chave única — ver migration_029_rubricas.sql),
+# o critério é conservador: só mantém no carve-out se NENHUMA linha
+# correspondente (fora 'Excluída') já tiver passado de 'Em levantamento'.
+_RUBRICA_EM_LEVANTAMENTO_SQL = """EXISTS (
+    SELECT 1 FROM rubricas r
+    WHERE r.projeto_id = comparacao_folha.projeto_id
+      AND r.codigo_ergon = comparacao_folha.rubrica_ergon
+      AND r.status = 'Em levantamento'
+  ) AND NOT EXISTS (
+    SELECT 1 FROM rubricas r
+    WHERE r.projeto_id = comparacao_folha.projeto_id
+      AND r.codigo_ergon = comparacao_folha.rubrica_ergon
+      AND r.status NOT IN ('Em levantamento', 'Excluída')
+  )"""
+_NAO_PROGRAMADA_CARVE_OUT_SQL = f"(UPPER(situacao) IN {_SITUACOES_NAO_PROGRAMADA_SQL} AND {_RUBRICA_EM_LEVANTAMENTO_SQL})"
+
 
 def _where_filtros(projeto_id=None, mesano=None, situacao=None, tipo_comparacao=None,
                     tiporubr=None, empresa=None, tipovinc=None, rubrica_ergon=None,
@@ -390,16 +440,22 @@ def dashboard(projeto_id, mesano=None):
     # só no front-end (o nome do campo aqui, total_sem_divergencia, foi
     # mantido de propósito, pra não obrigar mudança em nenhum outro lugar
     # que já lê esse mesmo campo).
+    #
+    # 95ª rodada — total_nao_programada/total_divergente passaram a cruzar
+    # com o status da rubrica correspondente (ver _NAO_PROGRAMADA_CARVE_OUT_SQL
+    # no topo do arquivo) em vez de olhar só pra SITUACAO. Colunas/rótulos do
+    # quadro no front-end NÃO mudaram — só a regra de quem entra em cada
+    # balde mudou.
     por_tiporubr = db.fetch_all(f"""
         SELECT
           COALESCE(tiporubr, '(sem tipo)') AS tiporubr,
           COUNT(*) AS total_linhas,
           COUNT(*) FILTER (WHERE UPPER(situacao) = 'NÃO DIVERGENTE') AS total_sem_divergencia,
-          COUNT(*) FILTER (WHERE UPPER(situacao) IN {_SITUACOES_NAO_PROGRAMADA_SQL}) AS total_nao_programada,
-          COUNT(*) FILTER (WHERE UPPER(situacao) <> 'NÃO DIVERGENTE' AND UPPER(situacao) NOT IN {_SITUACOES_NAO_PROGRAMADA_SQL}) AS total_divergente,
+          COUNT(*) FILTER (WHERE {_NAO_PROGRAMADA_CARVE_OUT_SQL}) AS total_nao_programada,
+          COUNT(*) FILTER (WHERE UPPER(situacao) <> 'NÃO DIVERGENTE' AND NOT {_NAO_PROGRAMADA_CARVE_OUT_SQL}) AS total_divergente,
           ROUND(100.0 * COUNT(*) FILTER (WHERE UPPER(situacao) = 'NÃO DIVERGENTE') / GREATEST(COUNT(*), 1), 1) AS pct_sem_divergencia,
-          ROUND(100.0 * COUNT(*) FILTER (WHERE UPPER(situacao) IN {_SITUACOES_NAO_PROGRAMADA_SQL}) / GREATEST(COUNT(*), 1), 1) AS pct_nao_programada,
-          ROUND(100.0 * COUNT(*) FILTER (WHERE UPPER(situacao) <> 'NÃO DIVERGENTE' AND UPPER(situacao) NOT IN {_SITUACOES_NAO_PROGRAMADA_SQL}) / GREATEST(COUNT(*), 1), 1) AS pct_divergente
+          ROUND(100.0 * COUNT(*) FILTER (WHERE {_NAO_PROGRAMADA_CARVE_OUT_SQL}) / GREATEST(COUNT(*), 1), 1) AS pct_nao_programada,
+          ROUND(100.0 * COUNT(*) FILTER (WHERE UPPER(situacao) <> 'NÃO DIVERGENTE' AND NOT {_NAO_PROGRAMADA_CARVE_OUT_SQL}) / GREATEST(COUNT(*), 1), 1) AS pct_divergente
         FROM comparacao_folha{where}
         GROUP BY tiporubr ORDER BY total_linhas DESC
     """)
