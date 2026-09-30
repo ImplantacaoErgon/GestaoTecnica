@@ -1051,6 +1051,38 @@
     <div class="card" style="margin-bottom:14px;">
       <div class="kpis" id="cf-kpis"></div>
     </div>
+    <!-- 92ª rodada — Consulta dinâmica de quantidades: pedido do usuário
+         (verbatim) "quero informar o tipo de comparação, a empresa, o tipo
+         da rubrica, a verba consist ou rubrica ergon... quero informar
+         alguns campos e receber as quantidades", com dois exemplos:
+         deixando Tipo de Comparação em branco, o retorno traz a quantidade
+         de CADA Tipo de Comparação pros demais filtros informados;
+         informando Tipo de Comparação (e deixando os outros em branco), o
+         retorno é um total só. Confirmado com o usuário (AskUserQuestion):
+         regra genérica — QUALQUER um dos 5 campos abaixo deixado em branco
+         vira uma quebra (agrupamento) no resultado, não só Tipo de
+         Comparação. Painel/<select>s com IDs próprios (prefixo "cfq-"),
+         separados dos filtros da grade acima — populados a partir do MESMO
+         resumo() já carregado por cfCarregarResumo() (sem chamada extra ao
+         servidor). Ver cfqConsultar()/cfqRenderResultado() mais abaixo e
+         comparacao_folha.consulta_dinamica() no backend pra regra
+         completa. -->
+    <details class="card" id="cfq-painel" style="margin-bottom:14px;">
+      <summary style="cursor:pointer;font-weight:600;">🔎 Consulta dinâmica de quantidades</summary>
+      <div class="muted" style="font-size:12px;margin:8px 0 12px;">
+        Preencha os campos que quiser usar como filtro — os que deixar em branco aparecem quebrados (agrupados) no resultado, com a quantidade de cada valor encontrado. Se preencher os 5, o resultado é um total só.
+      </div>
+      <div class="filters">
+        <select id="cfq-mesano"><option value="">Competência (todas)</option></select>
+        <select id="cfq-tipo-comparacao"><option value="">Tipo de Comparação (todos)</option></select>
+        <select id="cfq-empresa"><option value="">Empresa (todas)</option></select>
+        <select id="cfq-tiporubr"><option value="">Tipo de rubrica (todos)</option></select>
+        <select id="cfq-rubrica-ergon"><option value="">Rubrica Ergon (todas)</option></select>
+        <select id="cfq-verba-consist"><option value="">Verba Consist (todas)</option></select>
+        <button class="btn small" id="cfq-btn-consultar">Consultar</button>
+      </div>
+      <div id="cfq-resultado" style="margin-top:10px;"></div>
+    </details>
     <div class="filters">
       <select id="cf-f-mesano"><option value="">Competência (todas)</option></select>
       <select id="cf-f-situacao"><option value="">Situação (todas)</option></select>
@@ -9157,6 +9189,86 @@ async function cfCarregarResumo(){
     $("cf-f-situacao").value = situacaoAtual;
     $("cf-f-situacao").dataset.montado = JSON.stringify(situacoes);
   }
+  cfqPopularSelects(r);
+}
+
+// 92ª rodada — popula os <select> do painel "Consulta dinâmica" (ver HTML
+// acima) reaproveitando as MESMAS listas de valores válidos que
+// cfCarregarResumo() já buscou pros filtros da grade principal (nenhuma
+// chamada extra ao servidor). cfPopularSelect() já preserva a seleção atual
+// do usuário mesmo depois de reconstruir as <option>s.
+function cfqPopularSelects(r){
+  cfPopularSelect("cfq-mesano", "Competência (todas)", r.meses_disponiveis);
+  cfPopularSelect("cfq-tipo-comparacao", "Tipo de Comparação (todos)", r.tipos_comparacao_disponiveis);
+  cfPopularSelect("cfq-empresa", "Empresa (todas)", r.empresas_disponiveis);
+  cfPopularSelect("cfq-tiporubr", "Tipo de rubrica (todos)", r.tipos_rubrica_disponiveis);
+  cfPopularSelect("cfq-rubrica-ergon", "Rubrica Ergon (todas)",
+    (r.rubricas_ergon_disponiveis||[]).map(x=>({valor:x.codigo, rotulo:x.nome?`${x.codigo} — ${x.nome}`:x.codigo})));
+  cfPopularSelect("cfq-verba-consist", "Verba Consist (todas)",
+    (r.verbas_consist_disponiveis||[]).map(x=>({valor:x.codigo, rotulo:x.nome?`${x.codigo} — ${x.nome}`:x.codigo})));
+}
+
+// Rótulos amigáveis pros campos que podem aparecer como coluna quebrada no
+// resultado (ver cfqRenderResultado abaixo) — mesmo nome usado pelo backend
+// em campos_agrupados/linhas (ver comparacao_folha.consulta_dinamica).
+const CFQ_ROTULOS = {
+  tipo_comparacao: "Tipo de Comparação",
+  empresa: "Empresa",
+  tiporubr: "Tipo de Rubrica",
+  rubrica_ergon: "Rubrica Ergon",
+  verba_consist: "Verba Consist",
+};
+
+async function cfqConsultar(){
+  const btn = $("cfq-btn-consultar");
+  btn.disabled = true; const textoOriginal = btn.textContent; btn.textContent = "Consultando…";
+  try{
+    const params = {
+      projeto_id: PROJETO.id,
+      mesano: $("cfq-mesano").value || null,
+      tipo_comparacao: $("cfq-tipo-comparacao").value || null,
+      empresa: $("cfq-empresa").value || null,
+      tiporubr: $("cfq-tiporubr").value || null,
+      rubrica_ergon: $("cfq-rubrica-ergon").value || null,
+      verba_consist: $("cfq-verba-consist").value || null,
+    };
+    const p = new URLSearchParams();
+    Object.entries(params).forEach(([k,v])=>{ if(v) p.set(k, v); });
+    const r = await api(`/comparacao-folha/consulta-dinamica?${p.toString()}`);
+    cfqRenderResultado(r);
+  }catch(e){
+    // api() já mostra um toast com o erro específico
+  }finally{
+    btn.disabled = false; btn.textContent = textoOriginal;
+  }
+}
+
+// campos_agrupados vazio (os 5 campos foram preenchidos) → só um total,
+// generalização do Exemplo 2 do pedido do usuário. Do contrário, uma
+// coluna por campo deixado em branco + Quantidade, uma linha por
+// combinação encontrada (Exemplo 1, generalizado pra 1 a 5 campos em
+// branco ao mesmo tempo).
+function cfqRenderResultado(r){
+  const el = $("cfq-resultado");
+  const campos = r.campos_agrupados || [];
+  const linhas = r.linhas || [];
+  if(campos.length === 0){
+    const total = linhas[0] ? linhas[0].quantidade : 0;
+    el.innerHTML = `<div style="font-size:24px;font-weight:600;">${Number(total).toLocaleString('pt-BR')}</div>
+      <div class="muted" style="font-size:12px;">linha(s) encontradas para os filtros informados.</div>`;
+    return;
+  }
+  const cabecalhos = campos.map(c => CFQ_ROTULOS[c] || c);
+  el.innerHTML = `
+    ${r.truncado ? `<div class="muted" style="font-size:12px;margin-bottom:6px;">Mostrando as ${linhas.length} combinações mais frequentes (existem mais — refine os filtros pra ver o restante).</div>` : ""}
+    <div class="table-wrap">
+      <table>
+        <thead><tr>${cabecalhos.map(c=>`<th>${esc(c)}</th>`).join("")}<th>Quantidade</th></tr></thead>
+        <tbody>
+          ${linhas.map(l => `<tr>${campos.map(c=>`<td>${esc(l[c] ?? "")}</td>`).join("")}<td>${Number(l.quantidade).toLocaleString('pt-BR')}</td></tr>`).join("")}
+        </tbody>
+      </table>
+    </div>`;
 }
 
 // Popula um <select> de filtro a partir de uma lista de valores já
@@ -9373,6 +9485,7 @@ function wireComparacaoFolhaPane(){
   $("btn-atualizar-comparacao").addEventListener("click", selecionarComparacaoFolhaNoDrive);
   $("btn-upload-comparacao").addEventListener("click", ()=> $("cf-upload-file").click());
   $("cf-upload-file").addEventListener("change", uploadComparacaoFolhaDoComputador);
+  $("cfq-btn-consultar").addEventListener("click", cfqConsultar);
 }
 
 // ---------------------------------------------------------------------

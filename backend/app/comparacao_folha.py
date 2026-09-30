@@ -165,6 +165,13 @@ def resumo(projeto_id=None, **filtros):
         FROM comparacao_folha{where_projeto}{conector}verba_consist IS NOT NULL
         GROUP BY verba_consist ORDER BY 1
     """)
+    # 92ª rodada — lista de Tipo de Comparação disponíveis, pro combo da
+    # nova "Consulta dinâmica" (ver consulta_dinamica() abaixo). tipo_comparacao
+    # já era aceito por _where_filtros desde o início (55ª rodada), só nunca
+    # tinha um combo na tela pra usá-lo como filtro.
+    tipos_comparacao = db.fetch_all(f"""
+        SELECT DISTINCT tipo_comparacao FROM comparacao_folha{where_projeto}{conector}tipo_comparacao IS NOT NULL ORDER BY 1
+    """)
     return {
         "total": (row or {}).get("total", 0),
         "total_divergentes": (row or {}).get("total_divergentes", 0),
@@ -177,6 +184,95 @@ def resumo(projeto_id=None, **filtros):
         "tipovinc_disponiveis": [t["tipovinc"] for t in tipovinc],
         "rubricas_ergon_disponiveis": rubricas_ergon,
         "verbas_consist_disponiveis": verbas_consist,
+        "tipos_comparacao_disponiveis": [t["tipo_comparacao"] for t in tipos_comparacao],
+    }
+
+
+# ---- Consulta dinâmica de quantidades (92ª rodada) ----
+# Pedido do usuário (verbatim): "quero informar o tipo de comparação, a
+# empresa, o tipo da rubrica, a verba consist ou rubrica ergon, enfim, quero
+# informar alguns campos e receber as quantidades." Com dois exemplos: (1)
+# informando Tipo de Rubrica + Verba Consist mas NÃO Tipo de Comparação, o
+# retorno deve trazer a quantidade de CADA Tipo de Comparação pra esse
+# filtro; (2) informando só Tipo de Comparação, o retorno deve trazer a
+# quantidade (um número só) desse Tipo de Comparação.
+#
+# Confirmado com o usuário (AskUserQuestion): a regra é genérica, não
+# específica do Tipo de Comparação — QUALQUER um dos 5 campos abaixo que for
+# deixado em branco vira uma dimensão de agrupamento (GROUP BY) no
+# resultado; os que forem preenchidos viram filtro (WHERE) e saem do
+# agrupamento. Se os 5 forem preenchidos, não sobra nenhuma dimensão — o
+# resultado é uma quantidade só (o total que bate com todos os filtros),
+# generalizando o Exemplo 2. `mesano` (Competência) fica de fora dessa
+# lista de propósito: é só mais um filtro de escopo (nunca vira dimensão),
+# senão misturar competências diferentes na mesma quebra confundiria mais
+# do que ajudaria.
+_CAMPOS_CONSULTA_DINAMICA = [
+    ("tipo_comparacao", "tipo_comparacao"),
+    ("empresa", "empresa_consist"),
+    ("tiporubr", "tiporubr"),
+    ("rubrica_ergon", "rubrica_ergon"),
+    ("verba_consist", "verba_consist"),
+]
+
+# Mesmo espírito de LIMITE_EMPRESA_RUBRICA/LIMITE_EXPORT_CSV acima — teto de
+# segurança pro caso de o usuário deixar vários (ou todos) os 5 campos em
+# branco ao mesmo tempo, o que pode gerar muitas combinações distintas.
+LIMITE_CONSULTA_DINAMICA = 2000
+
+
+def consulta_dinamica(projeto_id, mesano=None, tipo_comparacao=None, empresa=None,
+                       tiporubr=None, rubrica_ergon=None, verba_consist=None):
+    """Ver comentário do bloco acima pra regra completa. Devolve
+    `campos_agrupados` (quais dos 5 campos viraram dimensão — lista vazia
+    quando os 5 foram preenchidos) e `linhas` (uma linha por combinação
+    encontrada, com `quantidade`; uma única linha só com `quantidade` quando
+    não há dimensão nenhuma)."""
+    valores = {
+        "tipo_comparacao": tipo_comparacao, "empresa": empresa, "tiporubr": tiporubr,
+        "rubrica_ergon": rubrica_ergon, "verba_consist": verba_consist,
+    }
+    campos_grupo = [(campo, coluna) for campo, coluna in _CAMPOS_CONSULTA_DINAMICA if not valores[campo]]
+
+    where = _where_filtros(
+        projeto_id=projeto_id, mesano=mesano, tipo_comparacao=tipo_comparacao,
+        empresa=empresa, tiporubr=tiporubr, rubrica_ergon=rubrica_ergon, verba_consist=verba_consist,
+    )
+
+    if not campos_grupo:
+        # Os 5 campos foram preenchidos — nenhuma dimensão sobra pra
+        # agrupar, então o resultado é só a contagem total (Exemplo 2 do
+        # pedido do usuário, generalizado pros 5 campos).
+        row = db.fetch_one(f"SELECT COUNT(*) AS quantidade FROM comparacao_folha{where}")
+        return {
+            "campos_agrupados": [],
+            "linhas": [{"quantidade": (row or {}).get("quantidade", 0)}],
+            "truncado": False,
+        }
+
+    # Cada campo deixado em branco entra no SELECT/GROUP BY (aliado ao NOME
+    # DO CAMPO, não ao nome da coluna no banco — "empresa", não
+    # "empresa_consist" — pro front-end usar a mesma chave nos dois casos).
+    # COALESCE evita que uma linha com o campo NULL simplesmente suma do
+    # agrupamento (GROUP BY trata NULL como um grupo à parte normalmente,
+    # mas o rótulo "(vazio)" deixa isso explícito pro usuário em vez de uma
+    # célula em branco na tabela).
+    selects = ", ".join(f"COALESCE({coluna}, '(vazio)') AS {campo}" for campo, coluna in campos_grupo)
+    group_by = ", ".join(coluna for _, coluna in campos_grupo)
+    linhas = db.fetch_all(f"""
+        SELECT {selects}, COUNT(*) AS quantidade, COUNT(*) OVER() AS total_combinacoes
+        FROM comparacao_folha{where}
+        GROUP BY {group_by}
+        ORDER BY quantidade DESC
+        LIMIT {LIMITE_CONSULTA_DINAMICA}
+    """)
+    total_combinacoes = linhas[0]["total_combinacoes"] if linhas else 0
+    for linha in linhas:
+        linha.pop("total_combinacoes", None)
+    return {
+        "campos_agrupados": [campo for campo, _ in campos_grupo],
+        "linhas": linhas,
+        "truncado": total_combinacoes > LIMITE_CONSULTA_DINAMICA,
     }
 
 

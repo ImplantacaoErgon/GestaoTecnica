@@ -2672,6 +2672,30 @@ def create_app():
         filtros = _filtros_comparacao_folha()
         return jsonify(comparacao_folha.resumo(projeto_id=pid, **filtros))
 
+    @app.get("/api/comparacao-folha/consulta-dinamica")
+    def comparacao_folha_consulta_dinamica():
+        """92ª rodada — pedido do usuário (verbatim): "quero informar o tipo
+        de comparação, a empresa, o tipo da rubrica, a verba consist ou
+        rubrica ergon ... quero informar alguns campos e receber as
+        quantidades". Só projeto_id + mesano (escopo) + os 5 campos que
+        podem ser filtro OU dimensão de agrupamento (ver
+        comparacao_folha.consulta_dinamica pra regra completa) — os demais
+        filtros da grade (situação, tipovinc, busca, só divergentes) não
+        entram aqui de propósito, ficam restritos aos 5 campos que o usuário
+        pediu."""
+        pid = request.args.get("projeto_id")
+        if not pid:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        return jsonify(comparacao_folha.consulta_dinamica(
+            projeto_id=pid,
+            mesano=request.args.get("mesano") or None,
+            tipo_comparacao=request.args.get("tipo_comparacao") or None,
+            empresa=request.args.get("empresa") or None,
+            tiporubr=request.args.get("tiporubr") or None,
+            rubrica_ergon=request.args.get("rubrica_ergon") or None,
+            verba_consist=request.args.get("verba_consist") or None,
+        ))
+
     @app.get("/api/comparacao-folha/dashboard")
     def dashboard_comparacao_folha():
         """65ª rodada: aba "Dashboard" dedicada à Comparação Folha — métricas
