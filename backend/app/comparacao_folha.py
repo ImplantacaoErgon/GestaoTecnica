@@ -18,6 +18,29 @@ Confirmado com o usuário (AskUserQuestion, 55ª rodada): a tela é só consulta
 """
 from . import db
 
+# 100ª rodada — bug real encontrado pelo usuário: o carve-out "Não
+# prog./cadastr." da 95ª rodada (e também os quadros de Cobertura de
+# Mapeamento da 94ª/96ª) cruzam rubricas.codigo_ergon/verba_legado com
+# comparacao_folha.rubrica_ergon/verba_consist por igualdade exata de texto
+# — mas as duas tabelas guardam o MESMO código em formatos diferentes:
+#   - rubricas.codigo_ergon/verba_legado vêm de uma célula NUMÉRICA do Excel
+#     da planilha "Levantamento Rubricas" (rubricas_import._numero_como_texto
+#     converte 57.0 -> "57", sem zero à esquerda).
+#   - comparacao_folha.rubrica_ergon/verba_consist vêm de texto puro do
+#     CSV/planilha exportada pelo sistema legado (comparacao_folha_import._texto
+#     só faz str(v).strip(), preservando "00057" exatamente como veio de lá).
+# Resultado: "57" (Rubricas) nunca batia com "00057" (Comparação Folha) pra
+# NENHUMA comparação — toda rubrica com código puramente numérico ficava
+# "sem correspondência" mesmo quando é a mesma rubrica de verdade (visto
+# pelo usuário: código 57/INSALUBRIDADE "Em levantamento" nas duas linhas de
+# Rubricas, mas aparecendo como Divergente na Comparação Folha).
+# Corrigido tolerando os dois formatos: compara como texto primeiro (caminho
+# mais comum e mais rápido, cobre os casos raros de código não-numérico) e
+# só cai pro cast numérico (ignora zero à esquerda) quando os dois lados são
+# só dígitos — nunca quebra pra um código que não seja puramente numérico.
+def _codigo_igual_sql(col_a, col_b):
+    return f"({col_a} = {col_b} OR ({col_a} ~ '^[0-9]+$' AND {col_b} ~ '^[0-9]+$' AND {col_a}::bigint = {col_b}::bigint))"
+
 # 94ª rodada — pedido do usuário: no quadro "Comparação por Tipo de Rubrica"
 # do Dashboard, os valores de SITUACAO abaixo passaram a contar como uma
 # categoria própria ("Não programada/cadastrada", ver dashboard() mais
@@ -67,15 +90,15 @@ _SITUACOES_NAO_PROGRAMADA_SQL = "(" + ", ".join(db.q(s) for s in SITUACOES_NAO_P
 # diferentes (codigo_ergon não é chave única — ver migration_029_rubricas.sql),
 # o critério é conservador: só mantém no carve-out se NENHUMA linha
 # correspondente (fora 'Excluída') já tiver passado de 'Em levantamento'.
-_RUBRICA_EM_LEVANTAMENTO_SQL = """EXISTS (
+_RUBRICA_EM_LEVANTAMENTO_SQL = f"""EXISTS (
     SELECT 1 FROM rubricas r
     WHERE r.projeto_id = comparacao_folha.projeto_id
-      AND r.codigo_ergon = comparacao_folha.rubrica_ergon
+      AND {_codigo_igual_sql('r.codigo_ergon', 'comparacao_folha.rubrica_ergon')}
       AND r.status = 'Em levantamento'
   ) AND NOT EXISTS (
     SELECT 1 FROM rubricas r
     WHERE r.projeto_id = comparacao_folha.projeto_id
-      AND r.codigo_ergon = comparacao_folha.rubrica_ergon
+      AND {_codigo_igual_sql('r.codigo_ergon', 'comparacao_folha.rubrica_ergon')}
       AND r.status NOT IN ('Em levantamento', 'Excluída')
   )"""
 _NAO_PROGRAMADA_CARVE_OUT_SQL = f"(UPPER(situacao) IN {_SITUACOES_NAO_PROGRAMADA_SQL} AND {_RUBRICA_EM_LEVANTAMENTO_SQL})"
@@ -545,13 +568,15 @@ def dashboard(projeto_id, mesano=None):
 
     # Cobertura de mapeamento — cruza com a parametrização de Rubricas do
     # MESMO projeto (ignora o filtro de mês: parametrização não é mensal).
+    # 100ª rodada: mesma tolerância a zero à esquerda do carve-out acima
+    # (ver _codigo_igual_sql) — este cruzamento tinha o mesmo bug.
     rubricas_parametrizadas_sem_uso = db.fetch_all(f"""
         SELECT r.codigo_ergon AS codigo, MAX(r.nome_abreviado) AS nome, COUNT(*) AS linhas_parametrizadas
         FROM rubricas r
         WHERE r.projeto_id = {db.q(projeto_id)} AND r.status <> 'Excluída' AND r.codigo_ergon IS NOT NULL
           AND NOT EXISTS (
             SELECT 1 FROM comparacao_folha cf
-            WHERE cf.projeto_id = r.projeto_id AND cf.rubrica_ergon = r.codigo_ergon
+            WHERE cf.projeto_id = r.projeto_id AND {_codigo_igual_sql('cf.rubrica_ergon', 'r.codigo_ergon')}
           )
         GROUP BY r.codigo_ergon ORDER BY 1
     """)
@@ -561,7 +586,7 @@ def dashboard(projeto_id, mesano=None):
         WHERE r.projeto_id = {db.q(projeto_id)} AND r.status <> 'Excluída' AND r.verba_legado IS NOT NULL
           AND NOT EXISTS (
             SELECT 1 FROM comparacao_folha cf
-            WHERE cf.projeto_id = r.projeto_id AND cf.verba_consist = r.verba_legado
+            WHERE cf.projeto_id = r.projeto_id AND {_codigo_igual_sql('cf.verba_consist', 'r.verba_legado')}
           )
         GROUP BY r.verba_legado ORDER BY 1
     """)
@@ -571,7 +596,7 @@ def dashboard(projeto_id, mesano=None):
         WHERE cf.projeto_id = {db.q(projeto_id)} AND cf.rubrica_ergon IS NOT NULL
           AND NOT EXISTS (
             SELECT 1 FROM rubricas r
-            WHERE r.projeto_id = cf.projeto_id AND r.status <> 'Excluída' AND r.codigo_ergon = cf.rubrica_ergon
+            WHERE r.projeto_id = cf.projeto_id AND r.status <> 'Excluída' AND {_codigo_igual_sql('r.codigo_ergon', 'cf.rubrica_ergon')}
           )
         GROUP BY cf.rubrica_ergon ORDER BY linhas DESC
     """)
@@ -581,7 +606,7 @@ def dashboard(projeto_id, mesano=None):
         WHERE cf.projeto_id = {db.q(projeto_id)} AND cf.verba_consist IS NOT NULL
           AND NOT EXISTS (
             SELECT 1 FROM rubricas r
-            WHERE r.projeto_id = cf.projeto_id AND r.status <> 'Excluída' AND r.verba_legado = cf.verba_consist
+            WHERE r.projeto_id = cf.projeto_id AND r.status <> 'Excluída' AND {_codigo_igual_sql('r.verba_legado', 'cf.verba_consist')}
           )
         GROUP BY cf.verba_consist ORDER BY linhas DESC
     """)

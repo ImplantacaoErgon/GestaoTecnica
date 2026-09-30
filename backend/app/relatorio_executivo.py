@@ -652,6 +652,20 @@ def chamar_ia(prompt):
     except anthropic.RateLimitError:
         raise RelatorioExecutivoError("Limite de uso da API da Anthropic atingido — tente novamente em alguns minutos.")
     except anthropic.APIError as e:
+        # Mesmo tratamento dado em requisitos_ia.py (99ª rodada): a API
+        # devolve um 400 cru tipo {'type':'error','error':{'type':
+        # 'invalid_request_error','message':'Your credit balance is too
+        # low...'}} quando a conta fica sem créditos — sem isto, o
+        # consultor via esse JSON em inglês direto na tela, sem saber o que
+        # fazer. Não tem um tipo de exceção próprio no SDK para este caso,
+        # por isso a checagem é pela mensagem.
+        if "credit balance is too low" in str(e):
+            raise RelatorioExecutivoError(
+                "Os créditos da conta da Anthropic acabaram — acesse console.anthropic.com "
+                "(menu Plans & Billing) e adicione créditos para voltar a gerar relatórios. Isso "
+                "usa a mesma conta do recurso \"Perguntar à IA\" (tela Analisar Requisitos), que "
+                "também fica indisponível até lá."
+            )
         raise RelatorioExecutivoError(f"Erro ao chamar a API da Anthropic: {e}")
     if getattr(resposta, "stop_reason", None) == "max_tokens":
         # Não falha o relatório por causa disso (o texto gerado até aqui ainda pode ser

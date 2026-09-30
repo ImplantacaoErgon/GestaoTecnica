@@ -737,7 +737,7 @@
       </div>
     </div>
     <div class="kpis" id="dash-kpis"></div>
-    <div class="card" id="dash-master-card">
+    <div class="card card--zona-azul" id="dash-master-card">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
         <h3>★ Atividades master — previsão de conclusão</h3>
         <span class="muted" style="font-size:11.5px;" title="&quot;Fim previsto (plano)&quot; é a data do cronograma (nunca muda sozinha). &quot;Fim projetado (andamento)&quot; reprojeta a partir do que já aconteceu de verdade — conclusões, % executado, bloqueios, propagando atraso pelas dependências — e pode ficar bem diferente da primeira quando o projeto está atrasado. Mesmo cálculo usado no Relatório Executivo (IA), sem custo de IA.">ⓘ como funciona</span>
@@ -4911,17 +4911,24 @@ function renderDashboard(){
   const pctDeveria = total?Math.round(100*deveriaConcluidas/total):0;
   const diffPP = pctConcluida - pctDeveria; // pontos percentuais: negativo = atrasado em relação ao plano
 
+  // 102ª rodada — pedido do usuário ("coloque cores nesses quadros do
+  // dashboard, estão muito brancos"): cor de fundo suave por quadro,
+  // reaproveitando SOFT_VAR (já usado em outras telas, ex. pill()/banners de
+  // carga) em vez de inventar uma paleta nova. "bg" segue o mesmo sentido
+  // semântico que "c" (cor do VALOR) já usava pros dois quadros dinâmicos
+  // (Aderência ao prazo/Atrasadas) — quando não há problema, cai num
+  // neutro (--surface-2) em vez de deixar sem cor nenhuma.
   $("dash-kpis").innerHTML = [
-    {l:"Total de atividades", v:total},
-    {l:"Concluídas", v:`${concluidas} (${pctConcluida}%)`, c:"ok"},
-    {l:"Deveria estar concluído (hoje)", v:`${deveriaConcluidas} (${pctDeveria}%)`,
+    {l:"Total de atividades", v:total, bg:"accent"},
+    {l:"Concluídas", v:`${concluidas} (${pctConcluida}%)`, c:"ok", bg:"ok"},
+    {l:"Deveria estar concluído (hoje)", v:`${deveriaConcluidas} (${pctDeveria}%)`, bg:"accent",
       title:"Quantas atividades já deveriam ter passado do prazo final previsto até hoje — mesmo critério de contagem do card 'Concluídas', pra poder comparar direto."},
-    {l:"Aderência ao prazo", v:`${diffPP>0?"+":""}${diffPP} p.p.`, c: diffPP<0?"danger":(diffPP>0?"ok":""),
+    {l:"Aderência ao prazo", v:`${diffPP>0?"+":""}${diffPP} p.p.`, c: diffPP<0?"danger":(diffPP>0?"ok":""), bg: diffPP<0?"danger":(diffPP>0?"ok":"faint"),
       title:"Diferença entre o % real concluído e o % que deveria estar concluído hoje segundo o plano. Negativo = atrasado em relação ao cronograma."},
-    {l:"Em andamento", v:emAndamento},
-    {l:"Atrasadas", v:atrasadas, c: atrasadas? "danger":""},
-    {l:"No caminho crítico", v:criticas},
-  ].map(k=>`<div class="kpi" ${k.title?`title="${esc(k.title)}"`:""}><div class="label">${k.l}</div><div class="value ${k.c||''}">${k.v}</div></div>`).join("");
+    {l:"Em andamento", v:emAndamento, bg:"accent"},
+    {l:"Atrasadas", v:atrasadas, c: atrasadas? "danger":"", bg: atrasadas? "danger":"faint"},
+    {l:"No caminho crítico", v:criticas, bg: criticas? "warn":"faint"},
+  ].map(k=>`<div class="kpi" style="background:${SOFT_VAR[k.bg]||SOFT_VAR.faint};" ${k.title?`title="${esc(k.title)}"`:""}><div class="label">${k.l}</div><div class="value ${k.c||''}">${k.v}</div></div>`).join("");
 
   api(`/relatorios/resumo-frentes?projeto_id=${PROJETO.id}`).then(rows=>{
     $("dash-frentes").innerHTML = rows.filter(r=>r.total_atividades>0).map(r=>{
