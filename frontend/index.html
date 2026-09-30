@@ -28,6 +28,11 @@
     --accent:#2f5f8a; --accent-strong:#234968; --accent-soft:#e6edf4;
     --warn:#a15c0d; --warn-soft:#faecda; --danger:#ab2f2f; --danger-soft:#faeaea;
     --ok:#1f7a4d; --ok-soft:#e4f3ea;
+    /* 103ª rodada: pedido do usuário pra variar mais as cores dos quadros do
+       Dashboard ("verde, azul, amarelo, rosa") — rosa não existia no tema
+       ainda, adicionado no mesmo estilo dos demais (tom médio pro texto/
+       ícone, tom bem claro pro fundo do card). */
+    --pink:#a13d72; --pink-soft:#f7e8f0;
     --shadow:0 1px 2px rgba(20,30,35,.07), 0 6px 16px rgba(20,30,35,.05);
   }
   @media (prefers-color-scheme: dark){
@@ -37,6 +42,7 @@
       --accent:#6fa8d8; --accent-strong:#9cc4e8; --accent-soft:#16232f;
       --warn:#dfa657; --warn-soft:#332a15; --danger:#e2807a; --danger-soft:#361c1b;
       --ok:#63cb93; --ok-soft:#153627;
+      --pink:#e08fc0; --pink-soft:#33202c;
       --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 20px rgba(0,0,0,.3);
     }
   }
@@ -49,6 +55,7 @@
     --accent:#6fa8d8; --accent-strong:#9cc4e8; --accent-soft:#16232f;
     --warn:#dfa657; --warn-soft:#332a15; --danger:#e2807a; --danger-soft:#361c1b;
     --ok:#63cb93; --ok-soft:#153627;
+    --pink:#e08fc0; --pink-soft:#33202c;
     --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 20px rgba(0,0,0,.3);
   }
   *{box-sizing:border-box;}
@@ -195,6 +202,8 @@
   .card--zona-azul{background:var(--accent-soft);}
   .card--zona-ambar{background:var(--warn-soft);}
   .card--zona-verde{background:var(--ok-soft);}
+  .card--zona-vermelha{background:var(--danger-soft);}
+  .card--zona-rosa{background:var(--pink-soft);}
 
   /* 98ª rodada — pedido do usuário: o par "% de comparação por Situação"
      (esquerda) × "Comparação por Tipo de Rubrica" (direita) herdava a
@@ -748,24 +757,31 @@
         <tbody id="dash-master-tbody"></tbody>
       </table></div>
     </div>
+    <!-- 103ª rodada: cores variando por quadro (pedido do usuário) — azul
+         pros dois de acompanhamento geral, vermelho pro que já é risco
+         confirmado (atrasadas/alertas urgentes), verde pra semana corrente
+         (em andamento agora), âmbar pra semana seguinte/esforço/anomalias
+         (atenção, ainda não é um problema confirmado) e rosa pros dois mais
+         "informativos"/neutros (marcos, horas por recurso), só pra variar
+         em vez de deixar tudo na mesma cor. -->
     <div class="grid-2">
-      <div class="card">
+      <div class="card card--zona-azul">
         <h3>Progresso por frente de trabalho</h3>
         <div id="dash-frentes"></div>
       </div>
-      <div class="card">
+      <div class="card card--zona-rosa">
         <h3>Próximos marcos</h3>
         <ul class="list-simple" id="dash-marcos"></ul>
       </div>
     </div>
-    <div class="card">
+    <div class="card card--zona-vermelha">
       <h3>Atividades atrasadas</h3>
       <div class="table-wrap"><table>
         <thead><tr><th>Código</th><th>Atividade</th><th>Frente</th><th>Fim previsto</th><th>Dias de atraso</th><th>Recurso</th></tr></thead>
         <tbody id="dash-atrasadas"></tbody>
       </table></div>
     </div>
-    <div class="card">
+    <div class="card card--zona-verde">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
         <h3>📅 Atividades previstas e em andamento — semana corrente</h3>
         <span class="muted mono" id="dash-semana-atual-periodo" style="font-size:11.5px;"></span>
@@ -777,7 +793,7 @@
         <tbody id="dash-semana-atual"></tbody>
       </table></div>
     </div>
-    <div class="card">
+    <div class="card card--zona-ambar">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
         <h3>📅 Atividades previstas — semana seguinte</h3>
         <span class="muted mono" id="dash-semana-seguinte-periodo" style="font-size:11.5px;"></span>
@@ -789,7 +805,7 @@
         <tbody id="dash-semana-seguinte"></tbody>
       </table></div>
     </div>
-    <div class="card" id="dash-alertas-card" hidden>
+    <div class="card card--zona-vermelha" id="dash-alertas-card" hidden>
       <h3>⚠ Atenção — Urgente/Alta sem recurso ou sem prazo</h3>
       <div class="view-sub" style="margin-top:-6px;">Atividades de prioridade alta que ainda não têm nenhum recurso definido ou não têm data fim prevista — risco de escapar do radar.</div>
       <div class="table-wrap"><table>
@@ -797,7 +813,7 @@
         <tbody id="dash-alertas"></tbody>
       </table></div>
     </div>
-    <div class="card" id="dash-esforco-card" hidden>
+    <div class="card card--zona-ambar" id="dash-esforco-card" hidden>
       <h3>⏱ Esforço acima do previsto — ainda em andamento</h3>
       <div class="view-sub" style="margin-top:-6px;">Atividades em andamento cujas horas já realizadas já ultrapassaram as horas previstas, mesmo sem terem chegado a 100% — um alerta antecipado, sem precisar esperar a atividade fechar pra descobrir que passou do esforço planejado.</div>
       <div class="table-wrap"><table>
@@ -805,7 +821,7 @@
         <tbody id="dash-esforco"></tbody>
       </table></div>
     </div>
-    <div class="card" id="dash-anomalias-fixada-card" hidden>
+    <div class="card card--zona-ambar" id="dash-anomalias-fixada-card" hidden>
       <h3>📌 Anomalias de data fixada</h3>
       <div class="view-sub" style="margin-top:-6px;">Atividades com a data de execução fixada (📌) cuja data prevista atual já não respeita o que uma predecessora direta exige — a data fixada não é alterada automaticamente, então precisa de uma decisão manual: manter assim ou desmarcar a trava e deixar recalcular.</div>
       <div class="table-wrap"><table>
@@ -813,7 +829,7 @@
         <tbody id="dash-anomalias-fixada"></tbody>
       </table></div>
     </div>
-    <div class="card">
+    <div class="card card--zona-rosa">
       <h3>Horas por recurso (previsto × realizado)</h3>
       <div class="view-sub" style="margin-top:-6px;">Soma das horas previstas e realizadas nas atividades em que cada recurso aparece como participante. Usa a hora alocada especificamente daquela pessoa na atividade (aba Responsáveis, no modal de atividade) quando informada; sem alocação específica, conta a atividade inteira para ela. A diferença só considera atividades com horas realizadas já lançadas — passe o mouse sobre o valor para ver quantas.</div>
       <div class="filters" style="margin:10px 0 0;">
