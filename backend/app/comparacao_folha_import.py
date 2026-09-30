@@ -502,13 +502,31 @@ def _linhas_copy(ws, indice_para_coluna, projeto_id, mesano_alvo, contadores):
         yield "\t".join(campos) + "\n"
 
 
-def importar_comparacao_folha(projeto_id, conteudo_bytes, timeout=900):
+def importar_comparacao_folha(projeto_id, conteudo_bytes, timeout=3600):
     """Ponto de entrada único (sem prévia — ver comentário no topo do
     arquivo): lê a planilha, detecta a competência (MESANO), substitui as
     linhas daquela competência (delete + copy, uma transação só) e devolve
     um resumo. Nunca materializa as ~300 mil linhas como lista de dicts
     Python nem como uma string SQL única — tudo é passado em streaming pro
-    banco (ver db.execute_stream)."""
+    banco (ver db.execute_stream).
+
+    91ª rodada — `timeout` (padrão) subiu de 900s pra 3600s (1h): mesmo
+    depois do alinhamento dos "três lados" feito na 88ª rodada (gunicorn +
+    db.execute_stream + Postgres via SET LOCAL, todos em 900s), uma carga
+    real em produção voltou a bater em "canceling statement due to statement
+    timeout" — dessa vez o SET LOCAL da 88ª rodada FUNCIONOU (o erro prova
+    isso: é o Postgres recusando, não mais o timeout descasado do pooler),
+    só que 900s não foi suficiente pro tamanho real do arquivo (~184 mil
+    linhas processadas antes de estourar, de um arquivo maior ainda). Antes
+    da 83ª/90ª rodada, os 900s estavam artificialmente amarrados ao
+    `--timeout 900` do gunicorn (ver Dockerfile) porque a carga rodava
+    DENTRO da própria requisição HTTP — depois que tanto o Picker (83ª)
+    quanto o Upload (90ª) passaram a rodar numa THREAD em segundo plano, essa
+    amarração deixou de fazer sentido: a thread não é mais monitorada pelo
+    timeout do worker do gunicorn (que só cobre o ciclo requisição/resposta,
+    já encerrado quando a thread começa), então dá pra dar uma margem bem
+    mais generosa sem nenhum efeito colateral pro usuário (que já nem fica
+    esperando a aba aberta)."""
     ws = _abrir_primeira_aba_com_dados(conteudo_bytes)
     indice_para_coluna = _mapear_cabecalho(ws)
     mesano_alvo = _detectar_mesano_alvo(ws, indice_para_coluna)
@@ -534,7 +552,9 @@ def importar_comparacao_folha(projeto_id, conteudo_bytes, timeout=900):
     # conexão física, então o valor vale pro COPY seguinte; um `SET` solto
     # (fora de transação) correria o risco de cair numa conexão diferente da
     # do COPY. Usa o mesmo `timeout` (em segundos) já recebido por esta
-    # função como única fonte de verdade, em vez de duplicar o número 900.
+    # função como única fonte de verdade, em vez de duplicar o número (que,
+    # a partir da 91ª rodada, já não é mais 900 — ver docstring da função,
+    # acima, pro motivo do valor ter mudado).
     prefixo = (
         "BEGIN;\n"
         f"SET LOCAL statement_timeout = {int(timeout * 1000)};\n"
