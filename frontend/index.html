@@ -1000,7 +1000,7 @@
     <details class="card card--zona-azul" id="ariq-painel" style="margin-bottom:14px;">
       <summary style="cursor:pointer;font-weight:600;">🤖 Perguntar à IA sobre estes requisitos</summary>
       <div class="muted" style="font-size:12px;margin:8px 0 12px;">
-        Pergunte algo sobre os requisitos considerados abaixo (ex.: "algum destes trata de integração com o eSocial?" ou "resuma o que estes requisitos pedem sobre férias"). A IA responde só com base no texto desses requisitos — é um candidato para revisão do consultor, não uma resposta oficial, e consome créditos da API da Anthropic (custo estimado mostrado após cada pergunta).
+        Pergunte algo sobre os requisitos considerados abaixo (ex.: "algum destes trata de integração com o eSocial?" ou "resuma o que estes requisitos pedem sobre férias"). A IA responde só com base no texto desses requisitos — é um candidato para revisão do consultor, não uma resposta oficial, e consome créditos da API de IA configurada no backend (Anthropic, com OpenAI como alternativa automática — custo estimado mostrado após cada pergunta, junto com o modelo que respondeu).
       </div>
       <div class="filters" style="margin-bottom:0;">
         <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;white-space:nowrap;">
@@ -2557,12 +2557,13 @@
     </div>
     <div class="modal-body single-col" id="re-body">
       <div id="re-intro">
-        <p>Gera um diagnóstico do projeto usando IA (Anthropic Claude), a partir dos números atuais do cronograma:
-        progresso por frente, atividades atrasadas, bloqueios, riscos abertos e uma previsão de conclusão da(s)
-        atividade(s) marcada(s) como <strong>★ atividade master</strong> (ex: Folha definitiva).</p>
+        <p>Gera um diagnóstico do projeto usando IA (Anthropic Claude, com OpenAI como alternativa automática caso a
+        Anthropic não responda), a partir dos números atuais do cronograma: progresso por frente, atividades
+        atrasadas, bloqueios, riscos abertos e uma previsão de conclusão da(s) atividade(s) marcada(s) como
+        <strong>★ atividade master</strong> (ex: Folha definitiva).</p>
         <p class="muted" style="margin-top:8px;">Os dados do projeto (nomes de atividades, prazos, status, nomes de
-        recursos) são enviados à API da Anthropic para gerar o texto — não é dado de folha de pagamento real.
-        A geração pode levar de 15 a 40 segundos.</p>
+        recursos) são enviados à API de IA configurada no backend para gerar o texto — não é dado de folha de
+        pagamento real. A geração pode levar de 15 a 40 segundos.</p>
       </div>
       <div id="re-loading" hidden style="text-align:center;padding:30px 0;">
         <div class="spinner"></div>
@@ -9762,10 +9763,17 @@ async function cfdCarregarDados(){
   catch(e){ return; }
 
   const g = r.geral || {};
+  // 111ª rodada — pedido do usuário: rótulo "% sem divergência (geral)"
+  // renomeado pra "% Convergente (geral)" (mesma troca de termo já feita
+  // em 94ª rodada no quadro "Comparação por Tipo de Rubrica" mais abaixo),
+  // e novo KPI "% Não prog./cadastr. (Em levantamento)" incluído entre ele
+  // e "% com divergência (geral)" — ver geral.pct_nao_programada em
+  // app/comparacao_folha.dashboard().
   $("cfd-kpis").innerHTML = [
     ["Linhas comparadas", (g.total||0).toLocaleString('pt-BR')],
     ["Convergente", (g.total_nao_divergentes||0).toLocaleString('pt-BR')],
-    ["% sem divergência (geral)", g.pct_nao_divergente==null ? "—" : `${g.pct_nao_divergente}%`],
+    ["% Convergente (geral)", g.pct_nao_divergente==null ? "—" : `${g.pct_nao_divergente}%`],
+    ["% Não prog./cadastr. (Em levantamento)", g.pct_nao_programada==null ? "—" : `${g.pct_nao_programada}%`],
     ["% com divergência (geral)", g.pct_divergente==null ? "—" : `${g.pct_divergente}%`],
   ].map(([l,v])=>`<div><div style="font-size:20px;font-weight:600;">${v}</div><div class="muted" style="font-size:11.5px;">${esc(l)}</div></div>`).join("");
 
