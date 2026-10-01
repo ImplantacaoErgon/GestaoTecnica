@@ -5973,14 +5973,23 @@ function renderRubricas(){
 
   const porStatus = {};
   RUBRICAS.forEach(r=>{ porStatus[r.status] = (porStatus[r.status]||0)+1; });
+  // 112ª rodada — pedido do usuário: % de cada status sobre o total de
+  // rubricas levantadas, ao lado da quantidade em cada cartão (igual em
+  // espírito ao que já existe no Dashboard Comparação Folha). O total usado
+  // como base é RUBRICAS.length (o mesmo "Total levantadas" já mostrado no
+  // 1º cartão) — inclui rubricas "Excluída" se houver (não tem cartão
+  // próprio nesse quadro), então os 5 % dos status abaixo não precisam
+  // somar 100%; o cartão "Total levantadas" não mostra % (é a própria base).
+  const totalRub = RUBRICAS.length;
+  const pctRub = v => totalRub ? `${(100*v/totalRub).toFixed(1)}%` : "—";
   $("rub-kpis").innerHTML = [
-    {l:"Total levantadas", v:RUBRICAS.length},
+    {l:"Total levantadas", v:totalRub, pct:null},
     {l:"Em levantamento", v:porStatus["Em levantamento"]||0},
     {l:"Enviadas à Techne", v:porStatus["Enviada à Techne"]||0},
     {l:"Liberadas p/ testes", v:porStatus["Liberada para testes"]||0},
     {l:"Em homologação", v:porStatus["Em homologação"]||0},
     {l:"Homologadas", v:porStatus["Homologada"]||0},
-  ].map(k=>`<div class="kpi"><div class="label">${k.l}</div><div class="value">${k.v}</div></div>`).join("");
+  ].map(k=>`<div class="kpi"><div class="label">${k.l}</div><div class="value">${k.v}</div>${k.pct===null?"":`<div class="muted" style="margin-top:2px;">${pctRub(k.v)}</div>`}</div>`).join("");
 
   $("rubricas-tbody").innerHTML = list.length ? list.map(r=>{
     const nome = r.nome_abreviado || r.nome_extenso || r.descricao_legado || "—";
@@ -9763,17 +9772,10 @@ async function cfdCarregarDados(){
   catch(e){ return; }
 
   const g = r.geral || {};
-  // 111ª rodada — pedido do usuário: rótulo "% sem divergência (geral)"
-  // renomeado pra "% Convergente (geral)" (mesma troca de termo já feita
-  // em 94ª rodada no quadro "Comparação por Tipo de Rubrica" mais abaixo),
-  // e novo KPI "% Não prog./cadastr. (Em levantamento)" incluído entre ele
-  // e "% com divergência (geral)" — ver geral.pct_nao_programada em
-  // app/comparacao_folha.dashboard().
   $("cfd-kpis").innerHTML = [
     ["Linhas comparadas", (g.total||0).toLocaleString('pt-BR')],
     ["Convergente", (g.total_nao_divergentes||0).toLocaleString('pt-BR')],
-    ["% Convergente (geral)", g.pct_nao_divergente==null ? "—" : `${g.pct_nao_divergente}%`],
-    ["% Não prog./cadastr. (Em levantamento)", g.pct_nao_programada==null ? "—" : `${g.pct_nao_programada}%`],
+    ["% sem divergência (geral)", g.pct_nao_divergente==null ? "—" : `${g.pct_nao_divergente}%`],
     ["% com divergência (geral)", g.pct_divergente==null ? "—" : `${g.pct_divergente}%`],
   ].map(([l,v])=>`<div><div style="font-size:20px;font-weight:600;">${v}</div><div class="muted" style="font-size:11.5px;">${esc(l)}</div></div>`).join("");
 
