@@ -77,6 +77,56 @@ dele:
 É uma heurística, não uma leitura garantida — sempre precisa de revisão
 humana antes de confirmar a importação (por isso a rota correspondente
 em main.py devolve uma PRÉVIA, não insere direto no banco).
+
+107ª/108ª rodada — pedido do usuário: "Esse pdf é um exemplo de um edital
+bem complexo para entender os requisitos, analise esse pdf e veja se nossa
+função conseguiria pegar todos os requisitos". Testado contra um TR real
+bem mais complexo que os já usados até então (edital da Prefeitura de
+Campinas, 186 páginas) e encontrados três problemas, todos corrigidos
+nesta rodada:
+
+  1. Zona Não Funcional só era procurada dentro de um título "ANEXO ... –
+     ...": TRs que colocam os requisitos não funcionais só numa seção
+     numerada do corpo do documento (ex: "10. Requisitos Não Funcionais da
+     Solução", sem ANEXO nenhum) ficavam sem nenhum item Não Funcional.
+     _find_non_functional_zone agora também procura entre os títulos
+     numerados de 1º nível (top_headings) quando não acha nenhum ANEXO
+     compatível. Nesse mesmo TR, a extração do PDF corrompeu esse título
+     específico com um espaço a mais no meio de uma palavra ("REQUISIT OS
+     NÃO FUNCIONAIS" em vez de "REQUISITOS NÃO FUNCIONAIS") — por isso a
+     comparação usa _squash (remove todo espaço em branco antes de
+     comparar), tolerando esse tipo de corrupção de espaçamento.
+  2. A zona Funcional (heurística "maior sequência de títulos numerados
+     consecutivos em CAIXA ALTA") não distinguia o catálogo de
+     funcionalidades de seções administrativas/contratuais que também são
+     tituladas em CAIXA ALTA e numeradas em sequência (ex: "3. Contexto
+     Normativo", "11. Qualificação Técnica", "12. Gestão do Contrato")
+     — nesse TR de Campinas, a sequência mais longa de títulos 1,2,3...12
+     incluía o documento praticamente inteiro, não só a seção 9
+     ("Especificações Técnicas e Funcionais"). Agora, se algum título de
+     1º nível bater com FUNC_KEYWORDS (vocabulário explícito de catálogo
+     de funcionalidades), esse título é usado para delimitar a zona
+     Funcional com prioridade sobre a heurística antiga (que continua
+     valendo, sem mudança de comportamento, nos TRs onde nenhum título
+     bate com FUNC_KEYWORDS). O fim da zona Funcional agora também é
+     limitado pelo próximo título de 1º nível encontrado (antes só
+     considerava o próximo ANEXO ou uma janela de segurança de 400
+     linhas) — reduz ainda mais o risco de "vazamento" pra seções
+     seguintes não relacionadas.
+  3. Em certas páginas (não todas — o problema é inconsistente mesmo
+     dentro do mesmo documento, aparentemente ligado a kerning de fonte),
+     o pypdf quebra o ÚLTIMO segmento de um código hierárquico de 2
+     dígitos em dois tokens separados por espaço — ex: o item real
+     "9.1.11" sai como linha "9.1.1 1 Permitir anexar..." em vez de
+     "9.1.11 Permitir anexar...". Sem reparo, o parser lia o código
+     errado ("9.1.1"), podendo colidir com um item genuíno de mesmo
+     código (sobrescrita silenciosa) ou só perder a hierarquia correta.
+     _repair_split_leaf_codes reconhece e conserta esse padrão específico
+     antes de qualquer outra extração (só no Formato 1 — narrativo; o
+     Formato 2 — tabular tem sintaxe própria e não é afetado). Confirmado
+     contra o TR de Campinas: exatamente 16 ocorrências no documento,
+     todas validadas manualmente (o código corrigido sempre encaixa na
+     sequência numérica vizinha, ex: ...9.1.10, 9.1.11, 9.1.12...).
 """
 import io
 import re
@@ -97,9 +147,36 @@ NF_KEYWORDS = [
     "REQUISITOS DE DESEMPENHO", "REQUISITOS DE INFRAESTRUTURA",
 ]
 
+# 107ª rodada — vocabulário de título explícito do catálogo de
+# funcionalidades, usado para delimitar a zona Funcional com prioridade
+# sobre a heurística genérica (ver docstring do módulo, item 2).
+FUNC_KEYWORDS = [
+    "ESPECIFICACOES TECNICAS E FUNCIONAIS",
+    "ESPECIFICACOES FUNCIONAIS DA SOLUCAO",
+    "ESPECIFICACAO FUNCIONAL DA SOLUCAO",
+    "CATALOGO DE FUNCIONALIDADES",
+    "RELACAO DE FUNCIONALIDADES",
+]
+# Nota: "FUNCIONALIDADES GERAIS" e "REQUISITOS FUNCIONAIS", sozinhos,
+# PROPOSITALMENTE não entram nessa lista — são nomes comuns de apenas UM
+# capítulo dentro de um catálogo maior (ex: "2. FUNCIONALIDADES GERAIS" é só
+# a 2ª de várias seções do catálogo em TRs já suportados — ver docstring do
+# módulo) e tratá-los como o título do catálogo INTEIRO cortaria fora as
+# demais seções. Os termos acima foram escolhidos por só aparecerem, na
+# prática, como título do catálogo como um todo (ex: "9. Especificações
+# Técnicas e Funcionais que a Solução deverá atender").
+
 TOP_HEADING_RE = re.compile(r"^(\d{1,2})\.\s*(.{4,90}?):?\s*$")
 LEAF_RE = re.compile(r"^(\d{1,2}(?:\.\d{1,3}){1,4})\.?\s+(.{2,}?)\s*$")
 ANEXO_RE = re.compile(r"^ANEXO\s+\S{1,15}\s*[\-–—]\s*(.{3,120})$", re.IGNORECASE)
+
+# 107ª rodada — ver docstring do módulo, item 3: código hierárquico
+# terminado em 1 dígito, seguido de um token solto de 1-2 dígitos, seguido
+# de início de frase em maiúscula — assinatura do bug de extração do pypdf
+# que quebra o último segmento de um código de 2 dígitos em dois tokens.
+SPLIT_CODE_RE = re.compile(
+    r"^(\d{1,2}(?:\.\d{1,3}){1,4})\s(\d{1,2})\.?\s+([A-ZÀ-Ý].*)$"
+)
 
 # ---- Formato 2 (tabular): ver docstring do módulo.
 # Código+prazo colado no FIM da descrição (não no início) — ex:
@@ -132,6 +209,17 @@ def _strip_accents(s):
 
 def _norm(s):
     return _strip_accents(s).upper()
+
+
+def _squash(s):
+    """Como _norm, mas também remove todo espaço em branco interno —
+    107ª rodada: usado para comparar títulos contra NF_KEYWORDS/
+    FUNC_KEYWORDS tolerando corrupção de espaçamento introduzida pela
+    extração de texto do PDF em certas páginas (ver docstring do
+    módulo, item 1) — ex: "REQUISIT OS NÃO FUNCIONAIS" vira
+    "REQUISITOSNAOFUNCIONAIS", igual ao resultado de uma keyword
+    squashed sem a corrupção."""
+    return re.sub(r"\s+", "", _norm(s))
 
 
 def _is_upper_heading(s):
@@ -306,18 +394,27 @@ def _extract_tabular_items(lines):
 
 # ---------------------------------------------------------------- localização das zonas
 
-def _find_functional_zone(lines):
-    """Acha a maior sequência de títulos 'N. TÍTULO EM CAIXA ALTA' numerados
-    consecutivamente (1,2,3...) — essa é o catálogo de funcionalidades."""
+def _find_top_headings(lines):
+    """Todas as linhas no formato 'N. TÍTULO EM CAIXA ALTA' (título de 1º
+    nível) — 107ª rodada: extraído de dentro de _find_functional_zone pra
+    poder ser reaproveitado também por _find_non_functional_zone (fallback
+    sem ANEXO) e por _find_explicit_func_heading (FUNC_KEYWORDS)."""
     candidates = []
     for i, line in enumerate(lines):
         s = line.strip()
         m = TOP_HEADING_RE.match(s)
         if m and _is_upper_heading(m.group(2)):
             candidates.append((i, int(m.group(1)), m.group(2).strip()))
+    return candidates
 
+
+def _find_functional_zone(top_headings):
+    """Acha a maior sequência de títulos de 1º nível numerados
+    consecutivamente (1,2,3...) — essa é o catálogo de funcionalidades
+    (heurística antiga, usada quando nenhum título bate com
+    FUNC_KEYWORDS — ver _find_explicit_func_heading)."""
     best, cur = [], []
-    for c in candidates:
+    for c in top_headings:
         if not cur:
             cur = [c] if c[1] in (1, 2) else []
         elif c[1] == cur[-1][1] + 1:
@@ -327,6 +424,20 @@ def _find_functional_zone(lines):
         if len(cur) > len(best):
             best = cur
     return best  # lista de (linha, numero, titulo)
+
+
+def _find_explicit_func_heading(top_headings):
+    """107ª rodada (ver docstring do módulo, item 2): título de 1º nível
+    cujo texto bata (tolerando corrupção de espaço — ver _squash) com
+    FUNC_KEYWORDS — quando existe, é usado para delimitar a zona Funcional
+    com prioridade sobre a heurística genérica de _find_functional_zone,
+    evitando que ela "vaze" pra seções administrativas/contratuais que
+    também são numeradas e em CAIXA ALTA."""
+    for h in top_headings:
+        titulo_sq = _squash(h[2])
+        if any(_squash(kw) in titulo_sq for kw in FUNC_KEYWORDS):
+            return h
+    return None
 
 
 def _find_anexo_headings(lines):
@@ -344,24 +455,67 @@ def _find_anexo_headings(lines):
     return heads
 
 
-def _find_non_functional_zone(anexo_heads, total_lines):
+def _find_non_functional_zone(anexo_heads, top_headings, total_lines):
     """Acha, entre os títulos de anexo já localizados, um que bata com
     vocabulário de requisitos técnicos/não funcionais, limitado pelo
-    próximo título de anexo (ou pelo fim do documento)."""
+    próximo título (de anexo ou numerado de 1º nível) ou pelo fim do
+    documento.
+
+    107ª rodada (ver docstring do módulo, item 1): se nenhum ANEXO bater,
+    cai para procurar o mesmo vocabulário entre os títulos numerados de 1º
+    nível (top_headings) — cobre TRs que colocam os requisitos não
+    funcionais só numa seção do corpo do documento, sem ANEXO separado.
+    A comparação usa _squash (tolera corrupção de espaço em branco vinda
+    da extração do PDF) tanto no caminho do ANEXO quanto no fallback."""
     nf_start = None
     for i, s in anexo_heads:
-        if any(kw in _norm(s) for kw in NF_KEYWORDS):
+        if any(_squash(kw) in _squash(s) for kw in NF_KEYWORDS):
             nf_start = i
             break
+    if nf_start is None:
+        for i, _num, titulo in top_headings:
+            if any(_squash(kw) in _squash(titulo) for kw in NF_KEYWORDS):
+                nf_start = i
+                break
     if nf_start is None:
         return None
 
     nf_end = total_lines
-    for i, _ in anexo_heads:
+    limites = sorted(set([i for i, _ in anexo_heads] + [i for i, _, _ in top_headings]))
+    for i in limites:
         if i > nf_start:
             nf_end = i
             break
     return (nf_start, nf_end)
+
+
+def _repair_split_leaf_codes(lines):
+    """107ª rodada (ver docstring do módulo, item 3): conserta o padrão de
+    corrupção '<código terminado em 1 dígito> <1-2 dígitos soltos> <início
+    de frase em maiúscula>' (ex: '9.1.1 1 Permitir anexar...' deveria ser
+    '9.1.11 Permitir anexar...') antes de qualquer outra extração. Reparo
+    conservador: só funde quando o último segmento do código já capturado
+    tem exatamente 1 dígito (o padrão observado) — evita mexer em
+    descrições legítimas que por acaso começam com um número isolado.
+    Roda só no Formato 1 (narrativo); o Formato 2 (tabular) tem sintaxe
+    própria e não passa por aqui. Retorna (linhas_reparadas, lista de
+    (código_original, código_corrigido)) para o chamador poder avisar o
+    usuário de quais códigos foram reconstruídos automaticamente."""
+    out = []
+    repairs = []
+    for line in lines:
+        s = line.strip()
+        m = SPLIT_CODE_RE.match(s)
+        if m:
+            codigo, digito_solto, resto = m.group(1), m.group(2), m.group(3)
+            partes = codigo.split(".")
+            if len(partes[-1]) == 1:
+                novo_codigo = ".".join(partes[:-1] + [partes[-1] + digito_solto])
+                out.append(f"{novo_codigo} {resto}")
+                repairs.append((codigo, novo_codigo))
+                continue
+        out.append(line)
+    return out, repairs
 
 
 # ---------------------------------------------------------------- extração dos itens
@@ -473,23 +627,37 @@ def parse_tr_document(raw_bytes, filename):
             )
     else:
         # Formato 1 (narrativo) — ver docstring do módulo.
+        # 107ª rodada, item 3: conserta códigos quebrados pela extração do PDF
+        # antes de qualquer outra análise (ver _repair_split_leaf_codes).
+        lines, codigos_reparados = _repair_split_leaf_codes(lines)
+
         anexo_heads = _find_anexo_headings(lines)
-        func_zone = _find_functional_zone(lines)
-        nf_zone = _find_non_functional_zone(anexo_heads, len(lines))
+        top_headings = _find_top_headings(lines)
+        # 107ª rodada, item 2: um título explícito do catálogo de funcionalidades
+        # (FUNC_KEYWORDS) tem prioridade sobre a heurística genérica de "maior
+        # sequência numerada consecutiva" — evita vazar para seções administrativas.
+        explicit_func = _find_explicit_func_heading(top_headings)
+        func_zone = [explicit_func] if explicit_func else _find_functional_zone(top_headings)
+        nf_zone = _find_non_functional_zone(anexo_heads, top_headings, len(lines))
 
         if func_zone:
             start_line = func_zone[0][0]
             # limite da zona funcional: o anexo de requisitos não funcionais, se achado;
-            # senão, o próximo título de anexo qualquer (evita "vazar" para dentro de um
-            # anexo não reconhecido); senão, uma janela de segurança.
-            proximo_anexo = next((i for i, _ in anexo_heads if i > func_zone[-1][0]), None)
+            # o próximo título de anexo qualquer (evita "vazar" para dentro de um anexo
+            # não reconhecido); o próximo título numerado de 1º nível (107ª rodada —
+            # evita vazar para a próxima seção administrativa/contratual); senão, uma
+            # janela de segurança. Usa o menor desses limites.
+            candidatos_fim = []
             if nf_zone:
-                end_line = nf_zone[0]
-            elif proximo_anexo is not None:
-                end_line = proximo_anexo
-            else:
-                end_line = func_zone[-1][0] + 400
-            end_line = min(end_line, len(lines))
+                candidatos_fim.append(nf_zone[0])
+            proximo_anexo = next((i for i, _ in anexo_heads if i > func_zone[-1][0]), None)
+            if proximo_anexo is not None:
+                candidatos_fim.append(proximo_anexo)
+            proximo_heading = next((i for i, _n, _t in top_headings if i > func_zone[-1][0]), None)
+            if proximo_heading is not None:
+                candidatos_fim.append(proximo_heading)
+            candidatos_fim.append(func_zone[-1][0] + 400)  # janela de segurança
+            end_line = min(min(candidatos_fim), len(lines))
             for it in _extract_leaf_items(lines, start_line, end_line):
                 itens.append(_build_item(it["codigo"], it["texto"], it["modulo_origem"], "RF", "Funcional"))
         else:
@@ -504,8 +672,17 @@ def parse_tr_document(raw_bytes, filename):
                 itens.append(_build_item(it["codigo"], it["texto"], it["modulo_origem"], "RNF", "Não Funcional"))
         else:
             avisos.append(
-                "Não foi encontrado um anexo de 'Requisitos Técnicos'/'Requisitos Não Funcionais' — "
-                "se o seu TR tiver essa seção com outro nome, os itens dela não foram capturados."
+                "Não foi encontrado um anexo nem uma seção numerada de 'Requisitos Técnicos'/"
+                "'Requisitos Não Funcionais' — se o seu TR tiver essa seção com outro nome, os "
+                "itens dela não foram capturados."
+            )
+
+        if codigos_reparados:
+            exemplos = ", ".join(f"{a}→{b}" for a, b in codigos_reparados[:5])
+            avisos.append(
+                f"{len(codigos_reparados)} código(s) foram reconstruídos automaticamente a partir de "
+                f"um problema de extração de texto do PDF, que às vezes quebra um código em dois "
+                f"pedaços (ex: {exemplos}) — revise esses itens com atenção."
             )
 
     if not itens:
