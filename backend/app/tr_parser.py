@@ -170,12 +170,17 @@ TOP_HEADING_RE = re.compile(r"^(\d{1,2})\.\s*(.{4,90}?):?\s*$")
 LEAF_RE = re.compile(r"^(\d{1,2}(?:\.\d{1,3}){1,4})\.?\s+(.{2,}?)\s*$")
 ANEXO_RE = re.compile(r"^ANEXO\s+\S{1,15}\s*[\-–—]\s*(.{3,120})$", re.IGNORECASE)
 
-# 107ª rodada — ver docstring do módulo, item 3: código hierárquico
-# terminado em 1 dígito, seguido de um token solto de 1-2 dígitos, seguido
-# de início de frase em maiúscula — assinatura do bug de extração do pypdf
-# que quebra o último segmento de um código de 2 dígitos em dois tokens.
+# 107ª/108ª rodada — ver docstring do módulo, item 3: código hierárquico
+# terminado em 1 dígito, seguido de um token solto de 1-2 dígitos (o resto
+# do dígito que faltava), opcionalmente seguido de mais segmentos de
+# hierarquia já corretos (ex: o ".1" de um subitem do item quebrado),
+# seguido de início de frase em maiúscula — assinatura do bug de extração
+# do pypdf que quebra o último segmento de um código de 2 dígitos em dois
+# tokens. Ex: "9.2.1 1 Controle..." (item "9.2.11", sem subitem) e
+# "9.2.1 1.1 A SOLUÇÃO..." (subitem "9.2.11.1" do mesmo item quebrado) —
+# o grupo 3 (hierarquia extra) cobre o 2º caso.
 SPLIT_CODE_RE = re.compile(
-    r"^(\d{1,2}(?:\.\d{1,3}){1,4})\s(\d{1,2})\.?\s+([A-ZÀ-Ý].*)$"
+    r"^(\d{1,2}(?:\.\d{1,3}){1,4})\s(\d{1,2})((?:\.\d{1,3})*)\.?\s+([A-ZÀ-Ý].*)$"
 )
 
 # ---- Formato 2 (tabular): ver docstring do módulo.
@@ -490,27 +495,33 @@ def _find_non_functional_zone(anexo_heads, top_headings, total_lines):
 
 
 def _repair_split_leaf_codes(lines):
-    """107ª rodada (ver docstring do módulo, item 3): conserta o padrão de
-    corrupção '<código terminado em 1 dígito> <1-2 dígitos soltos> <início
-    de frase em maiúscula>' (ex: '9.1.1 1 Permitir anexar...' deveria ser
-    '9.1.11 Permitir anexar...') antes de qualquer outra extração. Reparo
-    conservador: só funde quando o último segmento do código já capturado
-    tem exatamente 1 dígito (o padrão observado) — evita mexer em
-    descrições legítimas que por acaso começam com um número isolado.
-    Roda só no Formato 1 (narrativo); o Formato 2 (tabular) tem sintaxe
-    própria e não passa por aqui. Retorna (linhas_reparadas, lista de
-    (código_original, código_corrigido)) para o chamador poder avisar o
-    usuário de quais códigos foram reconstruídos automaticamente."""
+    """107ª/108ª rodada (ver docstring do módulo, item 3): conserta o padrão
+    de corrupção '<código terminado em 1 dígito> <1-2 dígitos soltos>
+    [<mais segmentos de hierarquia>] <início de frase em maiúscula>' antes
+    de qualquer outra extração — cobre tanto o próprio item quebrado (ex:
+    '9.1.1 1 Permitir anexar...' deveria ser '9.1.11 Permitir anexar...')
+    quanto os SUBITENS desse item quebrado, que ficam com o mesmo prefixo
+    errado (ex: '9.2.1 1.1 A SOLUÇÃO deverá...' deveria ser '9.2.11.1 A
+    SOLUÇÃO deverá...' — 108ª rodada: sem isso, vários subitens de um
+    mesmo item quebrado colidiam todos no código do item errado, ex:
+    8 subitens diferentes todos caindo em 'RF-9.2.1'). Reparo conservador:
+    só funde quando o último segmento do código já capturado tem
+    exatamente 1 dígito (o padrão observado) — evita mexer em descrições
+    legítimas que por acaso começam com um número isolado. Roda só no
+    Formato 1 (narrativo); o Formato 2 (tabular) tem sintaxe própria e não
+    passa por aqui. Retorna (linhas_reparadas, lista de (código_original,
+    código_corrigido)) para o chamador poder avisar o usuário de quais
+    códigos foram reconstruídos automaticamente."""
     out = []
     repairs = []
     for line in lines:
         s = line.strip()
         m = SPLIT_CODE_RE.match(s)
         if m:
-            codigo, digito_solto, resto = m.group(1), m.group(2), m.group(3)
+            codigo, digito_solto, hierarquia_extra, resto = m.group(1), m.group(2), m.group(3), m.group(4)
             partes = codigo.split(".")
             if len(partes[-1]) == 1:
-                novo_codigo = ".".join(partes[:-1] + [partes[-1] + digito_solto])
+                novo_codigo = ".".join(partes[:-1] + [partes[-1] + digito_solto]) + hierarquia_extra
                 out.append(f"{novo_codigo} {resto}")
                 repairs.append((codigo, novo_codigo))
                 continue
@@ -645,8 +656,13 @@ def parse_tr_document(raw_bytes, filename):
             # limite da zona funcional: o anexo de requisitos não funcionais, se achado;
             # o próximo título de anexo qualquer (evita "vazar" para dentro de um anexo
             # não reconhecido); o próximo título numerado de 1º nível (107ª rodada —
-            # evita vazar para a próxima seção administrativa/contratual); senão, uma
-            # janela de segurança. Usa o menor desses limites.
+            # evita vazar para a próxima seção administrativa/contratual). Usa o menor
+            # desses limites REAIS — a janela de segurança de 400 linhas só entra se
+            # NENHUM limite real foi achado (108ª rodada — bug corrigido: um catálogo de
+            # funcionalidades legítimo pode ter bem mais de 400 linhas, ex: a seção 9 do
+            # edital de Campinas tem ~3200 linhas; incluir a janela de segurança no min()
+            # sempre cortava o catálogo bem antes do limite real, perdendo a maior parte
+            # dos itens sem nenhum aviso).
             candidatos_fim = []
             if nf_zone:
                 candidatos_fim.append(nf_zone[0])
@@ -656,7 +672,8 @@ def parse_tr_document(raw_bytes, filename):
             proximo_heading = next((i for i, _n, _t in top_headings if i > func_zone[-1][0]), None)
             if proximo_heading is not None:
                 candidatos_fim.append(proximo_heading)
-            candidatos_fim.append(func_zone[-1][0] + 400)  # janela de segurança
+            if not candidatos_fim:
+                candidatos_fim.append(func_zone[-1][0] + 400)  # janela de segurança (só como último recurso)
             end_line = min(min(candidatos_fim), len(lines))
             for it in _extract_leaf_items(lines, start_line, end_line):
                 itens.append(_build_item(it["codigo"], it["texto"], it["modulo_origem"], "RF", "Funcional"))
