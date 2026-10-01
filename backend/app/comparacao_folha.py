@@ -36,10 +36,28 @@ from . import db
 # Rubricas, mas aparecendo como Divergente na Comparação Folha).
 # Corrigido tolerando os dois formatos: compara como texto primeiro (caminho
 # mais comum e mais rápido, cobre os casos raros de código não-numérico) e
-# só cai pro cast numérico (ignora zero à esquerda) quando os dois lados são
-# só dígitos — nunca quebra pra um código que não seja puramente numérico.
+# só cai pro fallback (ignora zero à esquerda) quando os dois lados são só
+# dígitos — nunca quebra pra um código que não seja puramente numérico.
+#
+# 104ª rodada — bug real em produção (visto pelo usuário: 500 ao abrir o
+# Dashboard de Comparação Folha depois de escolher a competência): a versão
+# original deste fallback usava CAST para ::bigint pra ignorar zero à
+# esquerda ("57" = "00057"), mas um código puramente numérico malformado com
+# muitos dígitos (ex: um valor de ~20 dígitos vindo torto da planilha, bem
+# mais longo que um código de rubrica de verdade) estoura o limite do tipo
+# bigint do Postgres (até ~9,2 quintilhões, ~19 dígitos) — e isso não dá um
+# resultado errado, dá ERRO DE BANCO, que quebra a consulta inteira e derruba
+# a tela inteira do Dashboard (não só aquele código problemático). Trocado o
+# CAST por uma comparação só de texto removendo os zeros à esquerda
+# (LTRIM ... '0'), que ignora zero à esquerda do mesmo jeito mas é só
+# manipulação de string — não tem limite de tamanho, nunca estoura. O
+# NULLIF/COALESCE trata o caso de um código feito só de zeros (ex: "000"),
+# que o LTRIM reduziria a string vazia.
 def _codigo_igual_sql(col_a, col_b):
-    return f"({col_a} = {col_b} OR ({col_a} ~ '^[0-9]+$' AND {col_b} ~ '^[0-9]+$' AND {col_a}::bigint = {col_b}::bigint))"
+    sem_zeros_a = f"COALESCE(NULLIF(LTRIM({col_a}, '0'), ''), '0')"
+    sem_zeros_b = f"COALESCE(NULLIF(LTRIM({col_b}, '0'), ''), '0')"
+    return (f"({col_a} = {col_b} OR ({col_a} ~ '^[0-9]+$' AND {col_b} ~ '^[0-9]+$' "
+            f"AND {sem_zeros_a} = {sem_zeros_b}))")
 
 # 94ª rodada — pedido do usuário: no quadro "Comparação por Tipo de Rubrica"
 # do Dashboard, os valores de SITUACAO abaixo passaram a contar como uma
