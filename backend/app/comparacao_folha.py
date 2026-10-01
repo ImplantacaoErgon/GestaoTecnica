@@ -47,17 +47,40 @@ from . import db
 # mais longo que um código de rubrica de verdade) estoura o limite do tipo
 # bigint do Postgres (até ~9,2 quintilhões, ~19 dígitos) — e isso não dá um
 # resultado errado, dá ERRO DE BANCO, que quebra a consulta inteira e derruba
-# a tela inteira do Dashboard (não só aquele código problemático). Trocado o
-# CAST por uma comparação só de texto removendo os zeros à esquerda
-# (LTRIM ... '0'), que ignora zero à esquerda do mesmo jeito mas é só
-# manipulação de string — não tem limite de tamanho, nunca estoura. O
-# NULLIF/COALESCE trata o caso de um código feito só de zeros (ex: "000"),
-# que o LTRIM reduziria a string vazia.
+# a tela inteira do Dashboard (não só aquele código problemático).
+#
+# 105ª rodada — o conserto acima (texto com LTRIM em vez de CAST) tirou o
+# erro de banco, mas revelou um SEGUNDO problema, mais sério, escondido atrás
+# do primeiro: essa comparação é usada dentro de EXISTS/NOT EXISTS
+# correlacionados (ver _RUBRICA_EM_LEVANTAMENTO_SQL e as 4 consultas de
+# Cobertura de Mapeamento mais abaixo), reavaliados para CADA linha da tabela
+# maior (comparacao_folha chega a ~250-300 mil linhas por competência em
+# produção). Uma expressão com OR + regex + LTRIM não é "sargable" (o
+# Postgres não consegue usar índice nenhum pra resolver), então o banco
+# caía pra varredura completa da tabela menor (rubricas) pra CADA uma das
+# ~300 mil linhas da tabela maior — reproduzido localmente com dados em
+# escala de produção (250 mil linhas): consulta não termina nem depois de
+# 90s (o timeout de produção, 60s, batia exatamente com isso). Antes da
+# 100ª/101ª rodada isso usava igualdade simples de texto (col_a = col_b),
+# que o Postgres SABE resolver com os índices que já existiam
+# (idx_rubricas_codigo_ergon, idx_comparacao_folha_rubrica_ergon) — a
+# correção de zero à esquerda que resolveu o bug do usuário acabou tirando
+# a capacidade do banco de usar esses índices.
+#
+# Corrigido criando uma função SQL própria pra normalização (remove zero à
+# esquerda de código puramente numérico, mantém como está se não for) —
+# normaliza_codigo_rubrica(), ver migration_036 — marcada IMMUTABLE, o que
+# permite criar um ÍNDICE FUNCIONAL sobre ela nas duas tabelas
+# (idx_rubricas_codigo_ergon_norm, idx_rubricas_verba_legado_norm,
+# idx_comparacao_folha_rubrica_ergon_norm,
+# idx_comparacao_folha_verba_consist_norm). Com os dois lados da comparação
+# usando a MESMA função e havendo índice funcional dos dois lados, o
+# Postgres volta a conseguir resolver por índice — testado com EXPLAIN
+# ANALYZE (ver nota de rodapé do arquivo de migração) que o plano de
+# execução usa os novos índices, e a mesma consulta que não terminava em
+# 90s com 250 mil linhas passou a rodar em menos de 1s.
 def _codigo_igual_sql(col_a, col_b):
-    sem_zeros_a = f"COALESCE(NULLIF(LTRIM({col_a}, '0'), ''), '0')"
-    sem_zeros_b = f"COALESCE(NULLIF(LTRIM({col_b}, '0'), ''), '0')"
-    return (f"({col_a} = {col_b} OR ({col_a} ~ '^[0-9]+$' AND {col_b} ~ '^[0-9]+$' "
-            f"AND {sem_zeros_a} = {sem_zeros_b}))")
+    return f"(normaliza_codigo_rubrica({col_a}) = normaliza_codigo_rubrica({col_b}))"
 
 # 94ª rodada — pedido do usuário: no quadro "Comparação por Tipo de Rubrica"
 # do Dashboard, os valores de SITUACAO abaixo passaram a contar como uma
