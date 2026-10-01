@@ -127,6 +127,42 @@ nesta rodada:
      contra o TR de Campinas: exatamente 16 ocorrências no documento,
      todas validadas manualmente (o código corrigido sempre encaixa na
      sequência numérica vizinha, ex: ...9.1.10, 9.1.11, 9.1.12...).
+
+110ª rodada — pedido do usuário (após aplicar a 109ª rodada em produção):
+"os itens no sistema ficaram com textos quebrados, pois foi carregado
+apenas a 1ª linha de requisito, enquanto que o requisito real possui mais
+de uma linha e ainda há quebras dentro do requisito [...] itens de lista".
+Causa: _extract_leaf_items (Formato 1 — narrativo) lia uma linha de cada
+vez e, ao achar uma linha que NÃO começava com um código hierárquico
+("N.N.N ..."), simplesmente a descartava — funcionava bem quando a
+descrição do item cabia inteira numa única linha do PDF, mas perdia todo
+o resto sempre que a descrição continuava na(s) linha(s) seguinte(s) (quebra
+natural de parágrafo) ou incluía uma lista (cada item da lista vira sua
+própria linha no texto extraído, sem nenhum marcador de bullet — o
+caractere "•" se perde na extração do pypdf). Agora toda linha que não é
+nem um novo item (LEAF_RE) nem um título de módulo (TOP_HEADING_RE) é
+tratada como CONTINUAÇÃO do item em andamento e concatenada à sua
+descrição, até aparecer o próximo item/título.
+
+Essa concatenação expôs dois tipos de "ruído" que antes ficavam
+confinados a uma única linha descartável e agora precisavam ser
+filtrados pra não grudar no meio da descrição: (a) o carimbo de rodapé de
+impressão típico de sistemas de protocolo eletrônico (ex: SEI —
+"Sistema Eletrônico de Informações", usado por muitos órgãos públicos
+brasileiros): uma linha "DD/MM/AAAA, HH:MM <sistema> - <processo> -
+<título>" seguida do link de impressão com o número de página colado no
+fim; e (b) o cabeçalho da tabela ("DESCRIÇÃO DAS FUNCIONALIDADES" / "GRAU
+DE IMPOR TÂNCIA") que se repete a cada página/subseção. _clean_noise_lines
+remove essas linhas antes de qualquer extração (roda uma vez, pros dois
+formatos — o Formato 2/tabular também acumula texto ao longo de várias
+linhas e também se beneficia de não ter esse ruído misturado).
+
+Por fim, o grau de importância (Essencial/Desejável Alto/Médio/Baixo),
+que no PDF é a 2ª coluna da tabela mas sai GRUDADO sem espaço no fim do
+texto da 1ª coluna (ex: "...e as regras vigentes da época.Essencial"),
+agora é reconhecido e separado para uma anotação limpa no fim da
+descrição — "(Grau no TR: Essencial)" — em vez de ficar colado sem
+espaço ao texto real (mesmo padrão já usado para o Prazo no Formato 2).
 """
 import io
 import re
@@ -181,6 +217,34 @@ ANEXO_RE = re.compile(r"^ANEXO\s+\S{1,15}\s*[\-–—]\s*(.{3,120})$", re.IGNORE
 # o grupo 3 (hierarquia extra) cobre o 2º caso.
 SPLIT_CODE_RE = re.compile(
     r"^(\d{1,2}(?:\.\d{1,3}){1,4})\s(\d{1,2})((?:\.\d{1,3})*)\.?\s+([A-ZÀ-Ý].*)$"
+)
+
+# 110ª rodada — ver docstring do módulo: ruído de PDF a limpar ANTES de
+# qualquer extração (não é específico de um formato — ajuda tanto o
+# Formato 1 quanto o Formato 2, que também concatenam texto ao longo de
+# várias linhas). Carimbo de rodapé tipo SEI ("DD/MM/AAAA, HH:MM <sistema>
+# - <processo> - <título>") — às vezes grudado sem espaço no fim de uma
+# linha de conteúdo real, às vezes sozinho numa linha; o link de impressão
+# (com o número de página colado no fim) costuma vir logo depois.
+FOOTER_STAMP_RE = re.compile(r"\d{2}/\d{2}/\d{4},\s*\d{1,2}:\d{2}\s")
+FOOTER_URL_RE = re.compile(r"^https?://\S")
+# Cabeçalho de coluna da tabela de requisitos, repetido a cada página/
+# subseção — comparado via _squash (tolera corrupção de espaço, ex:
+# "IMPOR TÂNCIA").
+TABLE_HEADER_FRAGMENTS_SQ = [
+    "DESCRICAODASFUNCIONALIDADES", "GRAUDE", "IMPORTANCIA",
+    "DESCRICAODASFUNCIONALIDADESGRAUDE",  # as 2 primeiras colunas saem grudadas numa linha só
+]
+
+# Grau de importância (coluna 2 da tabela) — no texto extraído sai GRUDADO
+# sem espaço no fim da descrição da coluna 1 (ex: "...vigentes da
+# época.Essencial"); numa quebra de página no meio do item, pode até
+# aparecer colado no MEIO do texto (não só no fim) — ver _extract_grau.
+# O lookbehind (?<=\S) exige que não haja espaço antes — é essa ausência de
+# espaço que identifica o artefato de extração, não uma frase legítima que
+# use essa palavra (que viria com espaço antes, e por isso não é tocada).
+GRAU_RE = re.compile(
+    r"(?<=\S)(Essencial|Desej[aá]vel\s+(?:Alto|M[eé]dio|Baixo))", re.IGNORECASE
 )
 
 # ---- Formato 2 (tabular): ver docstring do módulo.
@@ -494,6 +558,33 @@ def _find_non_functional_zone(anexo_heads, top_headings, total_lines):
     return (nf_start, nf_end)
 
 
+def _clean_noise_lines(lines):
+    """110ª rodada (ver docstring do módulo): remove ruído de extração do
+    PDF que não é conteúdo de requisito nenhum — carimbo de rodapé de
+    impressão (data/hora + sistema + link, estilo SEI) e cabeçalho de
+    coluna de tabela repetido a cada página. Roda cedo, antes de qualquer
+    outra análise, pros dois formatos (narrativo e tabular) se beneficiarem
+    — ambos acumulam texto ao longo de várias linhas e ambos perderiam
+    qualidade se esse ruído ficasse misturado no meio do conteúdo real."""
+    out = []
+    for line in lines:
+        s = line
+        m = FOOTER_STAMP_RE.search(s)
+        if m:
+            # mantém só o que vem ANTES do carimbo (pode ser conteúdo real
+            # grudado sem espaço, ex: "...época.Essencial09/01/2025...") —
+            # o carimbo e tudo depois dele (inclui o link/nº de página) é
+            # sempre ruído.
+            s = s[: m.start()]
+        s_stripped = s.strip()
+        if s_stripped and FOOTER_URL_RE.match(s_stripped):
+            s_stripped = ""
+        if s_stripped and _squash(s_stripped) in TABLE_HEADER_FRAGMENTS_SQ:
+            s_stripped = ""
+        out.append(s_stripped)
+    return out
+
+
 def _repair_split_leaf_codes(lines):
     """107ª/108ª rodada (ver docstring do módulo, item 3): conserta o padrão
     de corrupção '<código terminado em 1 dígito> <1-2 dígitos soltos>
@@ -534,6 +625,10 @@ def _repair_split_leaf_codes(lines):
 def _extract_leaf_items(lines, start_line, end_line):
     raw = []
     current_top = None
+    # 110ª rodada (ver docstring do módulo): item que está acumulando linhas
+    # de continuação no momento — None quando a linha anterior foi um
+    # título de módulo (ou quando ainda não achamos nenhum item).
+    current = None
     for i in range(start_line, end_line):
         s = lines[i].strip()
         if not s:
@@ -544,13 +639,48 @@ def _extract_leaf_items(lines, start_line, end_line):
             m_top = TOP_HEADING_RE.match(s)
             if m_top:
                 current_top = f"{m_top.group(1)}. {m_top.group(2).strip()}"
+                current = None
+                continue
+            # 110ª rodada: não é um novo item nem um título — é CONTINUAÇÃO
+            # do item em andamento (quebra de linha natural do PDF, inclusive
+            # cada item de uma lista dentro da descrição, que sai sem nenhum
+            # marcador de bullet na extração). Acumula em vez de descartar —
+            # antes dessa rodada, qualquer linha que não começasse com um
+            # código era simplesmente jogada fora, truncando a descrição na
+            # 1ª linha sempre que ela continuava no PDF.
+            if current is not None:
+                current["frags"].append(s)
             continue
         codigo, texto = m.group(1), m.group(2).strip()
         depth = codigo.count(".") + 1
         if depth == 1:
             current_top = f"{codigo}. {texto}"
+            current = None
             continue
-        raw.append({"codigo": codigo, "texto": texto, "depth": depth, "top": current_top})
+        item = {"codigo": codigo, "frags": [texto], "depth": depth, "top": current_top}
+        raw.append(item)
+        current = item
+
+    # junta os fragmentos acumulados de cada item num texto só, e separa o
+    # grau de importância (normalmente grudado sem espaço no fim; mais raro,
+    # pode aparecer grudado no MEIO do texto quando uma quebra de página cai
+    # bem ali — por isso varre o texto inteiro, não só o fim, e remove toda
+    # ocorrência encontrada, ficando com a última como o grau do item).
+    for r in raw:
+        texto_completo = " ".join(f for f in r["frags"] if f).strip()
+        grau = None
+        pedacos = []
+        fim_anterior = 0
+        for m in GRAU_RE.finditer(texto_completo):
+            pedacos.append(texto_completo[fim_anterior:m.start()])
+            grau = re.sub(r"\s+", " ", m.group(1)).strip()
+            fim_anterior = m.end()
+        if grau is not None:
+            pedacos.append(texto_completo[fim_anterior:])
+            texto_completo = re.sub(r"\s+", " ", "".join(pedacos)).strip()
+        r["grau"] = grau
+        r["texto"] = texto_completo
+        del r["frags"]
 
     codes = {r["codigo"] for r in raw}
 
@@ -577,6 +707,7 @@ def _extract_leaf_items(lines, start_line, end_line):
             "codigo": r["codigo"],
             "texto": r["texto"],
             "modulo_origem": " > ".join(path) if path else None,
+            "grau": r["grau"],
         })
     return final
 
@@ -590,12 +721,18 @@ def _titulo_from_texto(texto):
     return base
 
 
-def _build_item(codigo, texto, modulo_origem, prefixo, tipo, prazo=None):
+def _build_item(codigo, texto, modulo_origem, prefixo, tipo, prazo=None, grau=None):
     descricao = texto
     if prazo:
         # requisitos_tr não tem coluna própria pra isso — anexa ao final da
         # descrição pra não perder essa informação do TR original.
         descricao = f"{texto} (Prazo no TR: {prazo})"
+    if grau:
+        # 110ª rodada — mesma lógica do Prazo acima: requisitos_tr não tem
+        # coluna própria pro grau de importância (Essencial/Desejável
+        # Alto/Médio/Baixo), então anexa como anotação limpa em vez de
+        # deixar grudado sem espaço no fim do texto (ver GRAU_RE).
+        descricao = f"{descricao} (Grau no TR: {grau})"
     return {
         "codigo": f"{prefixo}-{codigo}",
         "titulo": _titulo_from_texto(texto),
@@ -613,6 +750,10 @@ def parse_tr_document(raw_bytes, filename):
     frente_trabalho_id, classificacao/atendimento/status default)."""
     text = extract_text(raw_bytes, filename)
     lines = text.split("\n")
+    # 110ª rodada — ver docstring do módulo: remove ruído de PDF (carimbo de
+    # rodapé, cabeçalho de tabela repetido) antes de qualquer outra análise,
+    # pros dois formatos.
+    lines = _clean_noise_lines(lines)
     avisos = []
 
     itens = []
@@ -676,7 +817,7 @@ def parse_tr_document(raw_bytes, filename):
                 candidatos_fim.append(func_zone[-1][0] + 400)  # janela de segurança (só como último recurso)
             end_line = min(min(candidatos_fim), len(lines))
             for it in _extract_leaf_items(lines, start_line, end_line):
-                itens.append(_build_item(it["codigo"], it["texto"], it["modulo_origem"], "RF", "Funcional"))
+                itens.append(_build_item(it["codigo"], it["texto"], it["modulo_origem"], "RF", "Funcional", grau=it["grau"]))
         else:
             avisos.append(
                 "Não foi possível identificar automaticamente o catálogo de funcionalidades "
@@ -686,7 +827,7 @@ def parse_tr_document(raw_bytes, filename):
         if nf_zone:
             start_line, end_line = nf_zone
             for it in _extract_leaf_items(lines, start_line, end_line):
-                itens.append(_build_item(it["codigo"], it["texto"], it["modulo_origem"], "RNF", "Não Funcional"))
+                itens.append(_build_item(it["codigo"], it["texto"], it["modulo_origem"], "RNF", "Não Funcional", grau=it["grau"]))
         else:
             avisos.append(
                 "Não foi encontrado um anexo nem uma seção numerada de 'Requisitos Técnicos'/"
