@@ -29,24 +29,33 @@ isso o prompt abaixo pede explicitamente à IA para citar o código de cada
 requisito em que baseou a resposta, e para deixar claro que a palavra final é
 do consultor quando a pergunta envolver escopo.
 
-Reaproveita EXATAMENTE a mesma configuração do Relatório Executivo
+Reaproveita a mesma configuração do Relatório Executivo
 (ANTHROPIC_API_KEY/ANTHROPIC_MODEL, ver .env.example) — nenhuma variável de
-ambiente nova. Uma única chave/conta da Anthropic para o backend inteiro
-(não por projeto/cliente) — mesmo modelo já usado em relatorio_executivo.py,
-seguido aqui de propósito para não introduzir uma segunda forma de configurar
-a mesma coisa.
+ambiente nova pra Anthropic. Uma única chave/conta da Anthropic para o
+backend inteiro (não por projeto/cliente) — mesmo modelo já usado em
+relatorio_executivo.py.
+
+105ª/106ª rodada — pedido do usuário (depois de ver o recurso ficar
+indisponível por falta de crédito na Anthropic, 99ª/100ª rodada): "tem como
+usar a Anthropic e/ou OpenAI se uma não puder? Caso não tenha créditos a
+Anthropic usar a OpenAI?" A chamada de IA em si (com o fallback automático
+pra OpenAI quando configurado) saiu deste arquivo e virou
+app/ia_provider.py, compartilhado com relatorio_executivo.py — ver aquele
+módulo para os detalhes de como o fallback funciona e quais variáveis de
+ambiente ele usa (ANTHROPIC_API_KEY/ANTHROPIC_MODEL, OPENAI_API_KEY/
+OPENAI_MODEL).
 
 Cada pergunta é gravada em requisitos_ia_perguntas (requisitos considerados,
 pergunta, resposta, tokens de entrada/saída e custo estimado, quem
 perguntou) — dá histórico/auditoria na própria tela e evita pagar de novo por
-uma pergunta já respondida antes (ver listar_historico()).
+uma pergunta já respondida antes (ver listar_historico()). O campo
+`modelo_ia` grava o modelo que respondeu DE FATO (Anthropic ou, se caiu no
+fallback, OpenAI) — é esse campo que, na tela, mostra pro consultor que a
+resposta veio do fallback, sem precisar de coluna nova.
 """
 import json
-import os
 
-from . import db
-
-ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
+from . import db, ia_provider
 
 # Teto de requisitos por pergunta — proteção de custo/contexto (não é sobre o
 # limite técnico do modelo, que aguenta muito mais texto que isso; é para
@@ -55,30 +64,9 @@ ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929"
 # mostra esse número e pede pra refinar o filtro quando ultrapassa.
 LIMITE_REQUISITOS_POR_PERGUNTA = 200
 
-# Preços por milhão de tokens (USD) — só para dar uma ESTIMATIVA de custo na
-# tela (pedido do usuário), não é a fatura real da Anthropic. Tabela oficial
-# consultada em platform.claude.com/docs/en/about-claude/pricing em
-# 30/09/2026 (data desta rodada) — preço de API muda com o tempo e este
-# dicionário não atualiza sozinho: se o valor mostrado na tela algum dia
-# parecer errado, confira a página oficial e atualize aqui.
-PRECOS_USD_POR_MILHAO_TOKENS = {
-    "claude-sonnet-4-5-20250929": {"entrada": 3.00, "saida": 15.00},
-    "claude-haiku-4-5": {"entrada": 1.00, "saida": 5.00},
-}
-# Fallback se ANTHROPIC_MODEL for trocado para um modelo fora da tabela acima
-# (evita KeyError — mostra uma estimativa no valor do Sonnet, conservadora
-# para a maioria dos modelos atuais, em vez de quebrar a tela).
-_PRECO_PADRAO = {"entrada": 3.00, "saida": 15.00}
-
 
 class RequisitosIAError(Exception):
     pass
-
-
-def _estimar_custo_usd(modelo, tokens_entrada, tokens_saida):
-    preco = PRECOS_USD_POR_MILHAO_TOKENS.get(modelo, _PRECO_PADRAO)
-    custo = tokens_entrada * preco["entrada"] / 1_000_000 + tokens_saida * preco["saida"] / 1_000_000
-    return round(custo, 4)
 
 
 def _montar_prompt(requisitos, pergunta):
@@ -105,57 +93,6 @@ PERGUNTA DO CONSULTOR:
 {pergunta}
 
 Responda em português do Brasil, de forma objetiva e direta. Esta resposta é um candidato para revisão do consultor responsável, nunca uma decisão automática — se a pergunta envolver determinar se algo está dentro do escopo contratual do TR, deixe isso explícito na resposta e recomende confirmação humana antes de qualquer posicionamento formal com o cliente."""
-
-
-def _chamar_ia(prompt, max_tokens=2000):
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise RequisitosIAError(
-            "ANTHROPIC_API_KEY não configurada no backend. Gere uma chave em "
-            "console.anthropic.com e coloque-a no arquivo .env (veja o README, seção "
-            "\"Relatório Executivo (IA)\" — esta pergunta usa a mesma chave/modelo)."
-        )
-    try:
-        import anthropic
-    except ImportError:
-        raise RequisitosIAError(
-            "Pacote 'anthropic' não instalado na imagem do backend — rode "
-            "'docker compose up -d --build' após atualizar requirements.txt."
-        )
-    client = anthropic.Anthropic(api_key=api_key)
-    try:
-        resposta = client.messages.create(
-            model=ANTHROPIC_MODEL,
-            max_tokens=max_tokens,
-            messages=[{"role": "user", "content": prompt}],
-        )
-    except anthropic.AuthenticationError:
-        raise RequisitosIAError("Chave da API da Anthropic inválida ou expirada (ANTHROPIC_API_KEY).")
-    except anthropic.RateLimitError:
-        raise RequisitosIAError("Limite de uso da API da Anthropic atingido — tente novamente em alguns minutos.")
-    except anthropic.APIError as e:
-        # Caso visto em produção (99ª rodada): a API devolve um 400 cru tipo
-        # {'type':'error','error':{'type':'invalid_request_error','message':
-        # 'Your credit balance is too low...'}} — sem tratar, isso aparecia
-        # na tela pro consultor como um dump de JSON em inglês, sem dizer o
-        # que fazer. Detectamos esse caso específico pela mensagem (não tem
-        # um tipo de exceção próprio no SDK) e damos a instrução certa.
-        if "credit balance is too low" in str(e):
-            raise RequisitosIAError(
-                "Os créditos da conta da Anthropic acabaram — acesse console.anthropic.com "
-                "(menu Plans & Billing) e adicione créditos para voltar a perguntar. Isso usa a "
-                "mesma conta do Relatório Executivo (IA), que também fica indisponível até lá."
-            )
-        raise RequisitosIAError(f"Erro ao chamar a API da Anthropic: {e}")
-
-    texto = "".join(bloco.text for bloco in resposta.content if getattr(bloco, "type", None) == "text")
-    if not texto.strip():
-        raise RequisitosIAError("A IA retornou uma resposta vazia — tente perguntar novamente.")
-
-    usage = getattr(resposta, "usage", None)
-    tokens_entrada = int(getattr(usage, "input_tokens", 0) or 0)
-    tokens_saida = int(getattr(usage, "output_tokens", 0) or 0)
-    return texto, tokens_entrada, tokens_saida
 
 
 def perguntar(projeto_id, requisito_ids, pergunta, perguntado_por_id=None, perguntado_por_nome=None):
@@ -190,15 +127,18 @@ def perguntar(projeto_id, requisito_ids, pergunta, perguntado_por_id=None, pergu
         raise RequisitosIAError("Nenhum dos requisitos informados pertence a este projeto.")
 
     prompt = _montar_prompt(requisitos, pergunta)
-    resposta_texto, tokens_entrada, tokens_saida = _chamar_ia(prompt)
-    custo_usd = _estimar_custo_usd(ANTHROPIC_MODEL, tokens_entrada, tokens_saida)
+    try:
+        resposta_texto, tokens_entrada, tokens_saida, modelo_usado, _truncado = ia_provider.chamar_ia(prompt)
+    except ia_provider.IAProviderError as e:
+        raise RequisitosIAError(str(e))
+    custo_usd = ia_provider.estimar_custo_usd(modelo_usado, tokens_entrada, tokens_saida)
 
     row = db.execute_returning_one(
         "INSERT INTO requisitos_ia_perguntas "
         "(projeto_id, requisito_ids, qtd_requisitos, pergunta, resposta, modelo_ia, "
         "tokens_entrada, tokens_saida, custo_usd_estimado, perguntado_por, perguntado_por_nome) "
         f"VALUES ({db.q(projeto_id)}, {db.q(json.dumps(ids))}::jsonb, {db.q(len(requisitos))}, "
-        f"{db.q(pergunta)}, {db.q(resposta_texto)}, {db.q(ANTHROPIC_MODEL)}, "
+        f"{db.q(pergunta)}, {db.q(resposta_texto)}, {db.q(modelo_usado)}, "
         f"{db.q(tokens_entrada)}, {db.q(tokens_saida)}, {db.q(custo_usd)}, "
         f"{db.q(perguntado_por_id)}, {db.q(perguntado_por_nome)}) "
         "RETURNING *"

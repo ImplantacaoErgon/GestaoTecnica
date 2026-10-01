@@ -38,15 +38,13 @@ isso se o cliente já autorizou (ver README).
 """
 import json
 import math
-import os
 from datetime import date, timedelta
 
 import networkx as nx
 
-from . import db, cronograma_anomalias
+from . import db, cronograma_anomalias, ia_provider
 from .cpm import _dur_dias, _business_day_offset, dias_uteis_entre
 
-ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
 LIMITE_ATRASADAS_NO_PROMPT = 40  # não manda a lista inteira se o projeto tiver centenas — manda uma amostra + o total
 
 # Mesma família de status "concluído" de backend/app/main.py (duplicada aqui de propósito
@@ -617,82 +615,44 @@ def montar_prompt(dados):
 
 
 def chamar_ia(prompt):
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise RelatorioExecutivoError(
-            "ANTHROPIC_API_KEY não configurada no backend. Gere uma chave em "
-            "console.anthropic.com e coloque-a no arquivo .env (veja o README, seção "
-            "\"Relatório Executivo (IA)\")."
-        )
+    # 105ª/106ª rodada — a chamada em si (com fallback automático pra
+    # OpenAI quando a Anthropic falha e OPENAI_API_KEY está configurada)
+    # saiu daqui e virou app/ia_provider.py, compartilhado com
+    # requisitos_ia.py — ver aquele módulo para detalhes.
+    #
+    # max_tokens=8000 (não o default de 2000 do ia_provider): 52ª rodada,
+    # bug real encontrado — com 4000 o relatório vinha sendo cortado ANTES
+    # de chegar nas duas últimas seções (Migração de Dados / Folha de
+    # Pagamento — ver PROMPT_TEMPLATE, elas ficam no fim de propósito). Com
+    # 8 seções e uma tabela por item de migração, 4000 tokens ficou pequeno
+    # demais; 8000 dá folga confortável mesmo com bastante atividade
+    # atrasada/itens de migração listados.
     try:
-        import anthropic
-    except ImportError:
-        raise RelatorioExecutivoError(
-            "Pacote 'anthropic' não instalado na imagem do backend — rode "
-            "'docker compose up -d --build' após atualizar requirements.txt."
-        )
-    client = anthropic.Anthropic(api_key=api_key)
-    try:
-        resposta = client.messages.create(
-            model=ANTHROPIC_MODEL,
-            # 52ª rodada — bug real encontrado: com 4000 o relatório vinha sendo cortado
-            # ANTES de chegar nas duas últimas seções (Migração de Dados / Folha de
-            # Pagamento — ver PROMPT_TEMPLATE, elas ficam no fim de propósito). O sintoma
-            # era o quadro de Migração de Dados simplesmente sumir do relatório, sem
-            # nenhum erro — a IA nunca chegava a escrever aquele "##". Os logs de geração
-            # mostravam ~80s toda vez (perto do teto de tokens), o que é o padrão de uma
-            # resposta batendo no limite. Com 8 seções e uma tabela por item de migração,
-            # 4000 tokens ficou pequeno demais; 8000 dá folga confortável mesmo com
-            # bastante atividade atrasada/itens de migração listados.
-            max_tokens=8000,
-            messages=[{"role": "user", "content": prompt}],
-        )
-    except anthropic.AuthenticationError:
-        raise RelatorioExecutivoError("Chave da API da Anthropic inválida ou expirada (ANTHROPIC_API_KEY).")
-    except anthropic.RateLimitError:
-        raise RelatorioExecutivoError("Limite de uso da API da Anthropic atingido — tente novamente em alguns minutos.")
-    except anthropic.APIError as e:
-        # Mesmo tratamento dado em requisitos_ia.py (99ª rodada): a API
-        # devolve um 400 cru tipo {'type':'error','error':{'type':
-        # 'invalid_request_error','message':'Your credit balance is too
-        # low...'}} quando a conta fica sem créditos — sem isto, o
-        # consultor via esse JSON em inglês direto na tela, sem saber o que
-        # fazer. Não tem um tipo de exceção próprio no SDK para este caso,
-        # por isso a checagem é pela mensagem.
-        if "credit balance is too low" in str(e):
-            raise RelatorioExecutivoError(
-                "Os créditos da conta da Anthropic acabaram — acesse console.anthropic.com "
-                "(menu Plans & Billing) e adicione créditos para voltar a gerar relatórios. Isso "
-                "usa a mesma conta do recurso \"Perguntar à IA\" (tela Analisar Requisitos), que "
-                "também fica indisponível até lá."
-            )
-        raise RelatorioExecutivoError(f"Erro ao chamar a API da Anthropic: {e}")
-    if getattr(resposta, "stop_reason", None) == "max_tokens":
+        texto, tokens_entrada, tokens_saida, modelo_usado, truncado = ia_provider.chamar_ia(prompt, max_tokens=8000)
+    except ia_provider.IAProviderError as e:
+        raise RelatorioExecutivoError(str(e))
+    if truncado:
         # Não falha o relatório por causa disso (o texto gerado até aqui ainda pode ser
         # útil), mas registra no log pra não repetir o mesmo "quadro sumiu" sem
         # explicação — se isso aparecer de novo, é sinal de que o limite precisa subir
         # de novo (ou o prompt precisa ficar mais enxuto).
         print(
-            "[relatorio_executivo] AVISO: resposta da IA cortada por atingir max_tokens "
-            f"({resposta.usage.output_tokens if getattr(resposta, 'usage', None) else '?'} tokens gerados) — "
-            "o relatório pode estar incompleto (seções do fim, como Migração de Dados/Folha "
-            "de Pagamento, podem ter ficado de fora).",
+            f"[relatorio_executivo] AVISO: resposta da IA ({modelo_usado}) cortada por atingir o teto de "
+            f"tokens ({tokens_saida} tokens gerados) — o relatório pode estar incompleto (seções do fim, "
+            "como Migração de Dados/Folha de Pagamento, podem ter ficado de fora).",
             flush=True,
         )
-    texto = "".join(bloco.text for bloco in resposta.content if getattr(bloco, "type", None) == "text")
-    if not texto.strip():
-        raise RelatorioExecutivoError("A IA retornou uma resposta vazia — tente gerar novamente.")
-    return texto
+    return texto, modelo_usado
 
 
 def gerar_relatorio(projeto_id, gerado_por=None):
     """Coleta os dados, chama a IA, grava em relatorios_executivos e retorna a linha criada."""
     dados = coletar_dados_projeto(projeto_id)
     prompt = montar_prompt(dados)
-    conteudo_md = chamar_ia(prompt)
+    conteudo_md, modelo_usado = chamar_ia(prompt)
     row = db.execute_returning_one(
         "INSERT INTO relatorios_executivos (projeto_id, modelo_ia, conteudo_md, dados_enviados, gerado_por) "
-        f"VALUES ({db.q(projeto_id)}, {db.q(ANTHROPIC_MODEL)}, {db.q(conteudo_md)}, "
+        f"VALUES ({db.q(projeto_id)}, {db.q(modelo_usado)}, {db.q(conteudo_md)}, "
         f"{db.q(json.dumps(dados, ensure_ascii=False, default=str))}::jsonb, {db.q(gerado_por)}) RETURNING *"
     )
     return row
