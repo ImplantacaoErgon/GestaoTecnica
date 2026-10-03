@@ -63,13 +63,26 @@ Campos novos da 40ª rodada e como cada grupo se comporta:
   * Preenchendo uma data real pela primeira vez (estava vazia): neutro,
     opcional, com um relato padrão genérico — não dá pra classificar como
     "antes" ou "depois" de nada que ainda não existia.
+  * **(125ª rodada)** Se o % concluído RESULTANTE desta edição chega a
+    100% e o Fim Real RESULTANTE continua vazio, o relato passa a ser
+    OBRIGATÓRIO (texto digitado, nunca o rótulo padrão) mesmo que a
+    mudança em si fosse uma "melhora" — aqui o que precisa ficar
+    explicado é especificamente a ausência da Data de Fim Real. Pedido
+    explícito do usuário: "permita que nas atualizações em massa e na
+    própria página de Cronograma possamos atualizar as concluídas, mas
+    desde que com relato" — pensado para atividades concluídas antes do
+    acompanhamento atual do projeto, sem data real disponível. Sem essa
+    liberação, `validar_consistencia_conclusao()` travaria a edição
+    (exigindo a Data de Fim Real) mesmo com o relato presente.
   Além disso, se o resultado da edição já fecha a atividade (100% + Fim
-  Real preenchidos), o Status é recalculado sozinho pelas mesmas
-  `classificar_conclusao`/`validar_consistencia_conclusao` de
-  `main.py` usadas no modal individual (passadas por parâmetro pra evitar
-  import circular) — sem isso, o campo Status ficaria dessincronizado do
-  que os cards de Dashboard/Relatório Executivo leem. Status em si
-  continua NÃO editável diretamente nesta tela (assim como % e datas
+  Real preenchidos, OU 100% sem Fim Real com o relato acima), o Status é
+  recalculado sozinho pelas mesmas `classificar_conclusao`/
+  `validar_consistencia_conclusao` de `main.py` usadas no modal individual
+  (passadas por parâmetro pra evitar import circular) — sem isso, o campo
+  Status ficaria dessincronizado do que os cards de Dashboard/Relatório
+  Executivo leem. Sem Fim Real, a variante sempre cai em "Concluída" pura
+  (não dá pra saber se atrasou sem a data real para comparar). Status em
+  si continua NÃO editável diretamente nesta tela (assim como % e datas
   reais de uma atividade concluída/cancelada — ver trava acima): a
   automação só entra quando o RESULTADO da edição já fecha a conta.
 - **Recursos/participantes**: uma linha pode vir com `recursos_adicionar`/
@@ -251,7 +264,17 @@ def _avaliar_progresso(a, edicao_raw):
     ou data real adiada) ou só sugerido com texto padrão (melhora: %
     subindo ou data real antecipada; ou neutro, 1ª vez preenchendo a data).
     Não LEVANTA erro por relato faltando — isso só é cobrado em `aplicar()`,
-    depois que o preview já teve chance de avisar qual linha precisa."""
+    depois que o preview já teve chance de avisar qual linha precisa.
+
+    125ª rodada — também detecta aqui se o RESULTADO desta edição (mesclando
+    com o que já está gravado) fecha a atividade em 100% sem Fim Real
+    preenchido: pedido explícito do usuário pra permitir concluir sem a data
+    real, desde que com relato. Quando é o caso, força relato OBRIGATÓRIO
+    (texto digitado, não um rótulo padrão) mesmo que a mudança em si fosse
+    uma "melhora" (% subindo) — aqui o que falta explicar é especificamente a
+    ausência da Data de Fim Real, não o avanço do percentual. Devolve esse
+    sinalizador como 4º valor (`concluir_sem_data_real`), consumido por
+    `calcular()`/`aplicar()` e repassado a `validar_consistencia_conclusao`."""
     progresso = {}
     obrigatorio = False
     sugestoes = []
@@ -291,16 +314,24 @@ def _avaliar_progresso(a, edicao_raw):
                 obrigatorio = True
 
     if not progresso:
-        return {}, None, None
+        return {}, None, None, False
 
     ini_novo = progresso.get("dtini_real", {}).get("novo")
     fim_novo = progresso.get("dtfim_real", {}).get("novo")
     if ini_novo and fim_novo and _to_date(fim_novo) < _to_date(ini_novo):
         raise ValueError(f'"{a["nome"]}": Fim real não pode ser anterior ao Início real.')
 
+    percentual_resultante = progresso.get("percentual_concluido", {}).get(
+        "novo", int(a.get("percentual_concluido") or 0)
+    )
+    dtfim_real_resultante = progresso["dtfim_real"]["novo"] if "dtfim_real" in progresso else a.get("dtfim_real")
+    concluir_sem_data_real = percentual_resultante == 100 and not dtfim_real_resultante
+    if concluir_sem_data_real:
+        obrigatorio = True
+
     relato_necessario = "obrigatorio" if obrigatorio else "opcional"
     sugestao = "; ".join(dict.fromkeys(sugestoes)) + "." if (not obrigatorio and sugestoes) else None
-    return progresso, relato_necessario, sugestao
+    return progresso, relato_necessario, sugestao, concluir_sem_data_real
 
 
 def _validar_recursos(a, edicao_raw, recursos_validos):
@@ -387,7 +418,7 @@ def _validar_edicao(atividade_id, by_id, edicao_raw, status_familia_concluida, p
         cascata["prazo_horas"] = prazo
 
     simples = _validar_campos_simples(a, edicao_raw, prioridade_validas)
-    progresso, relato_necessario, relato_sugerido = _avaliar_progresso(a, edicao_raw)
+    progresso, relato_necessario, relato_sugerido, concluir_sem_data_real = _avaliar_progresso(a, edicao_raw)
     recursos_add, recursos_rem = _validar_recursos(a, edicao_raw, recursos_validos)
     deps_add, deps_rem = _validar_dependencias(a, edicao_raw, by_id)
 
@@ -398,6 +429,7 @@ def _validar_edicao(atividade_id, by_id, edicao_raw, status_familia_concluida, p
         "relato_necessario": relato_necessario,
         "relato_texto_sugerido": relato_sugerido,
         "relato_texto": (edicao_raw.get("relato_texto") or "").strip(),
+        "concluir_sem_data_real": concluir_sem_data_real,
         "recursos_adicionar": recursos_add,
         "recursos_remover": recursos_rem,
         "dependencias_adicionar": deps_add,
@@ -659,17 +691,22 @@ def calcular(projeto_id, edicoes, status_familia_concluida, prioridade_validas,
             item["relato_necessario"] = v["relato_necessario"]
             item["relato_texto_sugerido"] = v["relato_texto_sugerido"]
             item["relato_texto"] = v["relato_texto"]
+            item["concluir_sem_data_real"] = v.get("concluir_sem_data_real", False)
             item["mudou"] = True
             # Status derivado sozinho quando o resultado já fecha a atividade
-            # (100% + Fim Real) — mesma automação do modal individual (ver
-            # main.py). Status em si não é campo editável nesta tela.
+            # (100% + Fim Real, ou 100% sem Fim Real com relato — 125ª rodada) —
+            # mesma automação do modal individual (ver main.py). Status em si
+            # não é campo editável nesta tela.
             if classificar_conclusao:
                 a = by_id[id_]
                 data_status = {campo: vv["novo"] for campo, vv in v["progresso"].items()}
-                classificar_conclusao(a, data_status)
+                relato_para_concluir_sem_data = v.get("concluir_sem_data_real", False)
+                classificar_conclusao(a, data_status, relato_para_concluir_sem_data=relato_para_concluir_sem_data)
                 if validar_consistencia_conclusao:
                     try:
-                        validar_consistencia_conclusao(a, data_status)
+                        validar_consistencia_conclusao(
+                            a, data_status, relato_para_concluir_sem_data=relato_para_concluir_sem_data
+                        )
                     except ValueError as e:
                         rotulo = (f'{a.get("codigo_wbs")} — ' if a.get("codigo_wbs") else "") + a["nome"]
                         raise ValueError(f'"{rotulo}": {e}')
@@ -726,6 +763,11 @@ def aplicar(projeto_id, edicoes, status_familia_concluida, prioridade_validas,
             texto_digitado = (i.get("relato_texto") or "").strip()
             if i.get("relato_necessario") == "obrigatorio" and not texto_digitado:
                 rotulo = (f'{i["codigo_wbs"]} — ' if i.get("codigo_wbs") else "") + i["nome"]
+                if i.get("concluir_sem_data_real"):
+                    raise ValueError(
+                        f'"{rotulo}": para concluir (100%) sem a Data de Fim Real preenchida, registre um '
+                        f'relato explicando o motivo antes de confirmar.'
+                    )
                 raise ValueError(
                     f'"{rotulo}": a mudança de % concluído/data real pedida é um retrocesso (percentual caindo '
                     f'ou data real adiada) — registre um relato explicando o motivo antes de confirmar.'

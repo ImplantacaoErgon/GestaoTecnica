@@ -689,7 +689,7 @@ def _valor_mesclado(atual, data, campo):
     return data[campo] if campo in data else (atual or {}).get(campo)
 
 
-def classificar_conclusao(atual, data):
+def classificar_conclusao(atual, data, relato_para_concluir_sem_data=False):
     """Calcula sozinha qual das 4 variantes de 'Concluída' vale, a partir de prazo
     (Fim Real x Fim Previsto) e esforço (Horas Realizadas x Horas Previstas), e
     SOBRESCREVE data['status'] com o resultado — automação pedida pelo usuário na 28ª/
@@ -697,25 +697,40 @@ def classificar_conclusao(atual, data):
     aqui para a classificação completa.
 
     Só age quando o estado RESULTANTE da gravação (mesclando `data` com `atual`) já diz
-    "isto está pronto" — 100% concluído E Fim Real preenchido — e o Status resultante não
-    é um dos dois status de exceção (Bloqueada/Cancelada, ver STATUS_NAO_AUTOMATIZAR),
-    que a automação nunca sobrescreve sozinha (uma atividade cancelada com 100%/Fim Real
-    continua sendo um estado contraditório — ver validar_consistencia_conclusao). Fora
-    disso, não faz nada: não é papel desta função decidir SE a atividade terminou, só
-    QUAL rótulo de conclusão usar quando ela já terminou.
+    "isto está pronto" — 100% concluído — e o Status resultante não é um dos dois status
+    de exceção (Bloqueada/Cancelada, ver STATUS_NAO_AUTOMATIZAR), que a automação nunca
+    sobrescreve sozinha (uma atividade cancelada com 100%/Fim Real continua sendo um
+    estado contraditório — ver validar_consistencia_conclusao). Fora disso, não faz nada:
+    não é papel desta função decidir SE a atividade terminou, só QUAL rótulo de conclusão
+    usar quando ela já terminou.
 
     Sem prazo previsto (dtfim_prev) ou sem prazo de horas (prazo_horas)/horas
     realizadas cadastrados, a falta de dado nunca é tratada como "estourou" — o
     benefício da dúvida fica com a atividade (ex: uma atividade sem prazo_horas
-    cadastrado não pode logicamente ter "esforço maior que o previsto")."""
+    cadastrado não pode logicamente ter "esforço maior que o previsto").
+
+    `relato_para_concluir_sem_data` (125ª rodada): quando True — quem chamou já
+    confirmou que existe um relato de andamento registrado explicando o motivo —
+    permite classificar como concluída mesmo SEM Fim Real preenchido. Sem a data
+    real não há como comparar com o Fim previsto, então cai sempre no rótulo
+    genérico "Concluída" (nunca numa das variantes "com atraso"/"com esforço
+    maior", que descrevem um fato sobre a execução real que aqui não está
+    disponível); se o Status resultante já for uma variante específica escolhida
+    manualmente, não é sobrescrito. Ver validar_consistencia_conclusao() — quem
+    decide SE o relato exigido existe é sempre a rota, nunca esta função."""
     percentual = _valor_mesclado(atual, data, "percentual_concluido")
     percentual = int(percentual) if percentual not in (None, "") else 0
     dtfim_real = _valor_mesclado(atual, data, "dtfim_real")
     status_resultante = _valor_mesclado(atual, data, "status")
 
-    if percentual != 100 or not dtfim_real:
+    if percentual != 100:
         return
     if status_resultante in STATUS_NAO_AUTOMATIZAR:
+        return
+
+    if not dtfim_real:
+        if relato_para_concluir_sem_data and status_resultante not in STATUS_FAMILIA_CONCLUIDA:
+            data["status"] = "Concluída"
         return
 
     dtfim_prev = _valor_mesclado(atual, data, "dtfim_prev")
@@ -738,7 +753,7 @@ def classificar_conclusao(atual, data):
         data["status"] = "Concluída"
 
 
-def validar_consistencia_conclusao(atual, data):
+def validar_consistencia_conclusao(atual, data, relato_para_concluir_sem_data=False):
     """Impede gravar uma atividade num estado contraditório entre Status (numa das 4
     variantes de Concluída), percentual_concluido=100 e Fim Real preenchido — os três
     precisam andar sempre juntos. Sem essa checagem dá pra marcar 100% deixando o
@@ -757,14 +772,26 @@ def validar_consistencia_conclusao(atual, data):
 
     `atual` é a linha já gravada no banco (None numa criação); `data` é o payload
     recebido — só os campos presentes em `data` sobrescrevem o valor de `atual` pra
-    fins desta checagem, exatamente como patch_row faz na gravação de verdade."""
+    fins desta checagem, exatamente como patch_row faz na gravação de verdade.
+
+    `relato_para_concluir_sem_data` (125ª rodada — pedido explícito do usuário:
+    "permita que nas atualizações em massa e na própria página de Cronograma possamos
+    atualizar as concluídas, mas desde que com relato"): quando True, 100% concluído
+    SEM Fim Real preenchido deixa de ser bloqueado — fica só faltando o % em 100 (isso
+    nunca é dispensado). Quem passa True já checou (na rota, ou em
+    cronograma_edicao_lote) que existe (ou vai existir, no mesmo salvamento) um relato
+    de andamento explicando por que a data real não está disponível — esta função não
+    acessa o banco, só decide a consequência. Pensado pra atividades concluídas antes
+    do acompanhamento atual do projeto, sem data real registrada; o caminho padrão
+    (sem relato) continua travando exatamente como antes."""
     status = _valor_mesclado(atual, data, "status")
     percentual = _valor_mesclado(atual, data, "percentual_concluido")
     percentual = int(percentual) if percentual not in (None, "") else 0
     dtfim_real = _valor_mesclado(atual, data, "dtfim_real")
     completo = percentual == 100 and bool(dtfim_real)
+    concluir_sem_data_real_ok = relato_para_concluir_sem_data and percentual == 100 and not dtfim_real
 
-    if status in STATUS_FAMILIA_CONCLUIDA and not completo:
+    if status in STATUS_FAMILIA_CONCLUIDA and not completo and not concluir_sem_data_real_ok:
         faltando = []
         if percentual != 100:
             faltando.append("o % concluído em 100")
@@ -772,7 +799,7 @@ def validar_consistencia_conclusao(atual, data):
             faltando.append("a Data de Fim Real")
         raise ValueError(f'Para marcar a atividade como "{status}", preencha também {" e ".join(faltando)}.')
 
-    if percentual == 100 and not dtfim_real and status not in STATUS_FAMILIA_CONCLUIDA:
+    if percentual == 100 and not dtfim_real and status not in STATUS_FAMILIA_CONCLUIDA and not concluir_sem_data_real_ok:
         # classificar_conclusao() só reclassifica quando JÁ tem Fim Real — 100% sem Fim
         # Real (em qualquer outro Status) continua sendo um estado incompleto: falta
         # dizer QUANDO a atividade terminou. Mantém o mesmo aviso da 28ª rodada.
@@ -1413,21 +1440,44 @@ def create_app():
         )
         if not atual:
             abort(404)
+        # 125ª rodada — pedido explícito do usuário: permitir concluir (100%) sem a
+        # Data de Fim Real preenchida na tela de edição individual, desde que exista
+        # ao menos um relato registrado explicando o motivo (dados anteriores ao
+        # acompanhamento atual do projeto, sem data real disponível). Calculado em
+        # cima do estado RESULTANTE (mescla `data` com `atual`, igual a
+        # classificar_conclusao/validar_consistencia_conclusao) ANTES de
+        # classificar_conclusao() rodar, porque ela usa esse mesmo flag pra decidir
+        # se assume "Concluída" sem data.
+        percentual_resultante = _valor_mesclado(atual, data, "percentual_concluido")
+        percentual_resultante = int(percentual_resultante) if percentual_resultante not in (None, "") else 0
+        dtfim_real_resultante = _valor_mesclado(atual, data, "dtfim_real")
+        tentando_concluir_sem_data_real = percentual_resultante == 100 and not dtfim_real_resultante
+
         # Mesma ordem do create: classifica primeiro (pode sobrescrever data["status"]
         # com a variante certa de Concluída), só depois checa relato/consistência.
-        classificar_conclusao(atual, data)
-        novo_status = data.get("status")
-        if novo_status in STATUS_EXIGE_RELATO:
+        novo_status_bruto = data.get("status")  # só o que veio explícito no payload, igual ao comportamento de sempre
+        tem_relato = None
+        if novo_status_bruto in STATUS_EXIGE_RELATO or tentando_concluir_sem_data_real:
             tem_relato = db.fetch_one(
                 f"SELECT 1 AS x FROM atividade_relato WHERE atividade_id = {db.q(id)} LIMIT 1"
             )
-            if not tem_relato:
-                return jsonify({
-                    "erro": f'Status "{novo_status}" exige ao menos um relato de andamento registrado. '
-                            'Adicione um relato na aba Relatos e tente salvar novamente.'
-                }), 400
+        if novo_status_bruto in STATUS_EXIGE_RELATO and not tem_relato:
+            return jsonify({
+                "erro": f'Status "{novo_status_bruto}" exige ao menos um relato de andamento registrado. '
+                        'Adicione um relato na aba Relatos e tente salvar novamente.'
+            }), 400
+        if tentando_concluir_sem_data_real and not tem_relato:
+            return jsonify({
+                "erro": "Para concluir (100%) sem a Data de Fim Real preenchida, registre antes um relato "
+                        "explicando o motivo (ex.: atividade concluída antes do acompanhamento atual do "
+                        "projeto, sem registro da data exata). Adicione um relato na aba Relatos e tente "
+                        "salvar novamente."
+            }), 400
+        relato_para_concluir_sem_data = tentando_concluir_sem_data_real and bool(tem_relato)
+
+        classificar_conclusao(atual, data, relato_para_concluir_sem_data=relato_para_concluir_sem_data)
         try:
-            validar_consistencia_conclusao(atual, data)
+            validar_consistencia_conclusao(atual, data, relato_para_concluir_sem_data=relato_para_concluir_sem_data)
         except ValueError as e:
             return jsonify({"erro": str(e)}), 400
         aplicar_percentual_inicial(atual, data)

@@ -7899,7 +7899,10 @@ async function saveAtividade(){
   }catch(e){
     // Erro mais comum aqui: status exige relato e ainda não há nenhum registrado.
     // Leva o usuário direto pra aba certa em vez de deixá-lo caçar o problema.
-    if(STATUS_EXIGE_RELATO.has(data.status)) switchPane($("overlay-atividade"), "relatos");
+    // 125ª rodada: mesma lógica quando o bloqueio é concluir (100%) sem a Data de
+    // Fim Real — o backend também pede um relato explicando o motivo nesse caso.
+    const concluindoSemDataReal = STATUS_FAMILIA_CONCLUIDA.includes(data.status) && Number(data.percentual_concluido)===100 && !data.dtfim_real;
+    if(STATUS_EXIGE_RELATO.has(data.status) || concluindoSemDataReal) switchPane($("overlay-atividade"), "relatos");
   }
 }
 
