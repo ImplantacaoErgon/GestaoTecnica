@@ -453,6 +453,90 @@ LIMITE_EMPRESA_RUBRICA = 25
 #           levantada, ou erro de digitação/código no legado.
 #     Rubricas com status 'Excluída' não contam como "parametrizadas
 #     válidas" pra este cruzamento (foram descartadas de propósito).
+# 118ª rodada — pedido do usuário (verbatim): no novo Dashboard Executivo
+# (Visão Executiva, ver renderVisaoExecutiva() no front-end), o card de Folha
+# de Pagamento ganhou "a comparação de folha com duas visões... números por
+# situação e... por tipo de rubrica, sempre comparando com as competências
+# existentes ou as últimas 5 caso existam mais". É um comparativo ENTRE
+# competências lado a lado (os dois quadros que já existem em dashboard()
+# acima — por_situacao/por_tiporubr — só que repetidos por mês, não um mês
+# só), por isso é uma função própria, não um loop chamando dashboard() N
+# vezes (dashboard() calcula bem mais coisa do que o card precisa —
+# por_empresa_rubrica, cobertura de mapeamento etc. — e cada chamada seria
+# uma rodada de ida-e-volta ao banco por mês).
+#
+# Diferente da restrição da 93ª rodada (não carregar Comparação Folha
+# automaticamente sem o usuário escolher uma Competência): aqui o próprio
+# pedido do usuário já limita o escopo a, no máximo, as 5 competências mais
+# recentes — nunca a tabela inteira — e as duas consultas abaixo filtram
+# `mesano` por comparação DIRETA de coluna (sem envolver a coluna numa
+# função como to_char(), que impediria o uso de índice — mesma lição da
+# sargabilidade documentada em _codigo_igual_sql/_RUBRICA_EM_LEVANTAMENTO_SQL
+# acima), então cada consulta é um GROUP BY só sobre as linhas desses meses,
+# não uma varredura da tabela toda.
+def competencias_recentes(projeto_id, limite=5):
+    """Datas (não string "AAAA-MM") das `limite` competências mais recentes
+    com dado carregado pra este projeto — usadas como filtro sargável
+    (comparação direta de coluna `date`) em resumo_por_competencia() abaixo.
+    Diferente de competencias_disponiveis() (que devolve "AAAA-MM" pro
+    <select> de filtro da tela de Comparação Folha), esta devolve a data
+    real (1º dia do mês) porque precisa virar literal de comparação, não
+    rótulo."""
+    rows = db.fetch_all(f"""
+        SELECT DISTINCT mesano FROM comparacao_folha
+        WHERE projeto_id = {db.q(projeto_id)} AND mesano IS NOT NULL
+        ORDER BY mesano DESC LIMIT {int(limite)}
+    """)
+    return [r["mesano"] for r in rows]
+
+
+def resumo_por_competencia(projeto_id, limite=5):
+    """Os dois quadros de dashboard() (por_situacao/por_tiporubr), repetidos
+    por competência — pro card "Folha de Pagamento" do Dashboard Executivo
+    comparar a evolução mês a mês em vez de um retrato de um mês só. Mesmas
+    regras de negócio (carve-out "Não programada/cadastrada" — ver
+    _NAO_PROGRAMADA_CARVE_OUT_SQL — pros mesmos critérios já documentados
+    acima, no bloco de dashboard())."""
+    meses = competencias_recentes(projeto_id, limite)
+    if not meses:
+        return {"competencias": [], "por_situacao": [], "por_tiporubr": []}
+    # meses vem mais recente -> mais antigo (ORDER BY mesano DESC); devolve
+    # em ordem cronológica (mais antigo -> mais recente), mais natural pra
+    # ler um comparativo/gráfico da esquerda pra direita.
+    meses_cronologico = list(reversed(meses))
+    meses_in = ", ".join(db.q(m) for m in meses)
+    where = f" WHERE projeto_id = {db.q(projeto_id)} AND mesano IN ({meses_in})"
+
+    por_situacao = db.fetch_all(f"""
+        SELECT
+          to_char(mesano, 'YYYY-MM') AS mesano,
+          COALESCE(situacao, '(sem situação)') AS situacao,
+          COUNT(*) AS total
+        FROM comparacao_folha{where}
+        GROUP BY mesano, situacao
+        ORDER BY mesano, total DESC
+    """)
+
+    por_tiporubr = db.fetch_all(f"""
+        SELECT
+          to_char(mesano, 'YYYY-MM') AS mesano,
+          COALESCE(tiporubr, '(sem tipo)') AS tiporubr,
+          COUNT(*) AS total_linhas,
+          COUNT(*) FILTER (WHERE UPPER(situacao) = 'NÃO DIVERGENTE') AS total_sem_divergencia,
+          COUNT(*) FILTER (WHERE {_NAO_PROGRAMADA_CARVE_OUT_SQL}) AS total_nao_programada,
+          COUNT(*) FILTER (WHERE UPPER(situacao) <> 'NÃO DIVERGENTE' AND NOT {_NAO_PROGRAMADA_CARVE_OUT_SQL}) AS total_divergente
+        FROM comparacao_folha{where}
+        GROUP BY mesano, tiporubr
+        ORDER BY mesano, total_linhas DESC
+    """)
+
+    return {
+        "competencias": [m[:7] for m in meses_cronologico],
+        "por_situacao": por_situacao,
+        "por_tiporubr": por_tiporubr,
+    }
+
+
 def dashboard(projeto_id, mesano=None):
     # (mesano só filtra "where" — as consultas de cobertura de mapeamento
     # abaixo usam projeto_id direto, sem `where`, porque parametrização de

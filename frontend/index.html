@@ -639,6 +639,35 @@
   .vex-module-link:hover{text-decoration:underline;}
   .vex-empty{color:var(--text-faint);font-size:12.5px;padding:10px 0;}
 
+  /* 118ª rodada — card maior "Folha de Pagamento" (funil de Rubricas +
+     comparação Ergon×legado por competência, em dois modos: Números/Gráficos) */
+  .vex-folha-comparacao{margin-top:18px;padding-top:16px;border-top:1px solid var(--border);}
+  .vex-toggle{display:inline-flex;background:var(--surface-2);border-radius:8px;padding:2px;gap:2px;}
+  .vex-toggle button{border:none;background:none;font-family:inherit;font-size:12px;font-weight:600;color:var(--text-muted);padding:5px 11px;border-radius:6px;cursor:pointer;}
+  .vex-toggle button.active{background:var(--surface);color:var(--text);box-shadow:0 1px 2px rgba(0,0,0,.08);}
+
+  .vex-comp-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px;}
+  .vex-comp-table th, .vex-comp-table td{padding:7px 10px;text-align:right;white-space:nowrap;}
+  .vex-comp-table th:first-child, .vex-comp-table td:first-child{text-align:left;position:sticky;left:0;background:var(--surface);}
+  .vex-comp-table thead th{color:var(--text-muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--border);}
+  .vex-comp-table tbody tr+tr td{border-top:1px solid var(--border);}
+  .vex-comp-table tbody tr.destaque td{font-weight:700;}
+  .vex-comp-table td .sub{display:block;font-size:10.5px;color:var(--text-faint);font-weight:400;}
+  .vex-comp-table-wrap{overflow-x:auto;}
+  .vex-comp-titulo{font-size:12px;font-weight:600;color:var(--text-muted);margin:14px 0 0;}
+  .vex-comp-titulo:first-child{margin-top:0;}
+
+  .vex-comp-graficos{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:10px;}
+  @media (max-width: 980px){ .vex-comp-graficos{grid-template-columns:1fr;} }
+
+  .vex-conv-chart{display:flex;align-items:flex-end;gap:16px;margin-top:14px;padding:0 4px;}
+  .vex-conv-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:8px;min-width:0;}
+  .vex-conv-stack{width:100%;max-width:46px;height:150px;display:flex;flex-direction:column-reverse;border-radius:4px 4px 0 0;overflow:hidden;background:var(--surface-2);}
+  .vex-conv-stack .seg{width:100%;border-bottom:2px solid var(--surface);}
+  .vex-conv-stack .seg:first-child{border-bottom:none;}
+  .vex-conv-label{font-size:11px;color:var(--text-muted);text-align:center;white-space:nowrap;}
+  .vex-conv-label .sub{display:block;font-size:13px;font-weight:700;color:var(--ok);}
+
   .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);padding:10px 18px;border-radius:8px;font-size:13px;z-index:100;box-shadow:var(--shadow);color:#fff;}
   .confirm-box{padding:20px;text-align:center;}
   .confirm-box p{margin:0 0 16px;color:var(--text-muted);font-size:13.5px;}
@@ -993,14 +1022,42 @@
       </div>
     </div>
 
-    <div class="vex-grid-3">
+    <!-- 118ª rodada — pedido do usuário: "Folha de pagamento pode ser um
+         quadro maior e logo após a parte dos quadros do cronograma" — saiu
+         do vex-grid-3 (que dividia espaço com Migração/Financeiro) e virou
+         um card de largura total, logo depois do bloco de Cronograma
+         (Curva S + Frentes/Marcos) e antes dos demais módulos. Dentro dele:
+         o funil de status das Rubricas (como já era) + a NOVA comparação
+         Ergon × legado (Comparação Folha) com duas visões — Números
+         (quadros por Situação/Tipo de Rubrica) e Gráficos — sempre
+         comparando as competências mais recentes (até 5). -->
+    <div class="card vex-folha-card">
+      <div class="vex-module-head">
+        <h3>💰 Folha de Pagamento</h3>
+        <button type="button" class="vex-module-link" onclick="goToView('rubricas')">Abrir Rubricas →</button>
+      </div>
+      <div id="vex-folha"></div>
+
+      <div class="vex-folha-comparacao">
+        <div class="vex-module-head" style="margin-top:4px;">
+          <h3 style="font-size:13.5px;">⚖️ Comparação Folha × Ergon <span class="muted" id="vex-folha-comp-sub" style="font-weight:400;font-size:11.5px;"></span></h3>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div class="vex-toggle" id="vex-folha-comp-toggle">
+              <button type="button" data-modo="numeros" class="active">📋 Números</button>
+              <button type="button" data-modo="graficos">📈 Gráficos</button>
+            </div>
+            <button type="button" class="vex-module-link" onclick="goToView('comparacao-folha-dashboard')">Abrir Comparação →</button>
+          </div>
+        </div>
+        <div id="vex-folha-comp-numeros"></div>
+        <div id="vex-folha-comp-graficos" hidden></div>
+      </div>
+    </div>
+
+    <div class="vex-grid-2">
       <div class="card">
         <div class="vex-module-head"><h3>📦 Migração de Dados</h3><button type="button" class="vex-module-link" onclick="goToView('migracao')">Abrir →</button></div>
         <div id="vex-migracao"></div>
-      </div>
-      <div class="card">
-        <div class="vex-module-head"><h3>💰 Folha de Pagamento</h3><button type="button" class="vex-module-link" onclick="goToView('rubricas')">Abrir →</button></div>
-        <div id="vex-folha"></div>
       </div>
       <div class="card">
         <div class="vex-module-head"><h3>💵 Financeiro</h3><button type="button" class="vex-module-link" onclick="goToView('faturas')">Abrir →</button></div>
@@ -3411,7 +3468,7 @@ async function afterProjetoReady(){
   aplicarMarcaNoTopo();
   fillStaticSelects();
   wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireGanttToolbar(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireExportarCronograma(); wireExportarCronogramaXml(); wireRemoverCronograma(); wireRemoverRequisitos(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma(); wireRenumerarCronograma();
-  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros(); wireQuadroCicloModal(); wireMigracaoRejeicoesPane(); wireRubricaModal(); wireRubricasFiltros(); wireImportRubricas(); wireComparacaoFolhaPane(); wireComparacaoFolhaDashboard();
+  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros(); wireQuadroCicloModal(); wireMigracaoRejeicoesPane(); wireRubricaModal(); wireRubricasFiltros(); wireImportRubricas(); wireComparacaoFolhaPane(); wireComparacaoFolhaDashboard(); wireVexFolhaComparacaoToggle();
   setupCsvTemplateLink();
   await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias(), loadItensMigracao(), loadRubricas(), loadRubricasAutoUpdateStatus()]);
   // Reaplica agora que REQUISITOS/ATIVIDADES já estão carregados — os selects
@@ -5415,7 +5472,7 @@ function _vexRenderCurvaS(curva){
     else { yPlanLabel = meio+6; yRealLabel = meio-6; }
   }
 
-  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;">
+  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;overflow:visible;">
     ${gridLines}
     ${linhaHoje}
     <path d="${pathFrom(curva.planejado)}" fill="none" stroke="var(--text-faint)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></path>
@@ -5501,6 +5558,278 @@ function _vexRenderFolha(){
     <div class="vex-stacked-bar">${segs.map(s=>`<div class="seg" style="width:${Math.round(100*s.v/total)}%;background:${COLOR_VAR[s.cor]};border-right:2px solid var(--surface);" title="${s.k}: ${s.v}"></div>`).join("")}</div>
     <div class="vex-legend" style="margin-top:8px;">${segs.map(s=>`<span class="item"><span class="swatch" style="background:${COLOR_VAR[s.cor]};"></span>${s.k} (${s.v})</span>`).join("")}</div>
   `;
+}
+
+// 118ª rodada — Comparação Folha × Ergon dentro do card de Folha de
+// Pagamento: duas visões (Números/Gráficos) sobre os mesmos dados —
+// os dois quadros que já existem em comparacao_folha.dashboard()
+// (por Situação / por Tipo de Rubrica), só que comparando lado a lado as
+// competências mais recentes (até 5 — ver /comparacao-folha/resumo-competencias),
+// em vez de uma competência só. Pedido do usuário (verbatim): "inclua a
+// comparação de folha com duas visões. Uma de números... a outra
+// transformando esses números em gráficos."
+function wireVexFolhaComparacaoToggle(){
+  const toggle = $("vex-folha-comp-toggle");
+  if(!toggle) return;
+  toggle.querySelectorAll("button").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      toggle.querySelectorAll("button").forEach(b=>b.classList.remove("active"));
+      btn.classList.add("active");
+      const modo = btn.dataset.modo;
+      $("vex-folha-comp-numeros").hidden = modo!=="numeros";
+      $("vex-folha-comp-graficos").hidden = modo!=="graficos";
+    });
+  });
+}
+
+// Pivota uma lista de linhas {mesano, [chaveCategoria], [chaveValor]} pra
+// {categoria: {mes: valor}} + total por categoria (pra ordenar as linhas da
+// tabela por volume) — usado tanto pelo quadro por Situação quanto, de forma
+// mais manual (tem 3 valores por célula, não 1), pelo quadro por Tipo de Rubrica.
+function _vexPivotPorMes(linhas, chaveCategoria, chaveValor){
+  const mapa = {}, totalPorCategoria = {};
+  linhas.forEach(l=>{
+    const cat = l[chaveCategoria];
+    if(!mapa[cat]) mapa[cat] = {};
+    mapa[cat][l.mesano] = Number(l[chaveValor]||0);
+    totalPorCategoria[cat] = (totalPorCategoria[cat]||0) + Number(l[chaveValor]||0);
+  });
+  return {mapa, totalPorCategoria};
+}
+
+// Quadro "por Situação": uma linha por valor de Situação (Não Divergente
+// sempre primeiro — é a leitura mais importante), uma coluna por
+// competência. Mais de 6 situações distintas (planilhas de origem variam
+// bastante) viram uma linha "Outras situações" agregada, pra não estourar a
+// largura do cartão com dezenas de linhas.
+function _vexTabelaPorSituacao(dados){
+  const meses = dados.competencias;
+  const {mapa, totalPorCategoria} = _vexPivotPorMes(dados.por_situacao, "situacao", "total");
+  let categorias = Object.keys(mapa).sort((a,b)=>totalPorCategoria[b]-totalPorCategoria[a]);
+  const idxND = categorias.indexOf("Não Divergente");
+  if(idxND>0){ categorias.splice(idxND,1); categorias.unshift("Não Divergente"); }
+  const LIMITE = 6;
+  const linhasShow = categorias.slice(0, LIMITE);
+  const resto = categorias.slice(LIMITE);
+  if(resto.length){
+    const outras = {};
+    meses.forEach(m=>{ outras[m] = resto.reduce((s,c)=>s+(mapa[c][m]||0),0); });
+    mapa["Outras situações"] = outras;
+    linhasShow.push("Outras situações");
+  }
+  const totalPorMes = {};
+  meses.forEach(m=>{ totalPorMes[m] = linhasShow.reduce((s,c)=>s+(mapa[c][m]||0),0); });
+
+  const corpo = linhasShow.map(cat=>{
+    const destaque = cat==="Não Divergente";
+    const cells = meses.map(m=>{
+      const v = mapa[cat][m]||0;
+      const totalMes = totalPorMes[m]||0;
+      const pct = totalMes ? Math.round(100*v/totalMes) : 0;
+      return `<td>${v.toLocaleString('pt-BR')}<span class="sub">${pct}%</span></td>`;
+    }).join("");
+    return `<tr class="${destaque?'destaque':''}"><td${destaque?` style="color:var(--ok);"`:""}>${esc(cat)}</td>${cells}</tr>`;
+  }).join("");
+
+  return `<p class="vex-comp-titulo">Comparação por Situação</p>
+    <div class="vex-comp-table-wrap"><table class="vex-comp-table">
+      <thead><tr><th>Situação</th>${meses.map(m=>`<th>${_vexFormatarMes(m)}</th>`).join("")}</tr></thead>
+      <tbody>${corpo}</tbody>
+    </table></div>`;
+}
+
+// Quadro "por Tipo de Rubrica": uma linha por tipo (Vantagem/Desconto),
+// célula = % convergente daquele tipo naquela competência + total de linhas
+// — mesmo critério de "Não programada/cadastrada" deduzida da divergência
+// que o Dashboard de Comparação Folha já usa (ver _NAO_PROGRAMADA_CARVE_OUT_SQL
+// no backend), só que agora uma coluna por mês.
+function _vexTabelaPorTipoRubrica(dados){
+  const meses = dados.competencias;
+  const mapa = {};
+  dados.por_tiporubr.forEach(l=>{
+    if(!mapa[l.tiporubr]) mapa[l.tiporubr] = {};
+    const totalLinhas = Number(l.total_linhas||0);
+    const convergente = Number(l.total_sem_divergencia||0);
+    mapa[l.tiporubr][l.mesano] = {totalLinhas, pct: totalLinhas ? Math.round(100*convergente/totalLinhas) : null};
+  });
+  const ordemPreferida = ["VANTAGEM","DESCONTO"];
+  const tipos = Object.keys(mapa).sort((a,b)=>{
+    const ia = ordemPreferida.indexOf(String(a).toUpperCase()), ib = ordemPreferida.indexOf(String(b).toUpperCase());
+    if(ia===-1 && ib===-1) return String(a).localeCompare(String(b));
+    if(ia===-1) return 1; if(ib===-1) return -1;
+    return ia-ib;
+  });
+
+  const corpo = tipos.map(tipo=>{
+    const cells = meses.map(m=>{
+      const c = mapa[tipo][m];
+      if(!c || !c.totalLinhas) return `<td class="muted">—</td>`;
+      const cor = c.pct>=90 ? "ok" : (c.pct>=60 ? "warn" : "danger");
+      return `<td><span style="color:${COLOR_VAR[cor]};font-weight:700;">${c.pct}%</span><span class="sub">${c.totalLinhas.toLocaleString('pt-BR')} linhas</span></td>`;
+    }).join("");
+    return `<tr><td>${esc(tipo)}</td>${cells}</tr>`;
+  }).join("");
+
+  return `<p class="vex-comp-titulo">Comparação por Tipo de Rubrica — % convergente</p>
+    <div class="vex-comp-table-wrap"><table class="vex-comp-table">
+      <thead><tr><th>Tipo</th>${meses.map(m=>`<th>${_vexFormatarMes(m)}</th>`).join("")}</tr></thead>
+      <tbody>${corpo}</tbody>
+    </table></div>
+    <div class="vex-legend" style="margin-top:6px;">
+      <span class="item"><span class="swatch" style="background:${COLOR_VAR.ok};"></span>≥ 90% convergente</span>
+      <span class="item"><span class="swatch" style="background:${COLOR_VAR.warn};"></span>60–89%</span>
+      <span class="item"><span class="swatch" style="background:${COLOR_VAR.danger};"></span>&lt; 60%</span>
+    </div>`;
+}
+
+// Gráfico A (visão "Gráficos"): evolução da convergência geral por
+// competência — barra 100% empilhada (Convergente na base, é a métrica "boa"
+// e fica ancorada na linha de base; Divergente e Não programada por cima),
+// usando os MESMOS tokens de status do resto do app (nunca a paleta
+// categórica — isto é estado/avaliação, não identidade). Construído em
+// HTML/CSS (não SVG) — mais simples e igualmente fiel aos specs de marca da
+// skill (cantos arredondados só no topo, vão de 2px em --surface entre
+// segmentos) que uma barra desenhada à mão em SVG.
+function _vexGraficoConvergencia(dados){
+  const meses = dados.competencias;
+  const porMes = {};
+  meses.forEach(m=>{ porMes[m] = {total:0, convergente:0, divergente:0, naoProgramada:0}; });
+  dados.por_tiporubr.forEach(l=>{
+    const r = porMes[l.mesano]; if(!r) return;
+    r.total += Number(l.total_linhas||0);
+    r.convergente += Number(l.total_sem_divergencia||0);
+    r.divergente += Number(l.total_divergente||0);
+    r.naoProgramada += Number(l.total_nao_programada||0);
+  });
+  const barras = meses.map(m=>{
+    const r = porMes[m];
+    const pct = v => r.total ? Math.round(100*v/r.total) : 0;
+    const pConv = pct(r.convergente), pDiv = pct(r.divergente), pNp = pct(r.naoProgramada);
+    const titulo = `${_vexFormatarMes(m)}: ${pConv}% convergente, ${pDiv}% divergente, ${pNp}% não programada (${r.total.toLocaleString('pt-BR')} linhas)`;
+    return `<div class="vex-conv-col">
+        <div class="vex-conv-stack" title="${esc(titulo)}">
+          <div class="seg" style="height:${pConv}%;background:var(--ok);"></div>
+          <div class="seg" style="height:${pDiv}%;background:var(--danger);"></div>
+          <div class="seg" style="height:${pNp}%;background:var(--text-faint);"></div>
+        </div>
+        <div class="vex-conv-label">${_vexFormatarMes(m)}<span class="sub">${pConv}%</span></div>
+      </div>`;
+  }).join("");
+  return `
+    <div class="card" style="box-shadow:none;border:1px solid var(--border);">
+      <div class="vex-module-head"><h3 style="font-size:12.5px;">Convergência geral por competência</h3></div>
+      <div class="vex-legend">
+        <span class="item"><span class="swatch" style="background:var(--ok);"></span>Convergente</span>
+        <span class="item"><span class="swatch" style="background:var(--danger);"></span>Divergente</span>
+        <span class="item"><span class="swatch" style="background:var(--text-faint);"></span>Não programada</span>
+      </div>
+      <div class="vex-conv-chart">${barras}</div>
+    </div>`;
+}
+
+// Gráfico B: % convergente por Tipo de Rubrica, ao longo das competências —
+// aqui SIM são duas identidades categóricas reais (Vantagem × Desconto, dois
+// grupos permanentes do negócio, não um "destaque vs. contexto"), por isso
+// usa dois slots da paleta categórica fixa (--series-1/--series-2) em vez do
+// padrão accent+cinza da Curva S. Mesmo SVG à mão, mesmos specs de marca.
+function _vexGraficoTipoRubrica(dados){
+  const meses = dados.competencias;
+  if(meses.length<2){
+    return `<div class="card" style="box-shadow:none;border:1px solid var(--border);">
+      <div class="vex-module-head"><h3 style="font-size:12.5px;">% convergente por Tipo de Rubrica</h3></div>
+      <div class="vex-empty">É preciso pelo menos 2 competências carregadas pra montar esta tendência.</div>
+    </div>`;
+  }
+  const mapa = {};
+  dados.por_tiporubr.forEach(l=>{
+    if(!mapa[l.tiporubr]) mapa[l.tiporubr] = {};
+    const totalLinhas = Number(l.total_linhas||0), convergente = Number(l.total_sem_divergencia||0);
+    mapa[l.tiporubr][l.mesano] = totalLinhas ? Math.round(100*convergente/totalLinhas) : null;
+  });
+  const ordemPreferida = ["VANTAGEM","DESCONTO"];
+  const tipos = Object.keys(mapa).sort((a,b)=>{
+    const ia = ordemPreferida.indexOf(String(a).toUpperCase()), ib = ordemPreferida.indexOf(String(b).toUpperCase());
+    if(ia===-1 && ib===-1) return String(a).localeCompare(String(b));
+    if(ia===-1) return 1; if(ib===-1) return -1;
+    return ia-ib;
+  }).slice(0,2); // paleta reservada pra 2 séries nesta visão — ver nota acima do validador (skill dataviz)
+  const cores = ["var(--series-1)","var(--series-2)"];
+
+  const W=360, H=200, padL=40, padR=16, padT=12, padB=24;
+  const plotW=W-padL-padR, plotH=H-padT-padB;
+  const n = meses.length;
+  const x = i => padL + (plotW*i/(n-1));
+  const y = v => padT + plotH*(1-v/100);
+  const gridLines = [0,50,100].map(v=>`
+    <line class="vex-grid-line" x1="${padL}" x2="${W-padR}" y1="${y(v)}" y2="${y(v)}"></line>
+    <text class="vex-axis-label" x="${padL-6}" y="${y(v)+3}" text-anchor="end">${v}%</text>`).join("");
+  const passo = Math.max(1, Math.ceil(n/5));
+  const xLabels = meses.map((m,i)=>{
+    if(i!==0 && i!==n-1 && i%passo!==0) return "";
+    return `<text class="vex-axis-label" x="${x(i)}" y="${H-padB+16}" text-anchor="middle">${_vexFormatarMes(m)}</text>`;
+  }).join("");
+
+  let yUltimos = [];
+  const linhas = tipos.map((tipo,ti)=>{
+    const serie = meses.map(m=> mapa[tipo][m]==null ? null : mapa[tipo][m]);
+    // pontos com valor null (sem linhas daquele tipo naquele mês) quebram a
+    // linha em vez de interpolar — evita sugerir um dado que não existe.
+    let d = "", aberto = false;
+    serie.forEach((v,i)=>{
+      if(v==null){ aberto=false; return; }
+      d += (aberto?"L":"M") + x(i).toFixed(1) + "," + y(v).toFixed(1) + " ";
+      aberto = true;
+    });
+    const ultimoIdx = serie.map((v,i)=>v==null?-1:i).filter(i=>i>=0).pop();
+    const ultimoVal = ultimoIdx!=null ? serie[ultimoIdx] : null;
+    if(ultimoIdx!=null) yUltimos.push({ti, idx:ultimoIdx, val:ultimoVal});
+    return `<path d="${d.trim()}" fill="none" stroke="${cores[ti]}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></path>`;
+  }).join("");
+
+  // rótulos de valor final — afasta verticalmente se os dois convergirem
+  // muito perto (mesma técnica da Curva S), nunca vaza pra fora do cartão
+  // (ancorado à esquerda do ponto, "end").
+  let marcadores = "";
+  if(yUltimos.length){
+    if(yUltimos.length===2 && Math.abs(y(yUltimos[0].val)-y(yUltimos[1].val))<12){
+      const meio = (y(yUltimos[0].val)+y(yUltimos[1].val))/2;
+      if(y(yUltimos[0].val)<=y(yUltimos[1].val)){ yUltimos[0]._yLabel=meio-6; yUltimos[1]._yLabel=meio+6; }
+      else { yUltimos[0]._yLabel=meio+6; yUltimos[1]._yLabel=meio-6; }
+    }
+    marcadores = yUltimos.map(u=>{
+      const cx = x(u.idx), cy = y(u.val), yLabel = u._yLabel!=null ? u._yLabel : cy;
+      return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4" fill="${cores[u.ti]}" stroke="var(--surface)" stroke-width="2"><title>${esc(tipos[u.ti])}: ${u.val}%</title></circle>
+        <text class="vex-value-label" x="${(cx-9).toFixed(1)}" y="${(yLabel+3).toFixed(1)}" text-anchor="end" style="fill:${cores[u.ti]};">${u.val}%</text>`;
+    }).join("");
+  }
+
+  return `<div class="card" style="box-shadow:none;border:1px solid var(--border);">
+    <div class="vex-module-head"><h3 style="font-size:12.5px;">% convergente por Tipo de Rubrica</h3></div>
+    <div class="vex-legend">${tipos.map((t,i)=>`<span class="item"><span class="swatch line" style="background:${cores[i]};"></span>${esc(t)}</span>`).join("")}</div>
+    <div class="vex-svg-wrap"><svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;overflow:visible;">
+      ${gridLines}${linhas}${marcadores}${xLabels}
+    </svg></div>
+  </div>`;
+}
+
+// Orquestra as duas visões (Números/Gráficos) do card de Comparação Folha —
+// chamado a partir de renderVisaoExecutiva() depois de buscar
+// /comparacao-folha/resumo-competencias (única chamada de rede deste bloco).
+function _vexRenderFolhaComparacao(dados){
+  const subEl = $("vex-folha-comp-sub"), numEl = $("vex-folha-comp-numeros"), grafEl = $("vex-folha-comp-graficos");
+  if(!dados || !dados.competencias || !dados.competencias.length){
+    subEl.textContent = "";
+    numEl.innerHTML = `<div class="vex-empty">Nenhuma competência de Comparação Folha carregada ainda.</div>`;
+    grafEl.innerHTML = "";
+    return;
+  }
+  const meses = dados.competencias;
+  subEl.textContent = meses.length>1
+    ? `${_vexFormatarMes(meses[0])} – ${_vexFormatarMes(meses[meses.length-1])} (${meses.length} competência${meses.length>1?"s":""})`
+    : `${_vexFormatarMes(meses[0])}`;
+
+  numEl.innerHTML = _vexTabelaPorSituacao(dados) + _vexTabelaPorTipoRubrica(dados);
+  grafEl.innerHTML = `<div class="vex-comp-graficos">${_vexGraficoConvergencia(dados)}${_vexGraficoTipoRubrica(dados)}</div>`;
 }
 
 // Financeiro (Faturas) — meter de % recebido (sobre o valor líquido) + dois
@@ -5615,6 +5944,8 @@ async function renderVisaoExecutiva(){
 
   _vexRenderMigracao();
   _vexRenderFolha();
+  api(`/comparacao-folha/resumo-competencias?projeto_id=${PROJETO.id}&limite=5`).then(_vexRenderFolhaComparacao)
+    .catch(()=>{ $("vex-folha-comp-numeros").innerHTML = `<div class="vex-empty">Não foi possível carregar a comparação Folha × Ergon.</div>`; });
   _vexRenderFinanceiro();
   _vexRenderRiscosPendencias();
   _vexRenderRequisitos();
