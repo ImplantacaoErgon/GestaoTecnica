@@ -10,7 +10,7 @@ from datetime import datetime, date, timedelta
 
 from flask import Flask, request, jsonify, send_from_directory, send_file, abort, session
 
-from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_renumeracao, cronograma_anomalias, cronograma_export, cronograma_export_xml, cronograma_comparacao, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, drive_rubricas, comparacao_folha, comparacao_folha_import, google_drive, migracao_quadro_export, requisitos_ia
+from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_renumeracao, cronograma_anomalias, cronograma_export, cronograma_export_xml, cronograma_comparacao, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, drive_rubricas, rubricas_auto_update, comparacao_folha, comparacao_folha_import, google_drive, migracao_quadro_export, requisitos_ia
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 FRONTEND_DIR = os.environ.get(
@@ -2656,6 +2656,19 @@ def create_app():
         inseridos, atualizados = upsert_rubricas(projeto_id, linhas)
         return jsonify({"inseridos": inseridos, "atualizados": atualizados})
 
+    @app.get("/api/rubricas/auto-update/status")
+    def rubricas_auto_update_status():
+        """113ª rodada — última execução (qualquer status) da atualização
+        automática de Rubricas (seg-sex, 8h-18h, horário de Brasília — ver
+        app/rubricas_auto_update.py), pra tela mostrar um aviso de quando foi
+        a última vez que o processo rodou sozinho. `null` quando o recurso
+        está desligado (RUBRICAS_AUTO_UPDATE_PROJETO_ID não configurada) ou
+        ainda não disparou nenhuma vez para este projeto."""
+        pid = request.args.get("projeto_id")
+        if not pid:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        return jsonify(rubricas_auto_update.ultima_execucao(pid))
+
     # ------------------------------------------------------------- comparação folha
     # 55ª rodada: aba "Comparação Folha" (dentro de Folha de Pagamento, junto
     # de Rubricas) — resultado já calculado (pelo cliente) da comparação
@@ -4027,6 +4040,12 @@ def create_app():
         if os.path.isfile(full):
             return send_from_directory(FRONTEND_DIR, path)
         return send_from_directory(FRONTEND_DIR, "index.html")
+
+    # 113ª rodada — liga a thread de agendamento da atualização automática de
+    # Rubricas (seg-sex, 8h-18h, horário de Brasília). Sem efeito nenhum se
+    # RUBRICAS_AUTO_UPDATE_PROJETO_ID não estiver configurada — ver
+    # app/rubricas_auto_update.py.
+    rubricas_auto_update.iniciar_agendador()
 
     return app
 

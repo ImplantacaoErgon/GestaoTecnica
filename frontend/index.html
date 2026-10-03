@@ -1144,6 +1144,7 @@
         <button class="btn small" id="btn-new-rubrica">+ Nova rubrica</button>
       </div>
     </div>
+    <div class="muted" id="rub-auto-update-status" style="font-size:12px;margin:-6px 0 10px 2px;"></div>
     <div class="table-wrap">
       <table>
         <thead><tr><th>Código ERGON</th><th>Verba legado</th><th>Nome</th><th>Grupo de cálculo</th><th>Tipo</th><th>Empresas</th><th>Status</th><th>Analista</th></tr></thead>
@@ -2876,6 +2877,7 @@ async function chamarAuthApi(path, body){
 let USUARIO_LOGADO = null;
 let PARAMETROS = null; // logo + nome da empresa (Configurações > Parâmetros) — ver carregarParametros()
 let PROJETO=null, PROJETOS=[], ETAPAS=[], FRENTES=[], TIPOS=[], RECURSOS=[], USUARIOS=[], ATIVIDADES=[], REQUISITOS=[], RISCOS=[], MARCOS=[], CALENDARIO=[], MANUAIS=[], FATURAS=[], PENDENCIAS=[], ITENS_MIGRACAO=[], RUBRICAS=[];
+let RUB_AUTO_UPDATE_STATUS = null;
 // Todas as dependências do projeto (63ª rodada) — carregada junto com
 // ATIVIDADES (ver loadAtividades()) pra desenhar as ligações no Gantt sem
 // precisar de uma chamada extra por atividade.
@@ -2949,9 +2951,9 @@ async function recarregarDadosDoProjeto(){
     api(`/calendario?projeto_id=${PROJETO.id}`)
   ]);
   fillStaticSelects();
-  await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias(), loadItensMigracao(), loadRubricas()]);
+  await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias(), loadItensMigracao(), loadRubricas(), loadRubricasAutoUpdateStatus()]);
   fillStaticSelects();
-  renderDashboard(); renderCronograma(); renderRequisitos(); renderRiscosMarcos(); renderConfigTable(); renderAnalisarRequisitos(); renderFaturas(); renderPendencias(); renderItensMigracao(); renderRubricas();
+  renderDashboard(); renderCronograma(); renderRequisitos(); renderRiscosMarcos(); renderConfigTable(); renderAnalisarRequisitos(); renderFaturas(); renderPendencias(); renderItensMigracao(); renderRubricas(); renderRubricasAutoUpdateStatus();
   // "Minhas atividades" NÃO depende do projeto ativo desde a 16ª rodada
   // (mostra todos os projetos em que o usuário está delegado) — por isso,
   // ao contrário das demais views desta função, não precisa recarregar
@@ -3143,12 +3145,12 @@ async function afterProjetoReady(){
   wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireGanttToolbar(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireExportarCronograma(); wireExportarCronogramaXml(); wireRemoverCronograma(); wireRemoverRequisitos(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma(); wireRenumerarCronograma();
   wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros(); wireQuadroCicloModal(); wireRubricaModal(); wireRubricasFiltros(); wireImportRubricas(); wireComparacaoFolhaPane(); wireComparacaoFolhaDashboard();
   setupCsvTemplateLink();
-  await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias(), loadItensMigracao(), loadRubricas()]);
+  await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias(), loadItensMigracao(), loadRubricas(), loadRubricasAutoUpdateStatus()]);
   // Reaplica agora que REQUISITOS/ATIVIDADES já estão carregados — os selects
   // "Item do TR" (atividade) e "Atividade (entregável)" (fatura) dependem
   // deles e a primeira chamada acima rodou antes desse load.
   fillStaticSelects();
-  renderDashboard(); renderCronograma(); renderRequisitos(); renderRiscosMarcos(); renderConfigTable(); renderAnalisarRequisitos(); renderFaturas(); renderPendencias(); renderItensMigracao(); renderRubricas();
+  renderDashboard(); renderCronograma(); renderRequisitos(); renderRiscosMarcos(); renderConfigTable(); renderAnalisarRequisitos(); renderFaturas(); renderPendencias(); renderItensMigracao(); renderRubricas(); renderRubricasAutoUpdateStatus();
   $("tabs").style.display = "flex";
 }
 
@@ -5948,6 +5950,31 @@ const STATUS_RUBRICA_COLOR = {
 
 async function loadRubricas(){ RUBRICAS = await api(`/rubricas?projeto_id=${PROJETO.id}`); }
 
+// 113ª rodada — status da atualização automática das Rubricas (seg-sex,
+// 8h-18h, horário de Brasília — ver app/rubricas_auto_update.py), exibido
+// como um avisinho logo acima da tabela. `null` quando o recurso está
+// desligado (variável de ambiente não configurada no backend) ou ainda não
+// disparou nenhuma vez — nesse caso não mostra nada (sem poluir a tela com
+// um aviso de "nunca rodou" pros clientes que nem usam este recurso).
+async function loadRubricasAutoUpdateStatus(){
+  try{ RUB_AUTO_UPDATE_STATUS = await api(`/rubricas/auto-update/status?projeto_id=${PROJETO.id}`); }
+  catch(e){ RUB_AUTO_UPDATE_STATUS = null; }
+}
+function renderRubricasAutoUpdateStatus(){
+  const el = $("rub-auto-update-status");
+  if(!el) return;
+  const s = RUB_AUTO_UPDATE_STATUS;
+  if(!s){ el.textContent = ""; return; }
+  const quando = fmtDateTime(s.concluido_em || s.iniciado_em);
+  if(s.status === "concluido"){
+    el.innerHTML = `🔄 Última atualização automática: <b>${esc(quando)}</b> — ${s.inseridos||0} nova(s), ${s.atualizados||0} atualizada(s).`;
+  }else if(s.status === "erro"){
+    el.innerHTML = `⚠️ A última atualização automática (${esc(quando)}) falhou: ${esc(s.mensagem_erro||"erro desconhecido")}.`;
+  }else{
+    el.innerHTML = `🔄 Atualização automática em andamento desde ${esc(quando)}…`;
+  }
+}
+
 function rubFilters(){
   return {
     search: ($("rub-search").value||"").trim().toLowerCase(),
@@ -5973,23 +6000,14 @@ function renderRubricas(){
 
   const porStatus = {};
   RUBRICAS.forEach(r=>{ porStatus[r.status] = (porStatus[r.status]||0)+1; });
-  // 112ª rodada — pedido do usuário: % de cada status sobre o total de
-  // rubricas levantadas, ao lado da quantidade em cada cartão (igual em
-  // espírito ao que já existe no Dashboard Comparação Folha). O total usado
-  // como base é RUBRICAS.length (o mesmo "Total levantadas" já mostrado no
-  // 1º cartão) — inclui rubricas "Excluída" se houver (não tem cartão
-  // próprio nesse quadro), então os 5 % dos status abaixo não precisam
-  // somar 100%; o cartão "Total levantadas" não mostra % (é a própria base).
-  const totalRub = RUBRICAS.length;
-  const pctRub = v => totalRub ? `${(100*v/totalRub).toFixed(1)}%` : "—";
   $("rub-kpis").innerHTML = [
-    {l:"Total levantadas", v:totalRub, pct:null},
+    {l:"Total levantadas", v:RUBRICAS.length},
     {l:"Em levantamento", v:porStatus["Em levantamento"]||0},
     {l:"Enviadas à Techne", v:porStatus["Enviada à Techne"]||0},
     {l:"Liberadas p/ testes", v:porStatus["Liberada para testes"]||0},
     {l:"Em homologação", v:porStatus["Em homologação"]||0},
     {l:"Homologadas", v:porStatus["Homologada"]||0},
-  ].map(k=>`<div class="kpi"><div class="label">${k.l}</div><div class="value">${k.v}</div>${k.pct===null?"":`<div class="muted" style="margin-top:2px;">${pctRub(k.v)}</div>`}</div>`).join("");
+  ].map(k=>`<div class="kpi"><div class="label">${k.l}</div><div class="value">${k.v}</div></div>`).join("");
 
   $("rubricas-tbody").innerHTML = list.length ? list.map(r=>{
     const nome = r.nome_abreviado || r.nome_extenso || r.descricao_legado || "—";
@@ -6301,6 +6319,7 @@ async function confirmarImportacaoRubricas(){
     });
     toast(`Importação concluída: ${r.inseridos} nova(s), ${r.atualizados} atualizada(s).`);
     await loadRubricas(); renderRubricas();
+    await loadRubricasAutoUpdateStatus(); renderRubricasAutoUpdateStatus();
     closeImportarRubricasModal();
   }catch(e){}
   rubImpConfirmando = false;
