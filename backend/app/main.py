@@ -816,6 +816,34 @@ def validar_consistencia_conclusao(atual, data, relato_para_concluir_sem_data=Fa
         )
 
 
+def validar_ordem_datas(atual, data):
+    """Trava amigável pros dois pares Início/Fim (Previsto e Real) — o banco já
+    impõe isso via CHECK constraint (atividades_check/atividades_check1), mas sem
+    esta checagem o erro que chega na tela do modal individual é o erro cru do
+    Postgres (reportado pelo usuário: reabriu uma atividade concluída, digitou
+    um novo Início Real pro trabalho retomado e esqueceu de também atualizar o
+    Fim Real antigo, que ficou anterior ao novo Início — a tela só mostrou
+    "violates check constraint "atividades_check1""). A Edição em Lote
+    (cronograma_edicao_lote._avaliar_progresso) já faz essa mesma checagem pro
+    par de datas reais há mais tempo; esta função estende a mesma regra — pros
+    dois pares, Previsto e Real — pro modal individual, que não tinha nenhuma.
+
+    Calculado em cima do estado RESULTANTE (mescla `data` com `atual`), igual a
+    classificar_conclusao/validar_consistencia_conclusao: se um PUT só manda um
+    dos dois campos do par, o outro ainda é considerado (ex: só alterar o Início
+    Real pra depois do Fim Real já gravado também é pego aqui)."""
+    for campo_ini, campo_fim, rotulo_ini, rotulo_fim in (
+        ("dtini_prev", "dtfim_prev", "Início Previsto", "Fim Previsto"),
+        ("dtini_real", "dtfim_real", "Início Real", "Fim Real"),
+    ):
+        ini = _valor_mesclado(atual, data, campo_ini)
+        fim = _valor_mesclado(atual, data, campo_fim)
+        if ini and fim and fim < ini:
+            raise ValueError(
+                f'A Data de "{rotulo_fim}" ({fim}) não pode ser anterior à Data de "{rotulo_ini}" ({ini}).'
+            )
+
+
 def aplicar_percentual_inicial(atual, data):
     """Sugestão automática de % concluído ao registrar que a atividade começou de
     verdade: quando a Data de Início Real está sendo preenchida agora pela primeira
@@ -1417,6 +1445,7 @@ def create_app():
             }), 400
         try:
             validar_consistencia_conclusao(None, data)
+            validar_ordem_datas(None, data)
         except ValueError as e:
             return jsonify({"erro": str(e)}), 400
         aplicar_percentual_inicial(None, data)
@@ -1434,7 +1463,7 @@ def create_app():
     def update_atividade(id):
         data = request.get_json(force=True)
         atual = db.fetch_one(
-            f"SELECT status, percentual_concluido, dtini_real, dtfim_real, dtfim_prev, "
+            f"SELECT status, percentual_concluido, dtini_real, dtfim_real, dtini_prev, dtfim_prev, "
             f"prazo_horas, horas_realizadas "
             f"FROM atividades WHERE id = {db.q(id)}"
         )
@@ -1478,6 +1507,7 @@ def create_app():
         classificar_conclusao(atual, data, relato_para_concluir_sem_data=relato_para_concluir_sem_data)
         try:
             validar_consistencia_conclusao(atual, data, relato_para_concluir_sem_data=relato_para_concluir_sem_data)
+            validar_ordem_datas(atual, data)
         except ValueError as e:
             return jsonify({"erro": str(e)}), 400
         aplicar_percentual_inicial(atual, data)
@@ -4250,6 +4280,16 @@ def create_app():
             }), 409
         if "duplicate key value violates unique constraint" in baixo:
             return jsonify({"erro": "Já existe um registro com esses mesmos dados (código/nome duplicado)."}), 409
+        if 'violates check constraint "atividades_check' in baixo:
+            # Rede de segurança pro mesmo caso que validar_ordem_datas() já pega no modal
+            # individual e create/update_atividade — cobre quem grava `atividades` por um
+            # caminho que não passa por lá (ex: cronograma_import.py, que escreve direto
+            # via SQL). Mensagem genérica de propósito: não dá pra saber aqui qual dos dois
+            # pares (Previsto/Real) foi o culpado, só que um Fim ficou antes do Início.
+            return jsonify({
+                "erro": "Não é possível salvar: a Data de Fim (Previsto ou Real) ficaria anterior à "
+                        "Data de Início correspondente. Confira as datas da atividade.",
+            }), 400
         return jsonify({"erro": msg}), 500
 
     # ------------------------------------------------------------ front-end estático
