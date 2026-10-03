@@ -668,6 +668,19 @@
   .vex-conv-label{font-size:11px;color:var(--text-muted);text-align:center;white-space:nowrap;}
   .vex-conv-label .sub{display:block;font-size:13px;font-weight:700;color:var(--ok);}
 
+  /* 119ª rodada (2ª leva) — pizzas (small multiples) por competência no
+     card "Convergência geral por competência": pedido do usuário pra
+     mostrar os 3 percentuais (Convergente/Divergente/Não programada), não
+     só o de Convergente. */
+  .vex-donut-row{display:flex;flex-wrap:wrap;gap:22px 28px;justify-content:center;margin-top:14px;}
+  .vex-donut-item{display:flex;flex-direction:column;align-items:center;gap:6px;}
+  .vex-donut-mes{font-size:11.5px;font-weight:600;color:var(--text-muted);}
+  .vex-donut-item svg text{font-family:'IBM Plex Sans',system-ui,sans-serif;}
+  .vex-donut-body{display:flex;align-items:center;gap:10px;}
+  .vex-donut-pcts{display:flex;flex-direction:column;gap:3px;font-size:11.5px;font-weight:700;text-align:left;}
+  .vex-donut-pcts span{display:flex;align-items:center;gap:5px;white-space:nowrap;}
+  .vex-donut-pcts span::before{content:"";width:8px;height:8px;border-radius:2px;background:currentColor;flex-shrink:0;}
+
   .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);padding:10px 18px;border-radius:8px;font-size:13px;z-index:100;box-shadow:var(--shadow);color:#fff;}
   .confirm-box{padding:20px;text-align:center;}
   .confirm-box p{margin:0 0 16px;color:var(--text-muted);font-size:13.5px;}
@@ -5682,24 +5695,45 @@ function _vexTabelaPorTipoRubrica(dados){
     </div>`;
 }
 
-// Gráfico A (visão "Gráficos"): evolução da convergência geral por
-// competência — barra 100% empilhada (Convergente na base, é a métrica "boa"
-// e fica ancorada na linha de base; Divergente e Não programada por cima),
-// usando os MESMOS tokens de status do resto do app (nunca a paleta
-// categórica — isto é estado/avaliação, não identidade).
+// Donut simples (anel) com até 3 fatias — usado pelo Gráfico A. Construído
+// com 3 <circle> concêntricos em stroke-dasharray/stroke-dashoffset (técnica
+// clássica de "donut em SVG sem lib"), girados -90° pra começar às 12h.
+// `GAP` deixa um respiro visível (~3px) em --surface entre fatias, mesmo
+// espírito do vão de 2px entre segmentos empilhados que a skill de dataviz
+// pede pra barras.
+function _vexDonut(pConv, pDiv, pNp, size, totalLabel){
+  const r = size/2 - 9, cx = size/2, cy = size/2, C = 2*Math.PI*r, GAP = 3;
+  const segs = [["var(--ok)",pConv], ["var(--danger)",pDiv], ["var(--text-faint)",pNp]];
+  let acc = 0;
+  const arcos = segs.map(([cor,v])=>{
+    if(v<=0) return "";
+    const len = Math.max(0, (v/100)*C - GAP);
+    const dashoffset = -((acc/100)*C);
+    acc += v;
+    return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${cor}" stroke-width="15" stroke-dasharray="${len.toFixed(1)} ${(C-len).toFixed(1)}" stroke-dashoffset="${dashoffset.toFixed(1)}" transform="rotate(-90 ${cx} ${cy})"></circle>`;
+  }).join("");
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--surface-2)" stroke-width="15"></circle>
+    ${arcos}
+    <text x="${cx}" y="${cy+4}" text-anchor="middle" style="font-size:11px;font-weight:700;fill:var(--text);">${esc(totalLabel)}</text>
+  </svg>`;
+}
+
+// Gráfico A (visão "Gráficos"): composição da convergência geral por
+// competência — uma pizza (donut) por competência, com os 3 percentuais
+// (Convergente/Divergente/Não programada) sempre usando os MESMOS tokens de
+// status do resto do app (nunca a paleta categórica — isto é estado/
+// avaliação, não identidade).
 //
-// 119ª rodada — pedido do usuário (verbatim: "melhore esses gráficos, estão
-// confusos"): a versão anterior (barras em HTML/CSS, sem nenhuma grade de
-// referência) deixava a altura de cada segmento sem nenhuma escala pra
-// comparar — só dava pra "achar" que um pedaço era maior que o outro. Agora
-// é SVG com a MESMA grade (0/25/50/75/100%) e o mesmo sistema visual do
-// gráfico B logo abaixo (_vexGraficoTipoRubrica) — um único sistema de
-// leitura pros dois gráficos da seção, como pede a skill de dataviz — e o
-// rótulo de % Convergente (a métrica "boa", já era destacada antes) agora
-// fica ancorado sempre na mesma altura (topo da barra), formando uma fileira
-// legível em vez de números soltos embaixo de cada coluna. A composição
-// completa (os 3 percentuais) continua disponível ao passar o mouse/tocar a
-// barra.
+// 119ª rodada (2ª leva) — pedido do usuário (verbatim: "esse 1o quadro...
+// aparece o % apenas de Convergentes, faça pizza ou linhas com os 3%"): a
+// versão anterior (barra 100% empilhada) só rotulava o percentual
+// Convergente de forma visível — os outros dois só apareciam no hover. Como
+// os 3 percentuais sempre somam 100% por competência (não há "tendência" a
+// mostrar numa única competência, são partes de um todo), pizza por
+// competência comunica isso melhor que uma linha de 3 séries — e, ao
+// contrário da barra empilhada, deixa todos os 3 números escritos por
+// extenso, sempre visíveis, abaixo de cada fatia.
 function _vexGraficoConvergencia(dados){
   const meses = dados.competencias;
   const porMes = {};
@@ -5712,36 +5746,23 @@ function _vexGraficoConvergencia(dados){
     r.naoProgramada += Number(l.total_nao_programada||0);
   });
 
-  const W=360, H=200, padL=40, padR=16, padT=22, padB=28;
-  const plotW=W-padL-padR, plotH=H-padT-padB;
-  const n = meses.length;
-  const y = v => padT + plotH*(1-v/100);
-  const gridLines = [0,25,50,75,100].map(v=>`
-    <line class="vex-grid-line" x1="${padL}" x2="${W-padR}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}"></line>
-    <text class="vex-axis-label" x="${padL-6}" y="${(y(v)+3).toFixed(1)}" text-anchor="end">${v}%</text>`).join("");
-
-  const slot = plotW/n;
-  const barW = Math.min(46, slot*0.56);
-  const corpo = meses.map((m,i)=>{
+  const itens = meses.map(m=>{
     const r = porMes[m];
     const pct = v => r.total ? (100*v/r.total) : 0;
     const pConv = pct(r.convergente), pDiv = pct(r.divergente), pNp = pct(r.naoProgramada);
-    const cx = padL + slot*(i+0.5);
-    const x0 = cx - barW/2;
-    const segs = [["var(--ok)",pConv], ["var(--danger)",pDiv], ["var(--text-faint)",pNp]];
-    let acc = 0;
-    const rects = segs.map(([cor,v])=>{
-      if(v<=0){ return ""; }
-      const y0 = y(acc), y1 = y(acc+v);
-      acc += v;
-      const alto = y0-y1;
-      const gap = alto>4 ? 1 : 0; // respiro de ~2px em --surface entre segmentos, só quando cabe
-      return `<rect x="${x0.toFixed(1)}" y="${(y1+gap).toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0,alto-2*gap).toFixed(1)}" fill="${cor}"></rect>`;
-    }).join("");
     const titulo = `${_vexFormatarMes(m)}: ${Math.round(pConv)}% convergente, ${Math.round(pDiv)}% divergente, ${Math.round(pNp)}% não programada (${r.total.toLocaleString('pt-BR')} linhas)`;
-    const rotuloConv = `<text class="vex-value-label" x="${cx.toFixed(1)}" y="${(padT-8).toFixed(1)}" text-anchor="middle" style="fill:var(--ok);">${Math.round(pConv)}%</text>`;
-    const rotuloMes = `<text class="vex-axis-label" x="${cx.toFixed(1)}" y="${(H-padB+16).toFixed(1)}" text-anchor="middle">${_vexFormatarMes(m)}</text>`;
-    return `<g>${rects}<title>${esc(titulo)}</title></g>${rotuloConv}${rotuloMes}`;
+    const donut = _vexDonut(pConv, pDiv, pNp, 92, r.total ? r.total.toLocaleString('pt-BR') : "—");
+    return `<div class="vex-donut-item" title="${esc(titulo)}">
+        <div class="vex-donut-mes">${_vexFormatarMes(m)}</div>
+        <div class="vex-donut-body">
+          ${donut}
+          <div class="vex-donut-pcts">
+            <span style="color:var(--ok);">${Math.round(pConv)}% conv.</span>
+            <span style="color:var(--danger);">${Math.round(pDiv)}% div.</span>
+            <span style="color:var(--text-faint);">${Math.round(pNp)}% não prog.</span>
+          </div>
+        </div>
+      </div>`;
   }).join("");
 
   return `
@@ -5752,9 +5773,7 @@ function _vexGraficoConvergencia(dados){
         <span class="item"><span class="swatch" style="background:var(--danger);"></span>Divergente</span>
         <span class="item"><span class="swatch" style="background:var(--text-faint);"></span>Não programada</span>
       </div>
-      <div class="vex-svg-wrap"><svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;overflow:visible;">
-        ${gridLines}${corpo}
-      </svg></div>
+      <div class="vex-donut-row">${itens}</div>
     </div>`;
 }
 
@@ -5762,7 +5781,14 @@ function _vexGraficoConvergencia(dados){
 // aqui SIM são duas identidades categóricas reais (Vantagem × Desconto, dois
 // grupos permanentes do negócio, não um "destaque vs. contexto"), por isso
 // usa dois slots da paleta categórica fixa (--series-1/--series-2) em vez do
-// padrão accent+cinza da Curva S.
+// padrão accent+cinza da Curva S. Abaixo do rótulo de % Convergente (a
+// métrica "boa", em destaque), um segundo rótulo menor "NP xx%" — em
+// var(--text-faint), nunca uma 3ª cor categórica, pra não competir com a
+// identidade Vantagem/Desconto — mostra o % de rubricas Não Programada/
+// Não Cadastrada daquele tipo (119ª rodada, 2ª leva: pedido do usuário —
+// "falta o % de rubricas não progra/cadastradas"). O % Divergente "puro"
+// (nem convergente, nem não programada) fica implícito (100% − os dois
+// rótulos) — já está detalhado por competência no Gráfico A ao lado.
 //
 // 119ª rodada — pedido do usuário ("melhore esses gráficos, estão
 // confusos"): com só 2-3 competências carregadas (o caso mais comum no
@@ -5776,11 +5802,14 @@ function _vexGraficoConvergencia(dados){
 // sentido de mostrar, volta a ser o gráfico de linha original.
 function _vexGraficoTipoRubrica(dados){
   const meses = dados.competencias;
-  const mapa = {};
+  const mapa = {}, mapaNP = {};
   dados.por_tiporubr.forEach(l=>{
-    if(!mapa[l.tiporubr]) mapa[l.tiporubr] = {};
-    const totalLinhas = Number(l.total_linhas||0), convergente = Number(l.total_sem_divergencia||0);
+    if(!mapa[l.tiporubr]){ mapa[l.tiporubr] = {}; mapaNP[l.tiporubr] = {}; }
+    const totalLinhas = Number(l.total_linhas||0);
+    const convergente = Number(l.total_sem_divergencia||0);
+    const naoProgramada = Number(l.total_nao_programada||0);
     mapa[l.tiporubr][l.mesano] = totalLinhas ? Math.round(100*convergente/totalLinhas) : null;
+    mapaNP[l.tiporubr][l.mesano] = totalLinhas ? Math.round(100*naoProgramada/totalLinhas) : null;
   });
   const ordemPreferida = ["VANTAGEM","DESCONTO"];
   const tipos = Object.keys(mapa).sort((a,b)=>{
@@ -5793,7 +5822,7 @@ function _vexGraficoTipoRubrica(dados){
   const n = meses.length;
   const usarBarras = n<=3;
 
-  const W=360, H=200, padL=40, padR=16, padT=22, padB=28;
+  const W=360, H=200, padL=40, padR=16, padT=34, padB=28;
   const plotW=W-padL-padR, plotH=H-padT-padB;
   const y = v => padT + plotH*(1-v/100);
   const gridLines = [0,25,50,75,100].map(v=>`
@@ -5812,11 +5841,13 @@ function _vexGraficoTipoRubrica(dados){
       return tipos.map((tipo,ti)=>{
         const v = mapa[tipo][m];
         if(v==null) return "";
+        const np = mapaNP[tipo][m];
         const bx = x0 + ti*(barW+6);
         const by = y(v);
         const h = (padT+plotH) - by;
-        return `<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0,h).toFixed(1)}" rx="2" fill="${cores[ti]}"><title>${esc(tipo)} — ${_vexFormatarMes(m)}: ${v}%</title></rect>
-          <text class="vex-value-label" x="${(bx+barW/2).toFixed(1)}" y="${(by-5).toFixed(1)}" text-anchor="middle" style="fill:${cores[ti]};font-size:10px;">${v}%</text>`;
+        const rotuloNP = np!=null ? `<text class="vex-axis-label" x="${(bx+barW/2).toFixed(1)}" y="${(by-16).toFixed(1)}" text-anchor="middle" style="font-size:9px;">(NP ${np}%)</text>` : "";
+        return `<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0,h).toFixed(1)}" rx="2" fill="${cores[ti]}"><title>${esc(tipo)} — ${_vexFormatarMes(m)}: ${v}% convergente, ${np==null?"—":np+"%"} não programada/cadastrada</title></rect>
+          <text class="vex-value-label" x="${(bx+barW/2).toFixed(1)}" y="${(by-5).toFixed(1)}" text-anchor="middle" style="fill:${cores[ti]};font-size:10px;">${v}%</text>${rotuloNP}`;
       }).join("");
     }).join("");
     xLabels = meses.map((m,i)=>`<text class="vex-axis-label" x="${(padL+slot*(i+0.5)).toFixed(1)}" y="${(H-padB+16).toFixed(1)}" text-anchor="middle">${_vexFormatarMes(m)}</text>`).join("");
@@ -5841,13 +5872,15 @@ function _vexGraficoTipoRubrica(dados){
       });
       const ultimoIdx = serie.map((v,i)=>v==null?-1:i).filter(i=>i>=0).pop();
       const ultimoVal = ultimoIdx!=null ? serie[ultimoIdx] : null;
-      if(ultimoIdx!=null) yUltimos.push({ti, idx:ultimoIdx, val:ultimoVal});
+      const ultimoNP = ultimoIdx!=null ? mapaNP[tipo][meses[ultimoIdx]] : null;
+      if(ultimoIdx!=null) yUltimos.push({ti, idx:ultimoIdx, val:ultimoVal, np:ultimoNP});
       return `<path d="${d.trim()}" fill="none" stroke="${cores[ti]}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></path>`;
     }).join("");
 
     // rótulos de valor final — afasta verticalmente se os dois convergirem
     // muito perto (mesma técnica da Curva S), nunca vaza pra fora do cartão
-    // (ancorado à esquerda do ponto, "end").
+    // (ancorado à esquerda do ponto, "end"). O % Não Programada/Cadastrada
+    // (rotuloNP) vai uma linha acima, sempre em --text-faint.
     let marcadores = "";
     if(yUltimos.length){
       if(yUltimos.length===2 && Math.abs(y(yUltimos[0].val)-y(yUltimos[1].val))<12){
@@ -5857,8 +5890,9 @@ function _vexGraficoTipoRubrica(dados){
       }
       marcadores = yUltimos.map(u=>{
         const cx = x(u.idx), cy = y(u.val), yLabel = u._yLabel!=null ? u._yLabel : cy;
-        return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4" fill="${cores[u.ti]}" stroke="var(--surface)" stroke-width="2"><title>${esc(tipos[u.ti])}: ${u.val}%</title></circle>
-          <text class="vex-value-label" x="${(cx-9).toFixed(1)}" y="${(yLabel+3).toFixed(1)}" text-anchor="end" style="fill:${cores[u.ti]};">${u.val}%</text>`;
+        const rotuloNP = u.np!=null ? `<text class="vex-axis-label" x="${(cx-9).toFixed(1)}" y="${(yLabel-8).toFixed(1)}" text-anchor="end" style="font-size:9px;">(NP ${u.np}%)</text>` : "";
+        return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4" fill="${cores[u.ti]}" stroke="var(--surface)" stroke-width="2"><title>${esc(tipos[u.ti])}: ${u.val}% convergente, ${u.np==null?"—":u.np+"%"} não programada/cadastrada</title></circle>
+          <text class="vex-value-label" x="${(cx-9).toFixed(1)}" y="${(yLabel+3).toFixed(1)}" text-anchor="end" style="fill:${cores[u.ti]};">${u.val}%</text>${rotuloNP}`;
       }).join("");
     }
     corpo = linhas + marcadores;
@@ -5866,7 +5900,10 @@ function _vexGraficoTipoRubrica(dados){
 
   return `<div class="card" style="box-shadow:none;border:1px solid var(--border);">
     <div class="vex-module-head"><h3 style="font-size:12.5px;">% convergente por Tipo de Rubrica</h3></div>
-    <div class="vex-legend">${tipos.map((t,i)=>`<span class="item"><span class="swatch${usarBarras?"":" line"}" style="background:${cores[i]};"></span>${esc(t)}</span>`).join("")}</div>
+    <div class="vex-legend">
+      ${tipos.map((t,i)=>`<span class="item"><span class="swatch${usarBarras?"":" line"}" style="background:${cores[i]};"></span>${esc(t)}</span>`).join("")}
+      <span class="item"><span class="swatch" style="background:var(--text-faint);"></span>NP = Não Programada/Cadastrada</span>
+    </div>
     <div class="vex-svg-wrap"><svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;overflow:visible;">
       ${gridLines}${corpo}${xLabels}
     </svg></div>
