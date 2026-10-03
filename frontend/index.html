@@ -9845,10 +9845,18 @@ async function cfdCarregarDados(){
   catch(e){ return; }
 
   const g = r.geral || {};
+  // 115ª rodada — pedido do usuário (verbatim): "entre os dois percentuais
+  // apresentados na imagem, inclua o percentual das rubricas não
+  // programadas/não cadastradas e que estejam na situação Em Levantamento
+  // na tabela de Rubricas" — novo KPI "% Não prog./cadastr." entre os dois
+  // que já existiam, lendo g.pct_nao_programada (ver dashboard() no
+  // backend, mesmo critério _NAO_PROGRAMADA_CARVE_OUT_SQL já usado no
+  // quadro "Comparação por Tipo de Rubrica" logo abaixo nesta mesma aba).
   $("cfd-kpis").innerHTML = [
     ["Linhas comparadas", (g.total||0).toLocaleString('pt-BR')],
     ["Convergente", (g.total_nao_divergentes||0).toLocaleString('pt-BR')],
     ["% sem divergência (geral)", g.pct_nao_divergente==null ? "—" : `${g.pct_nao_divergente}%`],
+    ["% Não prog./cadastr. (Em levantamento)", g.pct_nao_programada==null ? "—" : `${g.pct_nao_programada}%`],
     ["% com divergência (geral)", g.pct_divergente==null ? "—" : `${g.pct_divergente}%`],
   ].map(([l,v])=>`<div><div style="font-size:20px;font-weight:600;">${v}</div><div class="muted" style="font-size:11.5px;">${esc(l)}</div></div>`).join("");
 

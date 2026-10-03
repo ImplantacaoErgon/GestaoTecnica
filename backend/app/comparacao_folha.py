@@ -459,6 +459,17 @@ def dashboard(projeto_id, mesano=None):
     # Rubricas não é mensal: ver comentário do bloco.)
     where = _where_filtros(projeto_id=projeto_id, mesano=mesano)
 
+    # 115ª rodada — pedido do usuário (verbatim): "entre os dois percentuais
+    # apresentados na imagem, inclua o percentual das rubricas não
+    # programadas/não cadastradas e que estejam na situação Em Levantamento
+    # na tabela de Rubricas" — pro quadro de KPIs "geral" deste dashboard()
+    # (topo da aba Dashboard Comparação Folha). Mesmo critério
+    # (_NAO_PROGRAMADA_CARVE_OUT_SQL) já usado logo abaixo em por_tiporubr
+    # (95ª rodada). "Não programada/cadastrada" é uma categoria DEDUZIDA de
+    # Divergente (não somada à parte): rubrica ainda em levantamento, que
+    # nem chegou a ser comparada de verdade no Ergon, não é uma divergência
+    # de VALOR real — mesmo raciocínio já explicado no comentário da 94ª
+    # rodada, acima.
     geral = db.fetch_one(f"""
         SELECT
           COUNT(*) AS total,
@@ -467,25 +478,14 @@ def dashboard(projeto_id, mesano=None):
         FROM comparacao_folha{where}
     """) or {"total": 0, "total_nao_divergentes": 0, "total_nao_programada": 0}
     total_geral = geral.get("total") or 0
-    total_nao_programada = geral.get("total_nao_programada") or 0
+    total_nao_programada_geral = geral.get("total_nao_programada") or 0
     # total_divergentes/pct_divergente calculados aqui (não como "100 - pct_nao_divergente"
     # no front) pra bater exatamente com a contagem real de linhas divergentes, sem
     # arredondamento em cascata — 69ª/70ª rodada, pedido do usuário pro Dashboard de
     # Comparação de Folha mostrar também o % COM divergência, não só o % sem.
-    #
-    # 111ª rodada — pedido do usuário: incluir, entre o % Convergente e o %
-    # Divergente destes KPIs do topo, o % de "Não programada/cadastrada" (em
-    # levantamento) — mesma categoria que já existe no quadro "Comparação por
-    # Tipo de Rubrica" mais abaixo (_NAO_PROGRAMADA_CARVE_OUT_SQL), só que
-    # aqui calculada pro total geral, não quebrada por tipo de rubrica.
-    # Por consistência com aquele quadro (onde "Divergente" já é definido
-    # como "divergente E NÃO é não-programada" — ver por_tiporubr abaixo —
-    # de modo que Convergente + Não programada + Divergente somem 100%),
-    # total_divergentes aqui passou a DEDUZIR total_nao_programada também
-    # (antes somava tudo que não era "Não Divergente" num balde só).
-    geral["total_divergentes"] = total_geral - (geral.get("total_nao_divergentes") or 0) - total_nao_programada
+    geral["total_divergentes"] = total_geral - (geral.get("total_nao_divergentes") or 0) - total_nao_programada_geral
     geral["pct_nao_divergente"] = round(100 * (geral.get("total_nao_divergentes") or 0) / total_geral, 1) if total_geral else None
-    geral["pct_nao_programada"] = round(100 * total_nao_programada / total_geral, 1) if total_geral else None
+    geral["pct_nao_programada"] = round(100 * total_nao_programada_geral / total_geral, 1) if total_geral else None
     geral["pct_divergente"] = round(100 * geral["total_divergentes"] / total_geral, 1) if total_geral else None
 
     por_situacao = db.fetch_all(f"""
