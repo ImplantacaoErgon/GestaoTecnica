@@ -638,6 +638,7 @@
   .vex-module-link{font-size:12px;color:var(--accent-strong);text-decoration:none;font-weight:600;cursor:pointer;background:none;border:none;font-family:inherit;padding:0;}
   .vex-module-link:hover{text-decoration:underline;}
   .vex-empty{color:var(--text-faint);font-size:12.5px;padding:10px 0;}
+  .vex-scurve-aviso{margin-top:8px;font-size:11.5px;color:var(--warn);background:var(--warn-soft);border-radius:6px;padding:6px 10px;cursor:help;}
 
   /* 118ª rodada — card maior "Folha de Pagamento" (funil de Rubricas +
      comparação Ergon×legado por competência, em dois modos: Números/Gráficos) */
@@ -5426,13 +5427,32 @@ function _vexCurvaSCalcular(){
     const n = ATIVIDADES.filter(a=>STATUS_FAMILIA_CONCLUIDA.includes(a.status) && a.dtfim_real && a.dtfim_real<=corte).length;
     return total ? Math.round(100*n/total) : 0;
   });
-  return {meses:janela, planejado, realizado, hojeMes: hojeISO.slice(0,7)};
+  // 119ª rodada (3ª leva) — pedido do usuário ("por que o percentual do
+  // executado está tão baixo?"): o Realizado aqui só conta atividade
+  // concluída que TAMBÉM tem Data Fim Real preenchida (precisa de uma data
+  // pra saber em que mês do eixo contar o avanço) — diferente do card
+  // "Concluídas" do dashboard/KPIs, que conta só pelo status, sem exigir
+  // essa data. Quando a equipe muda o status pra "Concluída" sem preencher
+  // a Data Fim Real, a atividade entra no % de "Concluídas" mas NÃO entra
+  // nesta curva — é a causa mais comum de um Realizado muito menor aqui do
+  // que o % de Concluídas visto em outras telas. Contado aqui pra avisar
+  // isso diretamente no gráfico, em vez de deixar a diferença sem explicação.
+  const concluidasSemData = ATIVIDADES.filter(a=>STATUS_FAMILIA_CONCLUIDA.includes(a.status) && !a.dtfim_real).length;
+  return {meses:janela, planejado, realizado, hojeMes: hojeISO.slice(0,7), concluidasSemData};
 }
 
 // SVG desenhado à mão (sem lib de gráficos no projeto) — padrão de "emphasis":
-// 1 cor de destaque (accent, pro Realizado) + 1 cinza (pro Planejado, que aqui
-// é só contexto), em vez da paleta categórica cheia — ver skill de dataviz,
+// 1 cor de destaque (pro Realizado) + 1 cinza (pro Planejado, que aqui é só
+// contexto), em vez da paleta categórica cheia — ver skill de dataviz,
 // "quando uma série é o ponto e a outra é só contexto".
+//
+// 119ª rodada (3ª leva) — pedido do usuário ("mude para cores bem
+// diferentes entre um e outro"): a cor de destaque era var(--accent), um
+// azul-marinho BEM dessaturado — perto demais, em tom, do cinza neutro de
+// --text-faint usado no Planejado (os dois são "frios" e com saturação
+// baixa). Trocado pro laranja de --series-2 (quente, saturado, já validado
+// pra contraste/CVD pela skill de dataviz) — contraste de matiz máximo
+// contra o cinza frio do Planejado, em claro e escuro.
 function _vexRenderCurvaS(curva){
   const wrap = $("vex-scurve-chart"), legend = $("vex-scurve-legend");
   if(!curva || curva.meses.length<2){
@@ -5442,7 +5462,7 @@ function _vexRenderCurvaS(curva){
   }
   legend.innerHTML = `
     <span class="item"><span class="swatch line" style="background:var(--text-faint);"></span>Planejado</span>
-    <span class="item"><span class="swatch line" style="background:var(--accent);"></span>Realizado</span>`;
+    <span class="item"><span class="swatch line" style="background:var(--series-2);"></span>Realizado</span>`;
 
   const W=760, H=230, padL=34, padR=16, padT=12, padB=26;
   const plotW = W-padL-padR, plotH = H-padT-padB;
@@ -5489,13 +5509,18 @@ function _vexRenderCurvaS(curva){
     ${gridLines}
     ${linhaHoje}
     <path d="${pathFrom(curva.planejado)}" fill="none" stroke="var(--text-faint)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></path>
-    <path d="${pathFrom(curva.realizado)}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></path>
+    <path d="${pathFrom(curva.realizado)}" fill="none" stroke="var(--series-2)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"></path>
     <circle cx="${xFim.toFixed(1)}" cy="${y(ultimoPlan).toFixed(1)}" r="4" fill="var(--text-faint)" stroke="var(--surface)" stroke-width="2"><title>Planejado: ${ultimoPlan}%</title></circle>
-    <circle cx="${xFim.toFixed(1)}" cy="${y(ultimoReal).toFixed(1)}" r="4" fill="var(--accent)" stroke="var(--surface)" stroke-width="2"><title>Realizado: ${ultimoReal}%</title></circle>
+    <circle cx="${xFim.toFixed(1)}" cy="${y(ultimoReal).toFixed(1)}" r="4" fill="var(--series-2)" stroke="var(--surface)" stroke-width="2"><title>Realizado: ${ultimoReal}%</title></circle>
     <text class="vex-value-label" x="${(xFim-9).toFixed(1)}" y="${(yPlanLabel+3).toFixed(1)}" text-anchor="end" style="fill:var(--text-muted);">${ultimoPlan}%</text>
-    <text class="vex-value-label" x="${(xFim-9).toFixed(1)}" y="${(yRealLabel+3).toFixed(1)}" text-anchor="end">${ultimoReal}%</text>
+    <text class="vex-value-label" x="${(xFim-9).toFixed(1)}" y="${(yRealLabel+3).toFixed(1)}" text-anchor="end" style="fill:var(--series-2);">${ultimoReal}%</text>
     ${xLabels}
   </svg>`;
+  if(curva.concluidasSemData>0){
+    wrap.innerHTML += `<div class="vex-scurve-aviso" title="Atividades com status concluído, mas sem a Data Fim Real preenchida em Cronograma — como esta curva só sabe EM QUE MÊS contar um avanço através dessa data, elas não entram no Realizado, mesmo já estando concluídas.">
+      ⚠ ${curva.concluidasSemData} atividade${curva.concluidasSemData>1?"s":""} concluída${curva.concluidasSemData>1?"s":""} sem Data Fim Real preenchida não entra${curva.concluidasSemData>1?"m":""} nesta curva.
+    </div>`;
+  }
 }
 
 // Progresso por frente de trabalho — identidade CATEGÓRICA de verdade (cada
