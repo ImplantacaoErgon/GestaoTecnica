@@ -5686,10 +5686,20 @@ function _vexTabelaPorTipoRubrica(dados){
 // competência — barra 100% empilhada (Convergente na base, é a métrica "boa"
 // e fica ancorada na linha de base; Divergente e Não programada por cima),
 // usando os MESMOS tokens de status do resto do app (nunca a paleta
-// categórica — isto é estado/avaliação, não identidade). Construído em
-// HTML/CSS (não SVG) — mais simples e igualmente fiel aos specs de marca da
-// skill (cantos arredondados só no topo, vão de 2px em --surface entre
-// segmentos) que uma barra desenhada à mão em SVG.
+// categórica — isto é estado/avaliação, não identidade).
+//
+// 119ª rodada — pedido do usuário (verbatim: "melhore esses gráficos, estão
+// confusos"): a versão anterior (barras em HTML/CSS, sem nenhuma grade de
+// referência) deixava a altura de cada segmento sem nenhuma escala pra
+// comparar — só dava pra "achar" que um pedaço era maior que o outro. Agora
+// é SVG com a MESMA grade (0/25/50/75/100%) e o mesmo sistema visual do
+// gráfico B logo abaixo (_vexGraficoTipoRubrica) — um único sistema de
+// leitura pros dois gráficos da seção, como pede a skill de dataviz — e o
+// rótulo de % Convergente (a métrica "boa", já era destacada antes) agora
+// fica ancorado sempre na mesma altura (topo da barra), formando uma fileira
+// legível em vez de números soltos embaixo de cada coluna. A composição
+// completa (os 3 percentuais) continua disponível ao passar o mouse/tocar a
+// barra.
 function _vexGraficoConvergencia(dados){
   const meses = dados.competencias;
   const porMes = {};
@@ -5701,20 +5711,39 @@ function _vexGraficoConvergencia(dados){
     r.divergente += Number(l.total_divergente||0);
     r.naoProgramada += Number(l.total_nao_programada||0);
   });
-  const barras = meses.map(m=>{
+
+  const W=360, H=200, padL=40, padR=16, padT=22, padB=28;
+  const plotW=W-padL-padR, plotH=H-padT-padB;
+  const n = meses.length;
+  const y = v => padT + plotH*(1-v/100);
+  const gridLines = [0,25,50,75,100].map(v=>`
+    <line class="vex-grid-line" x1="${padL}" x2="${W-padR}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}"></line>
+    <text class="vex-axis-label" x="${padL-6}" y="${(y(v)+3).toFixed(1)}" text-anchor="end">${v}%</text>`).join("");
+
+  const slot = plotW/n;
+  const barW = Math.min(46, slot*0.56);
+  const corpo = meses.map((m,i)=>{
     const r = porMes[m];
-    const pct = v => r.total ? Math.round(100*v/r.total) : 0;
+    const pct = v => r.total ? (100*v/r.total) : 0;
     const pConv = pct(r.convergente), pDiv = pct(r.divergente), pNp = pct(r.naoProgramada);
-    const titulo = `${_vexFormatarMes(m)}: ${pConv}% convergente, ${pDiv}% divergente, ${pNp}% não programada (${r.total.toLocaleString('pt-BR')} linhas)`;
-    return `<div class="vex-conv-col">
-        <div class="vex-conv-stack" title="${esc(titulo)}">
-          <div class="seg" style="height:${pConv}%;background:var(--ok);"></div>
-          <div class="seg" style="height:${pDiv}%;background:var(--danger);"></div>
-          <div class="seg" style="height:${pNp}%;background:var(--text-faint);"></div>
-        </div>
-        <div class="vex-conv-label">${_vexFormatarMes(m)}<span class="sub">${pConv}%</span></div>
-      </div>`;
+    const cx = padL + slot*(i+0.5);
+    const x0 = cx - barW/2;
+    const segs = [["var(--ok)",pConv], ["var(--danger)",pDiv], ["var(--text-faint)",pNp]];
+    let acc = 0;
+    const rects = segs.map(([cor,v])=>{
+      if(v<=0){ return ""; }
+      const y0 = y(acc), y1 = y(acc+v);
+      acc += v;
+      const alto = y0-y1;
+      const gap = alto>4 ? 1 : 0; // respiro de ~2px em --surface entre segmentos, só quando cabe
+      return `<rect x="${x0.toFixed(1)}" y="${(y1+gap).toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0,alto-2*gap).toFixed(1)}" fill="${cor}"></rect>`;
+    }).join("");
+    const titulo = `${_vexFormatarMes(m)}: ${Math.round(pConv)}% convergente, ${Math.round(pDiv)}% divergente, ${Math.round(pNp)}% não programada (${r.total.toLocaleString('pt-BR')} linhas)`;
+    const rotuloConv = `<text class="vex-value-label" x="${cx.toFixed(1)}" y="${(padT-8).toFixed(1)}" text-anchor="middle" style="fill:var(--ok);">${Math.round(pConv)}%</text>`;
+    const rotuloMes = `<text class="vex-axis-label" x="${cx.toFixed(1)}" y="${(H-padB+16).toFixed(1)}" text-anchor="middle">${_vexFormatarMes(m)}</text>`;
+    return `<g>${rects}<title>${esc(titulo)}</title></g>${rotuloConv}${rotuloMes}`;
   }).join("");
+
   return `
     <div class="card" style="box-shadow:none;border:1px solid var(--border);">
       <div class="vex-module-head"><h3 style="font-size:12.5px;">Convergência geral por competência</h3></div>
@@ -5723,7 +5752,9 @@ function _vexGraficoConvergencia(dados){
         <span class="item"><span class="swatch" style="background:var(--danger);"></span>Divergente</span>
         <span class="item"><span class="swatch" style="background:var(--text-faint);"></span>Não programada</span>
       </div>
-      <div class="vex-conv-chart">${barras}</div>
+      <div class="vex-svg-wrap"><svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;overflow:visible;">
+        ${gridLines}${corpo}
+      </svg></div>
     </div>`;
 }
 
@@ -5731,15 +5762,20 @@ function _vexGraficoConvergencia(dados){
 // aqui SIM são duas identidades categóricas reais (Vantagem × Desconto, dois
 // grupos permanentes do negócio, não um "destaque vs. contexto"), por isso
 // usa dois slots da paleta categórica fixa (--series-1/--series-2) em vez do
-// padrão accent+cinza da Curva S. Mesmo SVG à mão, mesmos specs de marca.
+// padrão accent+cinza da Curva S.
+//
+// 119ª rodada — pedido do usuário ("melhore esses gráficos, estão
+// confusos"): com só 2-3 competências carregadas (o caso mais comum no
+// início de uma implantação), uma LINHA ligando 2-3 pontos não mostra
+// tendência nenhuma de verdade — só parece uma reta meio arbitrária
+// atravessando o cartão. Até 3 competências, mostra barras agrupadas
+// (Vantagem x Desconto lado a lado por competência) — comparação direta lê
+// muito melhor pra tão poucos pontos, e usa a MESMA grade 0/25/50/75/100%
+// do gráfico A ao lado, reforçando um único sistema visual na seção. A
+// partir de 4 competências, onde uma tendência ao longo do tempo já faz
+// sentido de mostrar, volta a ser o gráfico de linha original.
 function _vexGraficoTipoRubrica(dados){
   const meses = dados.competencias;
-  if(meses.length<2){
-    return `<div class="card" style="box-shadow:none;border:1px solid var(--border);">
-      <div class="vex-module-head"><h3 style="font-size:12.5px;">% convergente por Tipo de Rubrica</h3></div>
-      <div class="vex-empty">É preciso pelo menos 2 competências carregadas pra montar esta tendência.</div>
-    </div>`;
-  }
   const mapa = {};
   dados.por_tiporubr.forEach(l=>{
     if(!mapa[l.tiporubr]) mapa[l.tiporubr] = {};
@@ -5754,60 +5790,85 @@ function _vexGraficoTipoRubrica(dados){
     return ia-ib;
   }).slice(0,2); // paleta reservada pra 2 séries nesta visão — ver nota acima do validador (skill dataviz)
   const cores = ["var(--series-1)","var(--series-2)"];
-
-  const W=360, H=200, padL=40, padR=16, padT=12, padB=24;
-  const plotW=W-padL-padR, plotH=H-padT-padB;
   const n = meses.length;
-  const x = i => padL + (plotW*i/(n-1));
+  const usarBarras = n<=3;
+
+  const W=360, H=200, padL=40, padR=16, padT=22, padB=28;
+  const plotW=W-padL-padR, plotH=H-padT-padB;
   const y = v => padT + plotH*(1-v/100);
-  const gridLines = [0,50,100].map(v=>`
-    <line class="vex-grid-line" x1="${padL}" x2="${W-padR}" y1="${y(v)}" y2="${y(v)}"></line>
-    <text class="vex-axis-label" x="${padL-6}" y="${y(v)+3}" text-anchor="end">${v}%</text>`).join("");
-  const passo = Math.max(1, Math.ceil(n/5));
-  const xLabels = meses.map((m,i)=>{
-    if(i!==0 && i!==n-1 && i%passo!==0) return "";
-    return `<text class="vex-axis-label" x="${x(i)}" y="${H-padB+16}" text-anchor="middle">${_vexFormatarMes(m)}</text>`;
-  }).join("");
+  const gridLines = [0,25,50,75,100].map(v=>`
+    <line class="vex-grid-line" x1="${padL}" x2="${W-padR}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}"></line>
+    <text class="vex-axis-label" x="${padL-6}" y="${(y(v)+3).toFixed(1)}" text-anchor="end">${v}%</text>`).join("");
 
-  let yUltimos = [];
-  const linhas = tipos.map((tipo,ti)=>{
-    const serie = meses.map(m=> mapa[tipo][m]==null ? null : mapa[tipo][m]);
-    // pontos com valor null (sem linhas daquele tipo naquele mês) quebram a
-    // linha em vez de interpolar — evita sugerir um dado que não existe.
-    let d = "", aberto = false;
-    serie.forEach((v,i)=>{
-      if(v==null){ aberto=false; return; }
-      d += (aberto?"L":"M") + x(i).toFixed(1) + "," + y(v).toFixed(1) + " ";
-      aberto = true;
-    });
-    const ultimoIdx = serie.map((v,i)=>v==null?-1:i).filter(i=>i>=0).pop();
-    const ultimoVal = ultimoIdx!=null ? serie[ultimoIdx] : null;
-    if(ultimoIdx!=null) yUltimos.push({ti, idx:ultimoIdx, val:ultimoVal});
-    return `<path d="${d.trim()}" fill="none" stroke="${cores[ti]}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></path>`;
-  }).join("");
+  let corpo, xLabels;
 
-  // rótulos de valor final — afasta verticalmente se os dois convergirem
-  // muito perto (mesma técnica da Curva S), nunca vaza pra fora do cartão
-  // (ancorado à esquerda do ponto, "end").
-  let marcadores = "";
-  if(yUltimos.length){
-    if(yUltimos.length===2 && Math.abs(y(yUltimos[0].val)-y(yUltimos[1].val))<12){
-      const meio = (y(yUltimos[0].val)+y(yUltimos[1].val))/2;
-      if(y(yUltimos[0].val)<=y(yUltimos[1].val)){ yUltimos[0]._yLabel=meio-6; yUltimos[1]._yLabel=meio+6; }
-      else { yUltimos[0]._yLabel=meio+6; yUltimos[1]._yLabel=meio-6; }
-    }
-    marcadores = yUltimos.map(u=>{
-      const cx = x(u.idx), cy = y(u.val), yLabel = u._yLabel!=null ? u._yLabel : cy;
-      return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4" fill="${cores[u.ti]}" stroke="var(--surface)" stroke-width="2"><title>${esc(tipos[u.ti])}: ${u.val}%</title></circle>
-        <text class="vex-value-label" x="${(cx-9).toFixed(1)}" y="${(yLabel+3).toFixed(1)}" text-anchor="end" style="fill:${cores[u.ti]};">${u.val}%</text>`;
+  if(usarBarras){
+    const slot = plotW/n;
+    const grupoW = Math.min(slot*0.66, 72);
+    const barW = (grupoW - 6*(tipos.length-1)) / Math.max(1,tipos.length);
+    corpo = meses.map((m,i)=>{
+      const cx = padL + slot*(i+0.5);
+      const x0 = cx - grupoW/2;
+      return tipos.map((tipo,ti)=>{
+        const v = mapa[tipo][m];
+        if(v==null) return "";
+        const bx = x0 + ti*(barW+6);
+        const by = y(v);
+        const h = (padT+plotH) - by;
+        return `<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0,h).toFixed(1)}" rx="2" fill="${cores[ti]}"><title>${esc(tipo)} — ${_vexFormatarMes(m)}: ${v}%</title></rect>
+          <text class="vex-value-label" x="${(bx+barW/2).toFixed(1)}" y="${(by-5).toFixed(1)}" text-anchor="middle" style="fill:${cores[ti]};font-size:10px;">${v}%</text>`;
+      }).join("");
     }).join("");
+    xLabels = meses.map((m,i)=>`<text class="vex-axis-label" x="${(padL+slot*(i+0.5)).toFixed(1)}" y="${(H-padB+16).toFixed(1)}" text-anchor="middle">${_vexFormatarMes(m)}</text>`).join("");
+  } else {
+    const x = i => padL + (plotW*i/(n-1));
+    const passo = Math.max(1, Math.ceil(n/5));
+    xLabels = meses.map((m,i)=>{
+      if(i!==0 && i!==n-1 && i%passo!==0) return "";
+      return `<text class="vex-axis-label" x="${x(i)}" y="${H-padB+16}" text-anchor="middle">${_vexFormatarMes(m)}</text>`;
+    }).join("");
+
+    let yUltimos = [];
+    const linhas = tipos.map((tipo,ti)=>{
+      const serie = meses.map(m=> mapa[tipo][m]==null ? null : mapa[tipo][m]);
+      // pontos com valor null (sem linhas daquele tipo naquele mês) quebram a
+      // linha em vez de interpolar — evita sugerir um dado que não existe.
+      let d = "", aberto = false;
+      serie.forEach((v,i)=>{
+        if(v==null){ aberto=false; return; }
+        d += (aberto?"L":"M") + x(i).toFixed(1) + "," + y(v).toFixed(1) + " ";
+        aberto = true;
+      });
+      const ultimoIdx = serie.map((v,i)=>v==null?-1:i).filter(i=>i>=0).pop();
+      const ultimoVal = ultimoIdx!=null ? serie[ultimoIdx] : null;
+      if(ultimoIdx!=null) yUltimos.push({ti, idx:ultimoIdx, val:ultimoVal});
+      return `<path d="${d.trim()}" fill="none" stroke="${cores[ti]}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></path>`;
+    }).join("");
+
+    // rótulos de valor final — afasta verticalmente se os dois convergirem
+    // muito perto (mesma técnica da Curva S), nunca vaza pra fora do cartão
+    // (ancorado à esquerda do ponto, "end").
+    let marcadores = "";
+    if(yUltimos.length){
+      if(yUltimos.length===2 && Math.abs(y(yUltimos[0].val)-y(yUltimos[1].val))<12){
+        const meio = (y(yUltimos[0].val)+y(yUltimos[1].val))/2;
+        if(y(yUltimos[0].val)<=y(yUltimos[1].val)){ yUltimos[0]._yLabel=meio-6; yUltimos[1]._yLabel=meio+6; }
+        else { yUltimos[0]._yLabel=meio+6; yUltimos[1]._yLabel=meio-6; }
+      }
+      marcadores = yUltimos.map(u=>{
+        const cx = x(u.idx), cy = y(u.val), yLabel = u._yLabel!=null ? u._yLabel : cy;
+        return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4" fill="${cores[u.ti]}" stroke="var(--surface)" stroke-width="2"><title>${esc(tipos[u.ti])}: ${u.val}%</title></circle>
+          <text class="vex-value-label" x="${(cx-9).toFixed(1)}" y="${(yLabel+3).toFixed(1)}" text-anchor="end" style="fill:${cores[u.ti]};">${u.val}%</text>`;
+      }).join("");
+    }
+    corpo = linhas + marcadores;
   }
 
   return `<div class="card" style="box-shadow:none;border:1px solid var(--border);">
     <div class="vex-module-head"><h3 style="font-size:12.5px;">% convergente por Tipo de Rubrica</h3></div>
-    <div class="vex-legend">${tipos.map((t,i)=>`<span class="item"><span class="swatch line" style="background:${cores[i]};"></span>${esc(t)}</span>`).join("")}</div>
+    <div class="vex-legend">${tipos.map((t,i)=>`<span class="item"><span class="swatch${usarBarras?"":" line"}" style="background:${cores[i]};"></span>${esc(t)}</span>`).join("")}</div>
     <div class="vex-svg-wrap"><svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;overflow:visible;">
-      ${gridLines}${linhas}${marcadores}${xLabels}
+      ${gridLines}${corpo}${xLabels}
     </svg></div>
   </div>`;
 }
