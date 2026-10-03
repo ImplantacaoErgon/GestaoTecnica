@@ -2954,6 +2954,24 @@ async function recarregarDadosDoProjeto(){
   await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias(), loadItensMigracao(), loadRubricas(), loadRubricasAutoUpdateStatus()]);
   fillStaticSelects();
   renderDashboard(); renderCronograma(); renderRequisitos(); renderRiscosMarcos(); renderConfigTable(); renderAnalisarRequisitos(); renderFaturas(); renderPendencias(); renderItensMigracao(); renderRubricas(); renderRubricasAutoUpdateStatus();
+  // 113ª rodada — Comparação Folha/Dashboard NÃO entram nos Promise.all de
+  // carga acima de propósito (ver 93ª rodada: carregar isso sem o usuário
+  // pedir significaria agregar/paginar ~300 mil linhas à toa). Mas agora
+  // que reentrar nessas abas PRESERVA o que já estava carregado (ver
+  // CF_CARREGADO/CFD_CARREGADO), é preciso resetar essas duas flags aqui —
+  // senão, trocar de PROJETO com uma dessas abas já carregada deixaria a
+  // tela presa mostrando os dados (de competência/empresa/rubrica) do
+  // projeto ANTERIOR até o usuário sair e voltar pra aba. Chamar as
+  // próprias funções de entrada da aba de novo já cobre isso: com a flag
+  // zerada, elas caem no caminho de "primeira entrada" (reseta o <select>
+  // de Competência, repopula com os meses do projeto NOVO, mostra o aviso
+  // de novo) — mesmo em abas que não estão visíveis no momento (todas as
+  // views já existem no DOM, só escondidas; as demais chamadas de render*
+  // acima fazem o mesmo).
+  CF_CARREGADO = false;
+  CFD_CARREGADO = false;
+  renderComparacaoFolhaPane();
+  renderComparacaoFolhaDashboard();
   // "Minhas atividades" NÃO depende do projeto ativo desde a 16ª rodada
   // (mostra todos os projetos em que o usuário está delegado) — por isso,
   // ao contrário das demais views desta função, não precisa recarregar
@@ -9130,7 +9148,17 @@ let CF_TOTAL = 0;
 // colateral de cfRenderCargaBanner() (carga concluída) pra saber se pode
 // recarregar a grade sozinho ou se isso violaria a regra de "aguardar
 // escolher a competência" (ver renderComparacaoFolhaPane()).
+//
+// 113ª rodada — passou a servir TAMBÉM pra decidir se renderComparacaoFolhaPane()
+// pode pular o reset ao reentrar na aba (ver comentário lá) — pedido do
+// usuário (verbatim): "ao sair da aba os dados são apagados pois há o
+// refresh da página [...] Tente manter os dados mesmo que mude de aba".
 let CF_CARREGADO = false;
+// 113ª rodada — mesma ideia que CF_CARREGADO acima, só que pra aba
+// "Dashboard Comparação Folha" (ver renderComparacaoFolhaDashboard() e
+// cfdCarregarDados()) — as duas abas têm o mesmo problema (resetavam ao
+// reentrar) e a mesma correção, mas são painéis/estados independentes.
+let CFD_CARREGADO = false;
 
 // 83ª rodada — id da última carga (Google Picker) que ESTA aba já mostrou
 // como concluída/erro, pra não ficar re-exibindo o mesmo toast de sucesso
@@ -9197,6 +9225,22 @@ async function renderComparacaoFolhaPane(filtroInicial){
     cfVerificarCargaAtual();
     return;
   }
+  // 113ª rodada — pedido do usuário (verbatim): "ao sair da aba os dados
+  // são apagados pois há o refresh da página. [...] Tente manter os dados
+  // mesmo que mude de aba". Se o usuário JÁ tinha escolhido uma
+  // competência nesta mesma sessão de navegação (CF_CARREGADO, setado em
+  // cfCarregarResumo() abaixo), reentrar na aba não mexe em nada — filtro,
+  // grade e KPIs continuam exatamente como estavam, só a lista de
+  // competências disponíveis é atualizada em segundo plano (pra um mês
+  // recém-importado aparecer como opção, sem perder o que já estava na
+  // tela). Isso substitui o reset incondicional da 93ª rodada (comentário
+  // abaixo), que jogava fora a competência escolhida toda vez que o
+  // usuário saía e voltava pra esta aba.
+  if(CF_CARREGADO){
+    cfCarregarCompetencias();
+    cfVerificarCargaAtual();
+    return;
+  }
   // 93ª rodada — pedido do usuário (verbatim): "Na comparação da folha e no
   // dashboard não carregar nada de forma automática. aguardar escolher a
   // competência." Antes, entrar nesta aba já disparava cfCarregarResumo()
@@ -9206,12 +9250,9 @@ async function renderComparacaoFolhaPane(filtroInicial){
   // qualquer coisa. Agora só popula o <select> de Competência (consulta
   // enxuta, ver cfCarregarCompetencias()) e mostra um aviso no lugar dos
   // KPIs/grade — a carga de verdade só acontece quando o <select> de
-  // Competência mudar (ver wireComparacaoFolhaPane()). O <select> é
-  // resetado pra "" aqui (não preserva a última escolha) de propósito:
-  // senão, ao voltar pra esta aba já com uma competência selecionada de
-  // antes, trocar pra ELA MESMA de novo não dispararia o evento "change"
-  // (o valor não mudou) e a tela ficaria presa no aviso sem meio de sair.
-  CF_CARREGADO = false;
+  // Competência mudar (ver wireComparacaoFolhaPane()). Isso só roda na
+  // PRIMEIRA entrada na aba (ver CF_CARREGADO acima) — depois que o
+  // usuário já escolheu uma competência uma vez, não volta a acontecer.
   $("cf-f-mesano").value = "";
   await cfCarregarCompetencias();
   cfMostrarAguardandoCompetencia();
@@ -9740,11 +9781,23 @@ function wireComparacaoFolhaPane(){
 // todos os quadros do dashboard calculados sobre TODAS as competências).
 // Agora só popula o <select> (consulta enxuta) e mostra um aviso — a carga
 // de verdade só acontece quando o usuário trocar o <select> de Competência
-// (ver wireComparacaoFolhaDashboard()). <select> resetado pra "" aqui pelo
-// mesmo motivo já explicado em renderComparacaoFolhaPane(): senão reentrar
-// na aba já com uma competência escolhida antes não dispararia "change" ao
-// escolher a MESMA de novo, e a tela ficaria presa no aviso.
+// (ver wireComparacaoFolhaDashboard()).
+//
+// 113ª rodada — pedido do usuário (verbatim): "ao sair da aba os dados são
+// apagados pois há o refresh da página. [...] Tente manter os dados mesmo
+// que mude de aba" — mesmo ajuste feito em renderComparacaoFolhaPane()
+// (ver comentário grande lá): se o usuário JÁ escolheu uma competência
+// nesta sessão de navegação (CFD_CARREGADO), reentrar nesta aba não reseta
+// mais o <select> nem a tela — só atualiza a lista de competências
+// disponíveis em segundo plano. O reset pra "" só acontece na PRIMEIRA vez
+// (ver bloco abaixo), e é necessário só nesse caso: sem ele, se o usuário
+// já tivesse uma competência pré-selecionada e escolhesse a MESMA de novo,
+// o <select> não dispararia o evento "change" (o valor não mudou).
 async function renderComparacaoFolhaDashboard(){
+  if(CFD_CARREGADO){
+    cfdCarregarCompetencias();
+    return;
+  }
   $("cfd-f-mesano").value = "";
   await cfdCarregarCompetencias();
   cfdMostrarAguardandoCompetencia();
@@ -9785,6 +9838,7 @@ function cfdListaCoberturaHtml(lista, campoLinhas, colspan){
 }
 
 async function cfdCarregarDados(){
+  CFD_CARREGADO = true; // 113ª rodada — ver comentário em renderComparacaoFolhaDashboard()
   const mesano = $("cfd-f-mesano").value || "";
   let r;
   try{ r = await api(`/comparacao-folha/dashboard?projeto_id=${PROJETO.id}${mesano?`&mesano=${encodeURIComponent(mesano)}`:""}`); }
