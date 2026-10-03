@@ -975,6 +975,28 @@ def create_app():
             return jsonify({"erro": "Sessão expirada ou não autenticada. Faça login novamente."}), 401
         return None
 
+    @app.after_request
+    def nao_cachear_api(response):
+        """119ª rodada — investigação de bug relatado pelo usuário: o card
+        "Comparação Folha x Ergon" (rota nova da 118ª rodada,
+        /api/comparacao-folha/resumo-competencias) voltou, em produção, o
+        próprio index.html em vez de JSON — mesmo com a rota corretamente
+        registrada e o deploy confirmado no commit certo (verificado tanto
+        inspecionando app.url_map quanto via API do Render). A explicação
+        mais provável: durante a janela do rolling deploy (processo gunicorn
+        antigo ainda respondendo por alguns segundos, sem a rota nova, caindo
+        no fallback de SPA), o navegador do usuário pode ter armazenado essa
+        resposta 200 (index.html, com Cache-Control: no-cache + ETag/
+        Last-Modified do werkzeug) associada à URL exata da nova API —
+        e passou a reusá-la/revalidá-la de forma inconsistente em vez de
+        sempre buscar a rota JSON nova. Qualquer /api/* nunca deveria ser
+        cacheável pelo navegador (são sempre dados dinâmicos, autenticados
+        por sessão) — isso fecha essa classe de bug para qualquer rota nova
+        futura que nasça durante uma janela de deploy."""
+        if request.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
     # -------------------------------------------------------------- health
     @app.get("/api/health")
     def health():
@@ -2895,6 +2917,20 @@ def create_app():
             verba_consist=request.args.get("verba_consist") or None,
         ))
 
+    @app.get("/api/comparacao-folha/resumo-competencias")
+    def resumo_competencias_comparacao_folha():
+        """118ª rodada — card "Folha de Pagamento" do Dashboard Executivo
+        (Visão Executiva): os quadros por Situação e por Tipo de Rubrica,
+        repetidos pelas competências mais recentes (no máx. `limite`, padrão
+        5 — ver comparacao_folha.resumo_por_competencia). Só projeto_id;
+        sem os demais filtros da grade (igual dashboard_comparacao_folha
+        logo abaixo) — é um painel agregado, não uma consulta filtrável."""
+        pid = request.args.get("projeto_id")
+        if not pid:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        limite = min(int(request.args.get("limite") or 5), 12)
+        return jsonify(comparacao_folha.resumo_por_competencia(pid, limite=limite))
+
     @app.get("/api/comparacao-folha/dashboard")
     def dashboard_comparacao_folha():
         """65ª rodada: aba "Dashboard" dedicada à Comparação Folha — métricas
@@ -4167,16 +4203,28 @@ def create_app():
         return jsonify({"erro": msg}), 500
 
     # ------------------------------------------------------------ front-end estático
+    def _servir_index_html():
+        # 119ª rodada — Cache-Control: no-store aqui de propósito (ver
+        # comentário em nao_cachear_api acima): o navegador NUNCA deve reter
+        # essa resposta associada à URL que a gerou. Sem isso, qualquer rota
+        # /api/* nova que nasça durante a janela de um rolling deploy (o
+        # processo antigo do gunicorn ainda respondendo, sem a rota nova, e
+        # por isso caindo neste fallback de SPA) corre o risco de ficar presa
+        # no cache do navegador, mesmo depois do deploy novo já estar no ar.
+        resp = send_from_directory(FRONTEND_DIR, "index.html")
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+
     @app.get("/")
     def index():
-        return send_from_directory(FRONTEND_DIR, "index.html")
+        return _servir_index_html()
 
     @app.get("/<path:path>")
     def static_files(path):
         full = os.path.join(FRONTEND_DIR, path)
         if os.path.isfile(full):
             return send_from_directory(FRONTEND_DIR, path)
-        return send_from_directory(FRONTEND_DIR, "index.html")
+        return _servir_index_html()
 
     # 113ª rodada — liga a thread de agendamento da atualização automática de
     # Rubricas (seg-sex, 8h-18h, horário de Brasília). Sem efeito nenhum se
