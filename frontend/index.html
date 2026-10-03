@@ -34,6 +34,14 @@
        ícone, tom bem claro pro fundo do card). */
     --pink:#a13d72; --pink-soft:#f7e8f0;
     --shadow:0 1px 2px rgba(20,30,35,.07), 0 6px 16px rgba(20,30,35,.05);
+    /* 117ª rodada — Visão Executiva: paleta categórica validada (skill de
+       dataviz — ver scripts/validate_palette.js), só pra séries de GRÁFICO
+       (identidade de série), nunca reaproveitada pra status (esses
+       continuam em --ok/--warn/--danger/--accent acima, que têm outro
+       papel semântico). Ordem fixa — nunca ciclar/gerar uma 9ª cor. */
+    --series-1:#2a78d6; --series-2:#eb6834; --series-3:#1baf7a; --series-4:#eda100;
+    --series-5:#e87ba4; --series-6:#008300; --series-7:#4a3aa7; --series-8:#e34948;
+    /* rampa sequencial (1 matiz, claro→escuro) pro medidor de convergência */
   }
   @media (prefers-color-scheme: dark){
     :root:not([data-theme="light"]){
@@ -44,6 +52,8 @@
       --ok:#63cb93; --ok-soft:#153627;
       --pink:#e08fc0; --pink-soft:#33202c;
       --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 20px rgba(0,0,0,.3);
+      --series-1:#3987e5; --series-2:#d95926; --series-3:#199e70; --series-4:#c98500;
+      --series-5:#d55181; --series-6:#008300; --series-7:#9085e9; --series-8:#e66767;
     }
   }
   /* Tema forçado explicitamente pelo usuário (Configurações > Parâmetros >
@@ -57,6 +67,8 @@
     --ok:#63cb93; --ok-soft:#153627;
     --pink:#e08fc0; --pink-soft:#33202c;
     --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 20px rgba(0,0,0,.3);
+    --series-1:#3987e5; --series-2:#d95926; --series-3:#199e70; --series-4:#c98500;
+    --series-5:#d55181; --series-6:#008300; --series-7:#9085e9; --series-8:#e66767;
   }
   *{box-sizing:border-box;}
   body{margin:0;background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:14px;line-height:1.5;}
@@ -570,6 +582,63 @@
   .inline-add{display:flex;gap:6px;margin-top:10px;}
   .inline-add select, .inline-add input{flex:1;background:var(--surface-2);border:1px solid var(--border);border-radius:7px;padding:7px 9px;font-size:12.5px;font-family:inherit;}
 
+  /* ================= 117ª rodada: Visão Executiva (novo Dashboard) =================
+     Componentes seguindo a skill de dataviz: marcas finas, pontas
+     arredondadas, legenda sempre presente a partir de 2 séries, texto nunca
+     na cor da série (só tokens de texto), grade/eixo em cinza recessivo. */
+  .vex-hero-row{display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin-bottom:16px;}
+  .vex-hero-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px 26px;box-shadow:var(--shadow);display:flex;align-items:center;gap:22px;flex:1;min-width:280px;}
+  .vex-hero-figure{font-size:52px;font-weight:700;line-height:1;letter-spacing:-.01em;}
+  .vex-hero-meta{display:flex;flex-direction:column;gap:6px;}
+  .vex-hero-label{font-size:12.5px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;}
+  .vex-badge{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:999px;font-size:12.5px;font-weight:700;width:fit-content;}
+  .vex-badge .dot{width:8px;height:8px;border-radius:50%;}
+  .vex-subkpis{display:flex;gap:22px;flex-wrap:wrap;}
+  .vex-subkpi{display:flex;flex-direction:column;gap:2px;}
+  .vex-subkpi .v{font-size:19px;font-weight:700;}
+  .vex-subkpi .l{font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;}
+
+  .vex-grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
+  .vex-grid-2{display:grid;grid-template-columns:1.6fr 1fr;gap:14px;}
+  .vex-grid-2 > .card, .vex-grid-3 > .card{min-width:0;}
+  @media (max-width: 980px){ .vex-grid-3{grid-template-columns:1fr;} .vex-grid-2{grid-template-columns:1fr;} }
+
+  .vex-legend{display:flex;gap:16px;flex-wrap:wrap;margin:2px 0 10px;font-size:12px;color:var(--text-muted);}
+  .vex-legend .item{display:flex;align-items:center;gap:6px;}
+  .vex-legend .swatch{width:10px;height:10px;border-radius:3px;flex-shrink:0;}
+  .vex-legend .swatch.line{width:14px;height:2px;border-radius:1px;}
+
+  .vex-svg-wrap{width:100%;overflow:visible;}
+  .vex-svg-wrap text{font-family:'IBM Plex Sans',system-ui,sans-serif;fill:var(--text-muted);}
+  .vex-svg-wrap .vex-grid-line{stroke:var(--border);stroke-width:1px;}
+  .vex-svg-wrap .vex-axis-label{font-size:10.5px;fill:var(--text-faint);}
+  .vex-svg-wrap .vex-value-label{font-size:11px;font-weight:600;fill:var(--text);}
+
+  .vex-bar-list .row{display:flex;align-items:center;gap:10px;padding:8px 0;}
+  .vex-bar-list .row .nome{width:168px;flex-shrink:0;font-size:12.5px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .vex-bar-list .row .track{flex:1;height:10px;background:var(--surface-2);border-radius:5px;overflow:hidden;position:relative;}
+  .vex-bar-list .row .fill{height:100%;border-radius:5px;min-width:3px;}
+  .vex-bar-list .row .pct{width:46px;text-align:right;font-size:12px;font-weight:600;flex-shrink:0;}
+
+  .vex-meter{display:flex;flex-direction:column;gap:6px;}
+  .vex-meter .track{height:12px;background:var(--surface-2);border-radius:6px;overflow:hidden;}
+  .vex-meter .fill{height:100%;border-radius:6px;background:var(--accent);}
+  .vex-meter .labelrow{display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);}
+
+  .vex-stacked-bar{display:flex;height:22px;border-radius:6px;overflow:hidden;background:var(--surface-2);}
+  .vex-stacked-bar .seg{height:100%;min-width:2px;}
+
+  .vex-status-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;}
+  .vex-status-tile{border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:4px;}
+  .vex-status-tile .v{font-size:21px;font-weight:700;}
+  .vex-status-tile .l{font-size:11.5px;color:var(--text-muted);}
+
+  .vex-module-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:2px;}
+  .vex-module-head h3{margin:0;}
+  .vex-module-link{font-size:12px;color:var(--accent-strong);text-decoration:none;font-weight:600;cursor:pointer;background:none;border:none;font-family:inherit;padding:0;}
+  .vex-module-link:hover{text-decoration:underline;}
+  .vex-empty{color:var(--text-faint);font-size:12.5px;padding:10px 0;}
+
   .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);padding:10px 18px;border-radius:8px;font-size:13px;z-index:100;box-shadow:var(--shadow);color:#fff;}
   .confirm-box{padding:20px;text-align:center;}
   .confirm-box p{margin:0 0 16px;color:var(--text-muted);font-size:13.5px;}
@@ -695,10 +764,15 @@
       </select>
     </div>
     <nav class="tabs" id="tabs">
-      <button data-view="dashboard" class="active">Dashboard</button>
+      <button data-view="dashboard" class="active">📊 Dashboard</button>
       <div class="tab-group" data-group>
-        <button type="button" class="tab-group-trigger" data-views="cronograma,critico,riscos,calendario">Cronograma <span class="caret">▾</span></button>
+        <button type="button" class="tab-group-trigger" data-views="dashboard-cronograma,cronograma,critico,riscos,calendario">Cronograma <span class="caret">▾</span></button>
         <div class="tab-group-menu">
+          <!-- 117ª rodada: o antigo "Dashboard" (★ atividades master, semana
+               atual/seguinte, horas por recurso etc.) mudou de lugar — virou
+               a visão operacional do Cronograma, dando espaço pro novo
+               Dashboard (acima) ser a Visão Executiva do projeto inteiro. -->
+          <button data-view="dashboard-cronograma">📊 Visão Geral do Cronograma</button>
           <button data-view="cronograma">Cronograma</button>
           <button data-view="critico">Caminho Crítico</button>
           <button data-view="riscos">Riscos &amp; Marcos</button>
@@ -741,9 +815,12 @@
 <main id="app-main" hidden>
 
   <!-- ============ DASHBOARD ============ -->
-  <section class="view active" id="view-dashboard">
-    <h2 class="view-title">Visão geral</h2>
-    <div class="view-sub">Situação consolidada do projeto de implantação.</div>
+  <!-- 117ª rodada: era "view-dashboard" / nav "Dashboard" — virou a visão
+       operacional do Cronograma (ver nav acima); o novo id de topo
+       "view-dashboard" agora é a Visão Executiva, logo abaixo. -->
+  <section class="view" id="view-dashboard-cronograma">
+    <h2 class="view-title">📊 Visão Geral do Cronograma</h2>
+    <div class="view-sub">Situação consolidada do cronograma do projeto — atividades, prazos, marcos e horas.</div>
     <div style="margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
       <button class="btn secondary" id="btn-refresh-dashboard">↻ Atualizar</button>
       <span class="muted" id="dash-refresh-status"></span>
@@ -853,6 +930,93 @@
         <thead><tr><th>Recurso</th><th>Vínculo</th><th>Atividades</th><th>Horas previstas</th><th>Horas realizadas</th><th>Diferença</th></tr></thead>
         <tbody id="dash-horas-resp"></tbody>
       </table></div>
+    </div>
+  </section>
+
+  <!-- ============ VISÃO EXECUTIVA (117ª rodada) ============
+       Pedido do usuário (verbatim): "crie um novo dashboard com todo os
+       temas até aqui... visão gerencial do projeto... gerentes e diretores
+       irão ver essa página e não conhecem o projeto." Consolida TODOS os
+       módulos (Cronograma, Migração de Dados, Folha de Pagamento,
+       Financeiro, Riscos/Pendências, Requisitos TR) numa única tela,
+       pensada pra quem abre o sistema pela primeira vez. Reaproveita os
+       mesmos dados já carregados globalmente (ATIVIDADES/FRENTES/RISCOS/
+       MARCOS/FATURAS/PENDENCIAS/ITENS_MIGRACAO/RUBRICAS/REQUISITOS) — ver
+       renderVisaoExecutiva() — mais uma chamada leve (resumo de frentes).
+       O card "Folha de Pagamento" usa o funil de status das Rubricas
+       (RUBRICAS, já carregado), NUNCA a Comparação Folha — a 93ª rodada
+       proibiu carregar Comparação Folha sem o usuário escolher uma
+       Competência primeiro (tabela com ~300 mil linhas), e este dashboard
+       abre sozinho ao entrar no sistema, sem nenhuma Competência escolhida. -->
+  <section class="view active" id="view-dashboard">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:4px;">
+      <div>
+        <h2 class="view-title">Visão Executiva</h2>
+        <div class="view-sub" id="vex-subtitulo">Situação consolidada do projeto de implantação.</div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+        <span class="muted" id="vex-atualizado-em" style="font-size:11.5px;"></span>
+        <button class="btn secondary" id="btn-refresh-vex">↻ Atualizar</button>
+        <button class="btn" id="btn-relatorio-executivo-vex" title="Gera um diagnóstico do projeto usando IA a partir dos dados atuais do cronograma">🧠 Gerar Relatório Executivo (IA)</button>
+      </div>
+    </div>
+
+    <div class="vex-hero-row">
+      <div class="vex-hero-card">
+        <div>
+          <div class="vex-hero-label">Progresso geral do projeto</div>
+          <div class="vex-hero-figure" id="vex-hero-pct">—</div>
+          <div id="vex-hero-badge" style="margin-top:6px;"></div>
+        </div>
+        <div class="vex-subkpis" id="vex-subkpis"></div>
+      </div>
+    </div>
+
+    <div class="kpis" id="vex-kpis"></div>
+
+    <div class="card">
+      <div class="vex-module-head"><h3>Avanço do cronograma — planejado × realizado (acumulado)</h3>
+        <span class="muted" style="font-size:11.5px;" title="Cada ponto é o % acumulado de atividades com prazo previsto (linha cinza) ou concluídas de fato (linha azul) até aquele mês. Onde a linha azul fica abaixo da cinza, o projeto está atrasado em relação ao plano.">ⓘ como ler</span>
+      </div>
+      <div class="vex-legend" id="vex-scurve-legend"></div>
+      <div class="vex-svg-wrap" id="vex-scurve-chart"></div>
+    </div>
+
+    <div class="vex-grid-2">
+      <div class="card">
+        <div class="vex-module-head"><h3>Progresso por frente de trabalho</h3><button type="button" class="vex-module-link" onclick="goToView('cronograma')">Ver cronograma →</button></div>
+        <div class="vex-bar-list" id="vex-frentes"></div>
+      </div>
+      <div class="card">
+        <div class="vex-module-head"><h3>Próximos marcos</h3><button type="button" class="vex-module-link" onclick="goToView('riscos')">Ver todos →</button></div>
+        <ul class="list-simple" id="vex-marcos"></ul>
+      </div>
+    </div>
+
+    <div class="vex-grid-3">
+      <div class="card">
+        <div class="vex-module-head"><h3>📦 Migração de Dados</h3><button type="button" class="vex-module-link" onclick="goToView('migracao')">Abrir →</button></div>
+        <div id="vex-migracao"></div>
+      </div>
+      <div class="card">
+        <div class="vex-module-head"><h3>💰 Folha de Pagamento</h3><button type="button" class="vex-module-link" onclick="goToView('rubricas')">Abrir →</button></div>
+        <div id="vex-folha"></div>
+      </div>
+      <div class="card">
+        <div class="vex-module-head"><h3>💵 Financeiro</h3><button type="button" class="vex-module-link" onclick="goToView('faturas')">Abrir →</button></div>
+        <div id="vex-financeiro"></div>
+      </div>
+    </div>
+
+    <div class="vex-grid-2">
+      <div class="card">
+        <div class="vex-module-head"><h3>🚩 Riscos &amp; Pendências</h3><button type="button" class="vex-module-link" onclick="goToView('pendencias')">Abrir →</button></div>
+        <div class="vex-status-grid" id="vex-riscos-pendencias"></div>
+      </div>
+      <div class="card">
+        <div class="vex-module-head"><h3>📋 Requisitos do Termo de Referência</h3><button type="button" class="vex-module-link" onclick="goToView('requisitos')">Abrir →</button></div>
+        <div id="vex-requisitos"></div>
+      </div>
     </div>
   </section>
 
@@ -3039,7 +3203,7 @@ async function recarregarDadosDoProjeto(){
   fillStaticSelects();
   await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias(), loadItensMigracao(), loadRubricas(), loadRubricasAutoUpdateStatus()]);
   fillStaticSelects();
-  renderDashboard(); renderCronograma(); renderRequisitos(); renderRiscosMarcos(); renderConfigTable(); renderAnalisarRequisitos(); renderFaturas(); renderPendencias(); renderItensMigracao(); renderRubricas(); renderRubricasAutoUpdateStatus();
+  renderDashboard(); renderVisaoExecutiva(); renderCronograma(); renderRequisitos(); renderRiscosMarcos(); renderConfigTable(); renderAnalisarRequisitos(); renderFaturas(); renderPendencias(); renderItensMigracao(); renderRubricas(); renderRubricasAutoUpdateStatus();
   // 113ª rodada — Comparação Folha/Dashboard NÃO entram nos Promise.all de
   // carga acima de propósito (ver 93ª rodada: carregar isso sem o usuário
   // pedir significaria agregar/paginar ~300 mil linhas à toa). Mas agora
@@ -3254,7 +3418,7 @@ async function afterProjetoReady(){
   // "Item do TR" (atividade) e "Atividade (entregável)" (fatura) dependem
   // deles e a primeira chamada acima rodou antes desse load.
   fillStaticSelects();
-  renderDashboard(); renderCronograma(); renderRequisitos(); renderRiscosMarcos(); renderConfigTable(); renderAnalisarRequisitos(); renderFaturas(); renderPendencias(); renderItensMigracao(); renderRubricas(); renderRubricasAutoUpdateStatus();
+  renderDashboard(); renderVisaoExecutiva(); renderCronograma(); renderRequisitos(); renderRiscosMarcos(); renderConfigTable(); renderAnalisarRequisitos(); renderFaturas(); renderPendencias(); renderItensMigracao(); renderRubricas(); renderRubricasAutoUpdateStatus();
   $("tabs").style.display = "flex";
 }
 
@@ -3566,6 +3730,25 @@ function wireDashboardRefresh(){
       btn.disabled = false;
     }
   });
+  // 117ª rodada — Visão Executiva: igual ao botão acima, mas recarrega TODOS
+  // os módulos que o novo dashboard consolida (não só Cronograma/Riscos/
+  // Pendências), já que ele reúne todas as frentes do projeto.
+  $("btn-refresh-vex")?.addEventListener("click", async ()=>{
+    const btn = $("btn-refresh-vex"), status = $("vex-atualizado-em");
+    btn.disabled = true; status.textContent = "Atualizando…";
+    try{
+      await Promise.all([
+        loadAtividades(), loadRiscosMarcos(), loadPendencias(), loadFaturas(),
+        loadItensMigracao(), loadRubricas(), loadRequisitos(),
+      ]);
+      renderDashboard(); renderVisaoExecutiva();
+      status.textContent = "Atualizado às " + new Date().toLocaleTimeString("pt-BR");
+    }catch(e){
+      status.textContent = "Falha ao atualizar.";
+    }finally{
+      btn.disabled = false;
+    }
+  });
 }
 // "calendario" e "manuais" (31ª rodada) não têm section própria — são abas de
 // dentro de Configurações (cfgAbaAtual) acessadas agora pelos grupos
@@ -3599,6 +3782,13 @@ function goToView(view, opcoes){
   if(view==="cronograma") _ganttSincronizarAlturas();
   if(view==="critico") loadCaminhoCritico();
   if(view==="minhas-atividades") carregarMinhasAtividades();
+  // 117ª rodada: "dashboard" agora é a Visão Executiva; o antigo conteúdo
+  // (renderDashboard) mudou de view para "dashboard-cronograma", dentro do
+  // grupo Cronograma — recarrega ao entrar em qualquer uma das duas, pelo
+  // mesmo motivo do _ganttSincronizarAlturas acima (view escondida no
+  // carregamento inicial não mede largura/altura direito).
+  if(view==="dashboard-cronograma") renderDashboard();
+  if(view==="dashboard") renderVisaoExecutiva();
   if(view==="analisar-requisitos") renderAnalisarRequisitos();
   if(view==="comparacao-folha") renderComparacaoFolhaPane(opcoes && opcoes.filtroInicial);
   if(view==="comparacao-folha-dashboard") renderComparacaoFolhaDashboard();
@@ -4637,7 +4827,7 @@ async function _gridConfirmarSalvar(){
     $("gantt-salvar-painel").hidden = true;
     _gridFecharPopupDeps();
     await loadAtividades();
-    renderDashboard(); renderCronograma();
+    renderDashboard(); renderVisaoExecutiva(); renderCronograma();
   }catch(e){}
   gridSalvando = false;
   btn.textContent = "Confirmar e salvar";
@@ -5013,7 +5203,12 @@ function _ganttRedesenharBarras(){
 }
 
 // ================= DASHBOARD =================
-function renderDashboard(){
+// 117ª rodada — extraído de renderDashboard() pra ser reaproveitado também
+// pela Visão Executiva (renderVisaoExecutiva()): os dois dashboards
+// precisam mostrar EXATAMENTE o mesmo número de "Aderência ao prazo" etc,
+// então o cálculo vive num só lugar em vez de duplicado (e arriscar
+// divergir se um dia só um dos dois for ajustado).
+function calcularKpisCronograma(){
   const total = ATIVIDADES.length;
   const concluidas = ATIVIDADES.filter(a=>STATUS_FAMILIA_CONCLUIDA.includes(a.status)).length;
   const atrasadas = ATIVIDADES.filter(a=>a.atrasada).length;
@@ -5034,6 +5229,11 @@ function renderDashboard(){
   const deveriaConcluidas = ATIVIDADES.filter(a=>a.dtfim_prev && a.dtfim_prev <= hojeISO).length;
   const pctDeveria = total?Math.round(100*deveriaConcluidas/total):0;
   const diffPP = pctConcluida - pctDeveria; // pontos percentuais: negativo = atrasado em relação ao plano
+  return {total, concluidas, atrasadas, emAndamento, criticas, pctConcluida, deveriaConcluidas, pctDeveria, diffPP, hojeISO};
+}
+
+function renderDashboard(){
+  const {total, concluidas, atrasadas, emAndamento, criticas, pctConcluida, deveriaConcluidas, pctDeveria, diffPP} = calcularKpisCronograma();
 
   // 102ª rodada — pedido do usuário ("coloque cores nesses quadros do
   // dashboard, estão muito brancos"): cor de fundo suave por quadro,
@@ -5084,6 +5284,342 @@ function renderDashboard(){
   renderHorasPorRecurso();
   renderAtividadesMaster();
   renderAnomaliasDataFixada();
+}
+
+// ================= VISÃO EXECUTIVA (117ª rodada) =================
+// Novo dashboard "Visão Executiva" — virou a tela inicial (view "dashboard"),
+// substituindo o antigo dashboard operacional (que mudou pra "Visão Geral do
+// Cronograma", dentro do menu Cronograma — ver renderDashboard() acima).
+// Pedido do usuário: um resumo gerencial, com gráficos e cores, pra diretores
+// e gestores que NÃO conhecem o projeto em detalhe — por isso cada módulo
+// (Cronograma, Migração, Folha/Rubricas, Financeiro, Riscos & Pendências,
+// Requisitos TR) aparece resumido em um número/gráfico só, com um link "Abrir →"
+// pra quem quiser entrar no detalhe. Cores seguem a skill de dataviz: paleta
+// categórica fixa (--series-1..8, só pra identidade de frente de trabalho,
+// que já tem cor_hex própria no banco) e os tokens de status já existentes
+// no app (ok/warn/danger/accent/faint) pra tudo que é estado/avaliação —
+// nunca misturando os dois papéis.
+
+const MESES_ABREV = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
+function _vexFormatarMes(mes){
+  const [y,m] = mes.split("-").map(Number);
+  return `${MESES_ABREV[m-1]}/${String(y).slice(2)}`;
+}
+
+// Selo de saúde do cronograma (badge do card principal) — mesmo critério de
+// cor do "Aderência ao prazo" do dash-kpis original, só que com rótulo.
+function _vexHealthBadge(diffPP){
+  let cor, texto;
+  if(diffPP >= 0){ cor="ok"; texto="No prazo"; }
+  else if(diffPP >= -5){ cor="warn"; texto="Atenção"; }
+  else { cor="danger"; texto="Atrasado"; }
+  return `<span class="vex-badge" style="background:${SOFT_VAR[cor]};color:${COLOR_VAR[cor]};"><span class="dot" style="background:${COLOR_VAR[cor]};"></span>${texto} (${diffPP>0?"+":""}${diffPP} p.p. vs. plano)</span>`;
+}
+
+// Curva S acumulada: % de atividades com prazo PREVISTO (plano) vs. % REALMENTE
+// concluídas, mês a mês — onde a linha azul (realizado) fica abaixo da cinza
+// (planejado), o projeto está atrasado em relação ao cronograma. Corte de mês
+// por comparação lexicográfica de string ISO (mes+"-31"), mesma técnica já
+// usada em calcularKpisCronograma() pra "deveria estar concluído hoje".
+function _vexCurvaSCalcular(){
+  const comPrazo = ATIVIDADES.filter(a=>a.dtfim_prev);
+  if(!comPrazo.length) return null;
+  const hojeISO = toISO(new Date());
+
+  let minMes = comPrazo.reduce((m,a)=>a.dtfim_prev.slice(0,7)<m?a.dtfim_prev.slice(0,7):m, comPrazo[0].dtfim_prev.slice(0,7));
+  let maxMes = hojeISO.slice(0,7);
+  ATIVIDADES.forEach(a=>{
+    if(a.dtfim_prev && a.dtfim_prev.slice(0,7)>maxMes) maxMes = a.dtfim_prev.slice(0,7);
+    if(a.dtfim_real && a.dtfim_real.slice(0,7)>maxMes) maxMes = a.dtfim_real.slice(0,7);
+  });
+
+  const meses = [];
+  let [y,m] = minMes.split("-").map(Number);
+  const [yMax,mMax] = maxMes.split("-").map(Number);
+  while(y<yMax || (y===yMax && m<=mMax)){
+    meses.push(`${y}-${String(m).padStart(2,"0")}`);
+    m++; if(m>12){ m=1; y++; }
+  }
+  // Limita a janela aos últimos 18 meses (eixo não fica espremido em projetos
+  // longos) — mostra sempre o trecho mais recente, que é o relevante pra "onde
+  // estamos agora".
+  const janela = meses.length>18 ? meses.slice(meses.length-18) : meses;
+
+  const total = ATIVIDADES.length;
+  const planejado = janela.map(mes=>{
+    const corte = mes+"-31";
+    const n = ATIVIDADES.filter(a=>a.dtfim_prev && a.dtfim_prev<=corte).length;
+    return total ? Math.round(100*n/total) : 0;
+  });
+  const realizado = janela.map(mes=>{
+    const corte = mes+"-31";
+    const n = ATIVIDADES.filter(a=>STATUS_FAMILIA_CONCLUIDA.includes(a.status) && a.dtfim_real && a.dtfim_real<=corte).length;
+    return total ? Math.round(100*n/total) : 0;
+  });
+  return {meses:janela, planejado, realizado, hojeMes: hojeISO.slice(0,7)};
+}
+
+// SVG desenhado à mão (sem lib de gráficos no projeto) — padrão de "emphasis":
+// 1 cor de destaque (accent, pro Realizado) + 1 cinza (pro Planejado, que aqui
+// é só contexto), em vez da paleta categórica cheia — ver skill de dataviz,
+// "quando uma série é o ponto e a outra é só contexto".
+function _vexRenderCurvaS(curva){
+  const wrap = $("vex-scurve-chart"), legend = $("vex-scurve-legend");
+  if(!curva || curva.meses.length<2){
+    wrap.innerHTML = `<div class="vex-empty">Sem atividades com prazo previsto suficiente para montar a curva de avanço.</div>`;
+    legend.innerHTML = "";
+    return;
+  }
+  legend.innerHTML = `
+    <span class="item"><span class="swatch line" style="background:var(--text-faint);"></span>Planejado</span>
+    <span class="item"><span class="swatch line" style="background:var(--accent);"></span>Realizado</span>`;
+
+  const W=760, H=230, padL=34, padR=16, padT=12, padB=26;
+  const plotW = W-padL-padR, plotH = H-padT-padB;
+  const n = curva.meses.length;
+  const x = i => padL + (n===1 ? 0 : (plotW*i/(n-1)));
+  const y = v => padT + plotH*(1 - v/100);
+
+  const gridLines = [0,25,50,75,100].map(v=>`
+    <line class="vex-grid-line" x1="${padL}" x2="${W-padR}" y1="${y(v)}" y2="${y(v)}"></line>
+    <text class="vex-axis-label" x="${padL-6}" y="${y(v)+3}" text-anchor="end">${v}%</text>`).join("");
+
+  const passo = Math.max(1, Math.ceil(n/8));
+  const xLabels = curva.meses.map((mes,i)=>{
+    if(i!==0 && i!==n-1 && i%passo!==0) return "";
+    return `<text class="vex-axis-label" x="${x(i)}" y="${H-padB+16}" text-anchor="middle">${_vexFormatarMes(mes)}</text>`;
+  }).join("");
+
+  const pathFrom = arr => arr.map((v,i)=>`${i===0?"M":"L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+
+  // Linha/rótulo de "hoje": só desenha quando sobra pelo menos um mês de plano
+  // depois de hoje — quando a curva termina exatamente no mês de hoje, o
+  // próprio ponto final já comunica "agora", e a linha ficaria empilhada em
+  // cima dos rótulos de valor final (colisão de texto).
+  const hojeIdx = curva.meses.indexOf(curva.hojeMes);
+  const linhaHoje = (hojeIdx>=0 && hojeIdx<n-1) ? `
+    <line x1="${x(hojeIdx).toFixed(1)}" x2="${x(hojeIdx).toFixed(1)}" y1="${padT}" y2="${H-padB}" stroke="var(--text-faint)" stroke-width="1" stroke-dasharray="3,3"></line>
+    <text class="vex-axis-label" x="${x(hojeIdx).toFixed(1)}" y="${padT-2}" text-anchor="middle">hoje</text>` : "";
+
+  const ultimoPlan = curva.planejado[n-1], ultimoReal = curva.realizado[n-1];
+  const xFim = x(n-1);
+  // Rótulos de valor ficam à ESQUERDA do ponto final (anchor "end"), nunca à
+  // direita — evita que o texto vaze pra fora do viewBox/cartão no mês mais
+  // recente (ponta direita do gráfico). Se os dois valores ficarem muito
+  // próximos verticalmente, afasta um do outro pra não sobrepor o texto
+  // (nunca empilha os rótulos "fora" da marca, como a skill de dataviz pede).
+  let yPlanLabel = y(ultimoPlan), yRealLabel = y(ultimoReal);
+  if(Math.abs(yPlanLabel - yRealLabel) < 12){
+    const meio = (yPlanLabel + yRealLabel)/2;
+    if(yPlanLabel <= yRealLabel){ yPlanLabel = meio-6; yRealLabel = meio+6; }
+    else { yPlanLabel = meio+6; yRealLabel = meio-6; }
+  }
+
+  wrap.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;">
+    ${gridLines}
+    ${linhaHoje}
+    <path d="${pathFrom(curva.planejado)}" fill="none" stroke="var(--text-faint)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></path>
+    <path d="${pathFrom(curva.realizado)}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></path>
+    <circle cx="${xFim.toFixed(1)}" cy="${y(ultimoPlan).toFixed(1)}" r="4" fill="var(--text-faint)" stroke="var(--surface)" stroke-width="2"><title>Planejado: ${ultimoPlan}%</title></circle>
+    <circle cx="${xFim.toFixed(1)}" cy="${y(ultimoReal).toFixed(1)}" r="4" fill="var(--accent)" stroke="var(--surface)" stroke-width="2"><title>Realizado: ${ultimoReal}%</title></circle>
+    <text class="vex-value-label" x="${(xFim-9).toFixed(1)}" y="${(yPlanLabel+3).toFixed(1)}" text-anchor="end" style="fill:var(--text-muted);">${ultimoPlan}%</text>
+    <text class="vex-value-label" x="${(xFim-9).toFixed(1)}" y="${(yRealLabel+3).toFixed(1)}" text-anchor="end">${ultimoReal}%</text>
+    ${xLabels}
+  </svg>`;
+}
+
+// Progresso por frente de trabalho — identidade CATEGÓRICA de verdade (cada
+// frente já tem sua própria cor_hex cadastrada em Frentes de Trabalho), por
+// isso usa a cor própria da frente em vez de um token de status.
+function _vexRenderFrentes(rows){
+  const el = $("vex-frentes");
+  const list = (rows||[]).filter(r=>r.total_atividades>0);
+  if(!list.length){ el.innerHTML = `<div class="vex-empty">Nenhuma frente de trabalho com atividades cadastradas.</div>`; return; }
+  el.innerHTML = list.map(r=>{
+    const pct = Math.round(100*r.concluidas/r.total_atividades);
+    const frente = byId(FRENTES, r.frente_trabalho_id);
+    const cor = frente?.cor_hex || "var(--series-1)";
+    return `<div class="row">
+      <span class="nome" title="${esc(r.frente_nome)}">${esc(r.frente_nome)}</span>
+      <span class="track"><div class="fill" style="width:${pct}%;background:${esc(cor)};"></div></span>
+      <span class="pct">${r.concluidas}/${r.total_atividades}</span>
+    </div>`;
+  }).join("");
+}
+
+// Migração de Dados — "carregado/pendente/bloqueado" é ESTADO (avaliativo),
+// não identidade, por isso usa os tokens de status (ok/accent/danger/faint)
+// e não a paleta categórica.
+function _vexRenderMigracao(){
+  const el = $("vex-migracao");
+  if(!ITENS_MIGRACAO.length){ el.innerHTML = `<div class="vex-empty">Nenhum item de migração cadastrado.</div>`; return; }
+  const totalEstimado = ITENS_MIGRACAO.reduce((s,m)=>s+(Number(m.qtd_registros_estimada)||0),0);
+  const totalCarregado = ITENS_MIGRACAO.reduce((s,m)=>s+(Number(m.qtd_registros_carregados)||0),0);
+  const pct = totalEstimado>0 ? Math.round(100*totalCarregado/totalEstimado) : 0;
+  const porStatus = {};
+  ITENS_MIGRACAO.forEach(m=>{ porStatus[m.status] = (porStatus[m.status]||0)+1; });
+  const total = ITENS_MIGRACAO.length;
+  const segs = [
+    {k:"Concluído", v:porStatus["Concluído"]||0, cor:"ok"},
+    {k:"Em andamento", v:porStatus["Em andamento"]||0, cor:"accent"},
+    {k:"Bloqueado", v:porStatus["Bloqueado"]||0, cor:"danger"},
+    {k:"Não iniciado", v:porStatus["Não iniciado"]||0, cor:"faint"},
+  ].filter(s=>s.v>0);
+  el.innerHTML = `
+    <div class="vex-meter" style="margin-bottom:12px;">
+      <div class="track"><div class="fill" style="width:${pct}%;"></div></div>
+      <div class="labelrow"><span>${pct}% dos registros carregados</span><span>${totalCarregado.toLocaleString('pt-BR')} / ${totalEstimado.toLocaleString('pt-BR')}</span></div>
+    </div>
+    <div class="vex-stacked-bar">${segs.map(s=>`<div class="seg" style="width:${Math.round(100*s.v/total)}%;background:${COLOR_VAR[s.cor]||COLOR_VAR.faint};border-right:2px solid var(--surface);" title="${s.k}: ${s.v}"></div>`).join("")}</div>
+    <div class="vex-legend" style="margin-top:8px;">${segs.map(s=>`<span class="item"><span class="swatch" style="background:${COLOR_VAR[s.cor]};"></span>${s.k} (${s.v})</span>`).join("")}</div>
+  `;
+}
+
+// Folha de Pagamento (Rubricas) — mesmo raciocínio: funil de status é estado,
+// não identidade, reaproveita STATUS_RUBRICA_COLOR (já existe na tela de
+// Rubricas) pra manter a mesma cor em todo o sistema pro mesmo status.
+function _vexRenderFolha(){
+  const el = $("vex-folha");
+  const validas = RUBRICAS.filter(r=>r.status!=="Excluída");
+  if(!validas.length){ el.innerHTML = `<div class="vex-empty">Nenhuma rubrica levantada.</div>`; return; }
+  const porStatus = {};
+  validas.forEach(r=>{ porStatus[r.status] = (porStatus[r.status]||0)+1; });
+  const total = validas.length;
+  const homologadas = porStatus["Homologada"]||0;
+  const pct = Math.round(100*homologadas/total);
+  const ordem = [
+    {k:"Em levantamento", cor:"faint"}, {k:"Enviada à Techne", cor:"accent"},
+    {k:"Liberada para testes", cor:"accent"}, {k:"Em homologação", cor:"warn"},
+    {k:"Homologada", cor:"ok"},
+  ];
+  const segs = ordem.map(o=>({...o, v:porStatus[o.k]||0})).filter(o=>o.v>0);
+  el.innerHTML = `
+    <div class="vex-meter" style="margin-bottom:12px;">
+      <div class="track"><div class="fill" style="width:${pct}%;background:var(--ok);"></div></div>
+      <div class="labelrow"><span>${pct}% homologadas</span><span>${homologadas} / ${total}</span></div>
+    </div>
+    <div class="vex-stacked-bar">${segs.map(s=>`<div class="seg" style="width:${Math.round(100*s.v/total)}%;background:${COLOR_VAR[s.cor]};border-right:2px solid var(--surface);" title="${s.k}: ${s.v}"></div>`).join("")}</div>
+    <div class="vex-legend" style="margin-top:8px;">${segs.map(s=>`<span class="item"><span class="swatch" style="background:${COLOR_VAR[s.cor]};"></span>${s.k} (${s.v})</span>`).join("")}</div>
+  `;
+}
+
+// Financeiro (Faturas) — meter de % recebido (sobre o valor líquido) + dois
+// indicadores-chave; "atrasadas" usa o mesmo campo `atrasada` já calculado
+// pelo backend pra tela de Faturas.
+function _vexRenderFinanceiro(){
+  const el = $("vex-financeiro");
+  if(!FATURAS.length){ el.innerHTML = `<div class="vex-empty">Nenhuma fatura cadastrada.</div>`; return; }
+  const somaTotal = FATURAS.reduce((s,f)=>s+Number(f.valor_total||0),0);
+  const somaLiquido = FATURAS.reduce((s,f)=>s+Number(f.valor_liquido||0),0);
+  const somaPaga = FATURAS.filter(f=>f.paga).reduce((s,f)=>s+Number(f.valor_liquido||0),0);
+  const pctRecebido = somaLiquido>0 ? Math.round(100*somaPaga/somaLiquido) : 0;
+  const atrasadas = FATURAS.filter(f=>f.atrasada).length;
+  el.innerHTML = `
+    <div class="vex-meter" style="margin-bottom:12px;">
+      <div class="track"><div class="fill" style="width:${pctRecebido}%;background:var(--ok);"></div></div>
+      <div class="labelrow"><span>${pctRecebido}% do valor líquido recebido</span><span>${fmtMoeda(somaPaga)} / ${fmtMoeda(somaLiquido)}</span></div>
+    </div>
+    <div class="vex-status-grid">
+      <div class="vex-status-tile" style="background:${SOFT_VAR.accent};"><span class="v">${fmtMoeda(somaTotal)}</span><span class="l">Valor total faturado</span></div>
+      <div class="vex-status-tile" style="background:${atrasadas?SOFT_VAR.danger:SOFT_VAR.faint};"><span class="v" style="color:${atrasadas?COLOR_VAR.danger:'inherit'};">${atrasadas}</span><span class="l">Faturas atrasadas</span></div>
+    </div>
+  `;
+}
+
+// Riscos & Pendências — painel de status-tiles (cada card já é cor de estado).
+function _vexRenderRiscosPendencias(){
+  const el = $("vex-riscos-pendencias");
+  const riscosAbertos = RISCOS.filter(r=>r.status==="Aberto");
+  const riscosAltos = riscosAbertos.filter(r=>r.probabilidade==="Alto"||r.impacto==="Alto").length;
+  const pendAbertas = PENDENCIAS.filter(p=>p.status==="Aberta"||p.status==="Em andamento").length;
+  const pendAtrasadas = PENDENCIAS.filter(p=>p.atrasada).length;
+  const tiles = [
+    {l:"Riscos abertos", v:riscosAbertos.length, cor: riscosAbertos.length?"warn":"faint"},
+    {l:"Riscos de alto impacto/prob.", v:riscosAltos, cor: riscosAltos?"danger":"faint"},
+    {l:"Pendências em aberto", v:pendAbertas, cor: pendAbertas?"accent":"faint"},
+    {l:"Pendências atrasadas", v:pendAtrasadas, cor: pendAtrasadas?"danger":"faint"},
+  ];
+  el.innerHTML = tiles.map(t=>`<div class="vex-status-tile" style="background:${SOFT_VAR[t.cor]};"><span class="v" style="color:${COLOR_VAR[t.cor]};">${t.v}</span><span class="l">${t.l}</span></div>`).join("");
+}
+
+// Requisitos do TR — % atendido nativamente ou com parametrização (Nativo +
+// Parcial), reaproveitando ATENDIMENTO_COLOR já usado na tela de Requisitos.
+function _vexRenderRequisitos(){
+  const el = $("vex-requisitos");
+  if(!REQUISITOS.length){ el.innerHTML = `<div class="vex-empty">Nenhum requisito levantado.</div>`; return; }
+  const total = REQUISITOS.length;
+  const porAtend = {};
+  REQUISITOS.forEach(r=>{ porAtend[r.atendimento] = (porAtend[r.atendimento]||0)+1; });
+  const atendidos = (porAtend["Nativo"]||0) + (porAtend["Parcial"]||0);
+  const pct = Math.round(100*atendidos/total);
+  const ordem = ["Nativo","Parcial","Customizado","A analisar"];
+  const segs = ordem.map(k=>({k, v:porAtend[k]||0, cor:ATENDIMENTO_COLOR[k]})).filter(s=>s.v>0);
+  el.innerHTML = `
+    <div class="vex-meter" style="margin-bottom:12px;">
+      <div class="track"><div class="fill" style="width:${pct}%;background:var(--ok);"></div></div>
+      <div class="labelrow"><span>${pct}% atendidos nativamente ou com parametrização</span><span>${atendidos} / ${total}</span></div>
+    </div>
+    <div class="vex-stacked-bar">${segs.map(s=>`<div class="seg" style="width:${Math.round(100*s.v/total)}%;background:${COLOR_VAR[s.cor]};border-right:2px solid var(--surface);" title="${s.k}: ${s.v}"></div>`).join("")}</div>
+    <div class="vex-legend" style="margin-top:8px;">${segs.map(s=>`<span class="item"><span class="swatch" style="background:${COLOR_VAR[s.cor]};"></span>${s.k} (${s.v})</span>`).join("")}</div>
+  `;
+}
+
+// Orquestrador — monta a Visão Executiva inteira a partir dos dados já
+// carregados em memória (ATIVIDADES, MARCOS, ITENS_MIGRACAO, RUBRICAS,
+// FATURAS, RISCOS, PENDENCIAS, REQUISITOS, FRENTES); quem chama é
+// responsável por garantir que esses loads já rodaram (mesmo padrão de
+// renderDashboard()).
+async function renderVisaoExecutiva(){
+  const {total, concluidas, atrasadas, emAndamento, criticas, pctConcluida, diffPP} = calcularKpisCronograma();
+
+  $("vex-hero-pct").textContent = pctConcluida+"%";
+  $("vex-hero-badge").innerHTML = _vexHealthBadge(diffPP);
+  const marcosPendentes = MARCOS.filter(m=>!m.data_real).length;
+  $("vex-subkpis").innerHTML = [
+    {l:"Atividades", v:`${concluidas}/${total}`},
+    {l:"Em andamento", v:emAndamento},
+    {l:"Atrasadas", v:atrasadas, cor: atrasadas?"danger":null},
+    {l:"No caminho crítico", v:criticas, cor: criticas?"warn":null},
+    {l:"Marcos pendentes", v:marcosPendentes},
+  ].map(k=>`<div class="vex-subkpi"><span class="v" ${k.cor?`style="color:${COLOR_VAR[k.cor]};"`:""}>${k.v}</span><span class="l">${k.l}</span></div>`).join("");
+
+  // KPIs cruzados: uma leitura por módulo, pra quem não conhece o projeto
+  // entender o estado geral sem precisar abrir cada tela.
+  const totalEstimadoMig = ITENS_MIGRACAO.reduce((s,m)=>s+(Number(m.qtd_registros_estimada)||0),0);
+  const totalCarregadoMig = ITENS_MIGRACAO.reduce((s,m)=>s+(Number(m.qtd_registros_carregados)||0),0);
+  const pctMig = totalEstimadoMig>0 ? Math.round(100*totalCarregadoMig/totalEstimadoMig) : null;
+  const validasRub = RUBRICAS.filter(r=>r.status!=="Excluída");
+  const pctRub = validasRub.length ? Math.round(100*validasRub.filter(r=>r.status==="Homologada").length/validasRub.length) : null;
+  const somaLiquidoFat = FATURAS.reduce((s,f)=>s+Number(f.valor_liquido||0),0);
+  const somaPagaFat = FATURAS.filter(f=>f.paga).reduce((s,f)=>s+Number(f.valor_liquido||0),0);
+  const pctFat = somaLiquidoFat>0 ? Math.round(100*somaPagaFat/somaLiquidoFat) : null;
+  const riscosPendAbertos = RISCOS.filter(r=>r.status==="Aberto").length + PENDENCIAS.filter(p=>p.status==="Aberta"||p.status==="Em andamento").length;
+  const pctReq = REQUISITOS.length ? Math.round(100*REQUISITOS.filter(r=>r.atendimento==="Nativo"||r.atendimento==="Parcial").length/REQUISITOS.length) : null;
+
+  $("vex-kpis").innerHTML = [
+    {l:"Aderência ao prazo", v:`${diffPP>0?"+":""}${diffPP} p.p.`, bg: diffPP<0?"danger":(diffPP>0?"ok":"faint")},
+    {l:"Migração — % carregado", v: pctMig===null?"—":pctMig+"%", bg: pctMig===null?"faint":(pctMig>=90?"ok":pctMig>=50?"accent":"warn")},
+    {l:"Rubricas — % homologadas", v: pctRub===null?"—":pctRub+"%", bg: pctRub===null?"faint":(pctRub>=90?"ok":pctRub>=50?"accent":"warn")},
+    {l:"Financeiro — % recebido", v: pctFat===null?"—":pctFat+"%", bg: pctFat===null?"faint":(pctFat>=90?"ok":pctFat>=50?"accent":"warn")},
+    {l:"Riscos + Pendências em aberto", v: riscosPendAbertos, bg: riscosPendAbertos? "warn":"faint"},
+    {l:"Requisitos — % atendidos", v: pctReq===null?"—":pctReq+"%", bg: pctReq===null?"faint":(pctReq>=80?"ok":pctReq>=50?"accent":"warn")},
+  ].map(k=>`<div class="kpi" style="background:${SOFT_VAR[k.bg]||SOFT_VAR.faint};"><div class="label">${k.l}</div><div class="value">${k.v}</div></div>`).join("");
+
+  _vexRenderCurvaS(_vexCurvaSCalcular());
+
+  api(`/relatorios/resumo-frentes?projeto_id=${PROJETO.id}`).then(_vexRenderFrentes);
+
+  const proximos = MARCOS.filter(m=>!m.data_real).sort((a,b)=>a.data_prevista.localeCompare(b.data_prevista)).slice(0,6);
+  $("vex-marcos").innerHTML = proximos.length ? proximos.map(m=>`<li><span>${esc(m.nome)}</span><span class="mono muted">${fmtDate(m.data_prevista)}</span></li>`).join("")
+    : `<li class="muted">Nenhum marco pendente.</li>`;
+
+  _vexRenderMigracao();
+  _vexRenderFolha();
+  _vexRenderFinanceiro();
+  _vexRenderRiscosPendencias();
+  _vexRenderRequisitos();
+
+  $("vex-atualizado-em").textContent = "Atualizado às " + new Date().toLocaleTimeString("pt-BR");
 }
 
 // Anomalias de Data Fixada (57ª/58ª rodada): atividades marcadas com 📌 (Fixar data de
@@ -5373,7 +5909,7 @@ document.addEventListener("DOMContentLoaded", ()=>{
     try{
       const r = await api("/cpm/recalcular", {method:"POST", body: JSON.stringify({projeto_id: PROJETO.id})});
       toast(`Caminho crítico recalculado: ${r.caminho_critico.length} atividades críticas, duração ${r.duracao_projeto_dias_uteis} dias úteis.`);
-      await loadAtividades(); renderCronograma(); renderDashboard(); loadCaminhoCritico();
+      await loadAtividades(); renderCronograma(); renderDashboard(); renderVisaoExecutiva(); loadCaminhoCritico();
     }catch(e){}
   });
 });
@@ -6700,7 +7236,7 @@ function wireAtividadeModal(){
   $("at-delete").addEventListener("click", ()=>{
     askConfirm("Excluir esta atividade? Dependências e vínculos serão removidos também.", async ()=>{
       await api(`/atividades/${editingAtividadeId}`, {method:"DELETE"});
-      await loadAtividades(); renderCronograma(); renderDashboard(); closeAtividadeModal();
+      await loadAtividades(); renderCronograma(); renderDashboard(); renderVisaoExecutiva(); closeAtividadeModal();
       toast("Atividade excluída.");
     });
   });
@@ -6711,7 +7247,7 @@ function wireAtividadeModal(){
   $("at-duplicar").addEventListener("click", async ()=>{
     if(!editingAtividadeId) return;
     const copia = await api(`/atividades/${editingAtividadeId}/duplicar`, {method:"POST"});
-    await loadAtividades(); renderCronograma(); renderDashboard();
+    await loadAtividades(); renderCronograma(); renderDashboard(); renderVisaoExecutiva();
     toast("Atividade duplicada — ajuste o que precisar na cópia.");
     openAtividadeModal(copia);
   });
@@ -6721,7 +7257,7 @@ function wireAtividadeModal(){
     await api(`/atividades/${editingAtividadeId}/recursos`, {method:"POST", body: JSON.stringify({recurso_id, horas_alocadas})});
     $("at-resp-add-horas").value = "";
     await refreshResponsaveis();
-    await loadAtividades(); renderCronograma(); renderDashboard();
+    await loadAtividades(); renderCronograma(); renderDashboard(); renderVisaoExecutiva();
   });
   $("at-dep-add").addEventListener("click", async ()=>{
     const predecessora_id = $("at-dep-predecessora").value; if(!predecessora_id) return;
@@ -6732,7 +7268,7 @@ function wireAtividadeModal(){
     // própria atividade e as sucessoras dela (ver _cascatear_edicao_individual
     // em main.py) — recarrega a base e sincroniza os campos de data/esforço
     // do próprio modal, caso a atividade aberta tenha sido uma das afetadas.
-    await loadAtividades(); renderCronograma(); renderDashboard();
+    await loadAtividades(); renderCronograma(); renderDashboard(); renderVisaoExecutiva();
     _sincronizarCamposDataSeAfetado(resp && resp._cascata);
     const msg = mensagemCascata(resp && resp._cascata);
     if(msg) toast("Dependência adicionada." + msg);
@@ -6904,7 +7440,7 @@ async function saveAtividade(){
     let resp;
     if(editingAtividadeId) resp = await api(`/atividades/${editingAtividadeId}`, {method:"PUT", body: JSON.stringify(data)});
     else resp = await api("/atividades", {method:"POST", body: JSON.stringify(data)});
-    await loadAtividades(); renderCronograma(); renderDashboard(); closeAtividadeModal();
+    await loadAtividades(); renderCronograma(); renderDashboard(); renderVisaoExecutiva(); closeAtividadeModal();
     toast("Atividade salva." + mensagemCascata(resp && resp._cascata));
   }catch(e){
     // Erro mais comum aqui: status exige relato e ainda não há nenhum registrado.
@@ -6926,7 +7462,7 @@ async function refreshResponsaveis(){
   $("at-resp-list").querySelectorAll("button[data-resp]").forEach(b=>b.addEventListener("click", async ()=>{
     await api(`/atividades/${editingAtividadeId}/recursos/${b.dataset.resp}`, {method:"DELETE"});
     await refreshResponsaveis();
-    await loadAtividades(); renderCronograma(); renderDashboard();
+    await loadAtividades(); renderCronograma(); renderDashboard(); renderVisaoExecutiva();
   }));
   $("at-resp-list").querySelectorAll("input[data-resp-horas]").forEach(inp=>inp.addEventListener("change", async ()=>{
     const horas_alocadas = inp.value ? Number(inp.value) : null;
@@ -6948,7 +7484,7 @@ async function refreshDeps(){
     await refreshDeps();
     // 71ª rodada — remover uma predecessora também pode reposicionar em
     // cascata (ver comentário equivalente em at-dep-add acima).
-    await loadAtividades(); renderCronograma(); renderDashboard();
+    await loadAtividades(); renderCronograma(); renderDashboard(); renderVisaoExecutiva();
     _sincronizarCamposDataSeAfetado(resp && resp._cascata);
     const msg = mensagemCascata(resp && resp._cascata);
     if(msg) toast("Dependência removida." + msg);
@@ -7839,7 +8375,7 @@ async function removerCronogramaConfirmado(){
     });
     toast("Cronograma removido: todas as atividades e marcos deste projeto foram apagados.");
     await Promise.all([loadAtividades(), loadRiscosMarcos(), loadPendencias()]);
-    renderDashboard(); renderCronograma(); renderRiscosMarcos(); renderPendencias();
+    renderDashboard(); renderVisaoExecutiva(); renderCronograma(); renderRiscosMarcos(); renderPendencias();
     fecharRemoverCronogramaModal();
   }catch(e){}
   rcRemovendo = false;
@@ -7903,7 +8439,7 @@ async function removerRequisitosConfirmado(){
     });
     toast("Requisitos removidos: todos os requisitos do TR deste projeto foram apagados.");
     await Promise.all([loadRequisitos(), loadAtividades()]);
-    renderRequisitos(); renderCronograma(); renderDashboard();
+    renderRequisitos(); renderCronograma(); renderDashboard(); renderVisaoExecutiva();
     fecharRemoverRequisitosModal();
   }catch(e){}
   rqRemovendo = false;
@@ -8138,7 +8674,7 @@ async function confirmarReplanejamento(){
     });
     toast(`Cronograma replanejado: ${r.atividades_alteradas} atividade(s) e ${r.marcos_alterados} marco(s) com data nova.`);
     await Promise.all([loadAtividades(), loadRiscosMarcos(), loadPendencias()]);
-    renderDashboard(); renderCronograma(); renderRiscosMarcos(); renderPendencias();
+    renderDashboard(); renderVisaoExecutiva(); renderCronograma(); renderRiscosMarcos(); renderPendencias();
     fecharReplanejarModal();
   }catch(e){}
   rpConfirmando = false;
@@ -8224,7 +8760,7 @@ async function confirmarRenumeracao(){
     });
     toast(`Cronograma renumerado: ${r.atividades_renumeradas} atividade(s) com Código WBS novo.`);
     await loadAtividades();
-    renderDashboard(); renderCronograma();
+    renderDashboard(); renderVisaoExecutiva(); renderCronograma();
     fecharRenumerarModal();
   }catch(e){}
   rnConfirmando = false;
@@ -8829,7 +9365,7 @@ async function confirmarEdicaoLote(){
     toast(`Cronograma atualizado: ${r.atividades_editadas} atividade(s) editada(s), ${r.atividades_cascata} em cascata`
       + (r.relatos_criados ? `, ${r.relatos_criados} relato(s) registrado(s)` : "") + ".");
     await loadAtividades();
-    renderDashboard(); renderCronograma();
+    renderDashboard(); renderVisaoExecutiva(); renderCronograma();
     fecharEdicaoLoteModal();
   }catch(e){}
   elConfirmando = false;
@@ -8867,6 +9403,7 @@ let reRelatorioAtual = null; // último relatório carregado/gerado (pra habilit
 
 function wireRelatorioExecutivo(){
   $("btn-relatorio-executivo")?.addEventListener("click", abrirRelatorioExecutivoModal);
+  $("btn-relatorio-executivo-vex")?.addEventListener("click", abrirRelatorioExecutivoModal);
   $("re-close").addEventListener("click", ()=>{ $("overlay-relatorio-executivo").hidden = true; });
   $("overlay-relatorio-executivo").addEventListener("click", e=>{ if(e.target.id==="overlay-relatorio-executivo") $("overlay-relatorio-executivo").hidden = true; });
   $("re-gerar").addEventListener("click", gerarRelatorioExecutivo);
@@ -10584,7 +11121,7 @@ async function reloadConfigEntidades(){
   renderConfigTable();
   // nomes/ativo podem ter mudado — atualiza o que já está carregado na tela
   await loadAtividades();
-  renderDashboard(); renderCronograma(); renderRequisitos(); renderRiscosMarcos(); renderPendencias();
+  renderDashboard(); renderVisaoExecutiva(); renderCronograma(); renderRequisitos(); renderRiscosMarcos(); renderPendencias();
 }
 
 // ================= Parâmetros do site (Configurações > Parâmetros) =================
