@@ -1011,6 +1011,10 @@
           <div class="vex-hero-figure" id="vex-hero-pct">—</div>
           <div id="vex-hero-badge" style="margin-top:6px;"></div>
         </div>
+        <div>
+          <div class="vex-hero-label" title="Quanto o projeto já deveria ter avançado até hoje, segundo o prazo final previsto (dtfim_prev) de cada atividade — mesmo critério usado pra calcular a Aderência ao prazo.">% Esperado atual</div>
+          <div class="vex-hero-figure" id="vex-hero-pct-esperado" style="color:var(--text-muted);">—</div>
+        </div>
         <div class="vex-subkpis" id="vex-subkpis"></div>
       </div>
     </div>
@@ -6022,9 +6026,10 @@ function _vexRenderRequisitos(){
 // responsável por garantir que esses loads já rodaram (mesmo padrão de
 // renderDashboard()).
 async function renderVisaoExecutiva(){
-  const {total, concluidas, atrasadas, emAndamento, criticas, pctConcluida, diffPP} = calcularKpisCronograma();
+  const {total, concluidas, atrasadas, emAndamento, criticas, pctConcluida, pctDeveria, diffPP} = calcularKpisCronograma();
 
   $("vex-hero-pct").textContent = pctConcluida+"%";
+  $("vex-hero-pct-esperado").textContent = pctDeveria+"%";
   $("vex-hero-badge").innerHTML = _vexHealthBadge(diffPP);
   const marcosPendentes = MARCOS.filter(m=>!m.data_real).length;
   $("vex-subkpis").innerHTML = [
