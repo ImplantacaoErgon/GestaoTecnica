@@ -708,7 +708,14 @@
       <button data-view="minhas-atividades">Minhas atividades</button>
       <button data-view="pendencias">🚩 Pendências</button>
       <button data-view="faturas">💵 Faturas</button>
-      <button data-view="migracao">📦 Migração de Dados</button>
+      <div class="tab-group" data-group>
+        <button type="button" class="tab-group-trigger" data-views="migracao,migracao-rejeicoes">📦 Migração de Dados <span class="caret">▾</span></button>
+        <div class="tab-group-menu">
+          <button data-view="migracao">📦 Itens e Ciclos</button>
+          <!-- 116ª rodada: carga/análise das planilhas de rejeitados -->
+          <button data-view="migracao-rejeicoes">🚫 Rejeições da Migração</button>
+        </div>
+      </div>
       <div class="tab-group" data-group>
         <button type="button" class="tab-group-trigger" data-views="rubricas,comparacao-folha,comparacao-folha-dashboard">💰 Folha de Pagamento <span class="caret">▾</span></button>
         <div class="tab-group-menu">
@@ -1118,6 +1125,51 @@
         <thead><tr><th>Tabela do legado</th><th>Destino/Sistema</th><th>Meta</th><th>Carregado</th><th>% Carregados</th><th>Rejeitado</th><th>% Rejeitados</th><th>Ciclos</th><th>Status</th><th>Responsável</th></tr></thead>
         <tbody id="migracao-tbody"></tbody>
       </table>
+    </div>
+  </section>
+
+  <!-- ============ REJEIÇÕES DA MIGRAÇÃO (116ª rodada) ============
+       Carga, análise e histórico das planilhas de REJEITADOS que o Ergon
+       devolve em cada ciclo de migração -- Fase 2 (De-Para, arquivo
+       "LISTA_P_REJ_DP_*") e Fase 3 (Carga final, arquivo
+       "LISTA_P_REJ_ERG_*"). Primeiro recorte: Eventos de Cargos. Uma
+       página só (confirmado com o usuário), com filtro de Fase -- ver
+       app/migracao_rejeicoes.py / app/migracao_rejeicoes_import.py. -->
+  <section class="view" id="view-migracao-rejeicoes">
+    <h2 class="view-title">🚫 Rejeições da Migração</h2>
+    <div class="view-sub">Carga das planilhas de rejeitados devolvidas pelo Ergon em cada ciclo de migração — Fase 2 (De-Para) e Fase 3 (Carga final) — com análise dos tipos de erro, ação sugerida e histórico das cargas.</div>
+
+    <div class="card" style="margin-bottom:14px;">
+      <div class="field full" style="margin-bottom:10px;"><label>Item de migração</label><select id="mrj-item"></select></div>
+      <div class="muted" id="mrj-sem-item" style="margin:4px 0 0 2px;">Cadastre um item de migração na aba "Itens e Ciclos" antes de carregar rejeições (ex: "Eventos de Cargos").</div>
+      <div id="mrj-upload-wrap" hidden>
+        <div class="filters" style="margin-bottom:0;">
+          <div class="field" style="margin:0;"><label>Fase</label>
+            <select id="mrj-upload-fase">
+              <option value="fase2_depara">Fase 2 — De-Para</option>
+              <option value="fase3_carga_final">Fase 3 — Carga final</option>
+            </select>
+          </div>
+          <div class="field" style="margin:0;"><label>Ciclo nº</label><input id="mrj-upload-ciclo" type="number" min="1" step="1" style="width:90px;"></div>
+          <div class="field" style="margin:0;"><label>Data do ciclo (se novo)</label><input id="mrj-upload-data" type="date"></div>
+          <div class="field" style="margin:0;flex:1;min-width:220px;"><label>Planilha (.csv ou .xlsx)</label><input id="mrj-upload-file" type="file" accept=".csv,.xlsx,.xlsm"></div>
+          <button class="btn small" id="mrj-upload-btn" style="align-self:flex-end;">⬆ Importar planilha</button>
+        </div>
+        <div class="muted" style="font-size:12px;margin-top:8px;">Reimportar o mesmo ciclo + mesma fase SUBSTITUI a carga anterior (não duplica). O nome do arquivo escolhido pré-seleciona a fase automaticamente (LISTA_P_REJ_DP_* = Fase 2, LISTA_P_REJ_ERG_* = Fase 3).</div>
+      </div>
+    </div>
+
+    <div id="mrj-historico-wrap" hidden>
+      <div class="filters">
+        <select id="mrj-f-fase"><option value="">Fase (todas)</option><option value="fase2_depara">Fase 2 — De-Para</option><option value="fase3_carga_final">Fase 3 — Carga final</option></select>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Fase</th><th>Ciclo</th><th>Data do ciclo</th><th>Arquivo</th><th>Total linhas</th><th>Classificadas</th><th>Enviado em</th><th>Por</th><th></th></tr></thead>
+          <tbody id="mrj-cargas-tbody"></tbody>
+        </table>
+      </div>
+      <div class="muted" id="mrj-cargas-vazio" hidden>Nenhuma carga de rejeitados registrada ainda para este item.</div>
     </div>
   </section>
 
@@ -2035,6 +2087,40 @@
       </table></div>
     </div>
     <div class="modal-foot"><span></span><button class="btn secondary" id="qc-fechar">Fechar</button></div>
+  </div>
+</div>
+
+<!-- ================= MODAL: ANÁLISE DE REJEIÇÕES DA MIGRAÇÃO (116ª rodada) ================= -->
+<div class="overlay" id="overlay-mrj-analise" hidden>
+  <div class="modal" style="max-width:980px;">
+    <div class="modal-head"><h2 id="mrj-analise-titulo">Análise da carga</h2><button class="btn ghost" id="mrj-analise-close">✕</button></div>
+    <div class="modal-body single-col">
+      <div class="kpis" id="mrj-analise-kpis" style="margin-bottom:14px;"></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Tipo de erro</th><th>Qtd</th><th>%</th><th>Descrição</th><th style="min-width:260px;">Ação sugerida</th><th></th></tr></thead>
+          <tbody id="mrj-breakdown-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="modal-foot"><span></span><button class="btn secondary" id="mrj-analise-fechar">Fechar</button></div>
+  </div>
+</div>
+
+<!-- ================= MODAL: LINHAS DE UM TIPO DE ERRO (116ª rodada) ================= -->
+<div class="overlay" id="overlay-mrj-detalhe" hidden>
+  <div class="modal" style="max-width:860px;">
+    <div class="modal-head"><h2 id="mrj-detalhe-titulo">Linhas rejeitadas</h2><button class="btn ghost" id="mrj-detalhe-close">✕</button></div>
+    <div class="modal-body single-col">
+      <div class="muted" id="mrj-detalhe-aviso" style="margin-bottom:8px;"></div>
+      <div class="table-wrap" style="max-height:420px;">
+        <table>
+          <thead><tr><th>Linha</th><th>Identificador</th><th>Mensagem de erro</th></tr></thead>
+          <tbody id="mrj-detalhe-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="modal-foot"><span></span><button class="btn secondary" id="mrj-detalhe-fechar">Fechar</button></div>
   </div>
 </div>
 
@@ -3161,7 +3247,7 @@ async function afterProjetoReady(){
   aplicarMarcaNoTopo();
   fillStaticSelects();
   wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireGanttToolbar(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireExportarCronograma(); wireExportarCronogramaXml(); wireRemoverCronograma(); wireRemoverRequisitos(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma(); wireRenumerarCronograma();
-  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros(); wireQuadroCicloModal(); wireRubricaModal(); wireRubricasFiltros(); wireImportRubricas(); wireComparacaoFolhaPane(); wireComparacaoFolhaDashboard();
+  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros(); wireQuadroCicloModal(); wireMigracaoRejeicoesPane(); wireRubricaModal(); wireRubricasFiltros(); wireImportRubricas(); wireComparacaoFolhaPane(); wireComparacaoFolhaDashboard();
   setupCsvTemplateLink();
   await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias(), loadItensMigracao(), loadRubricas(), loadRubricasAutoUpdateStatus()]);
   // Reaplica agora que REQUISITOS/ATIVIDADES já estão carregados — os selects
@@ -3516,6 +3602,7 @@ function goToView(view, opcoes){
   if(view==="analisar-requisitos") renderAnalisarRequisitos();
   if(view==="comparacao-folha") renderComparacaoFolhaPane(opcoes && opcoes.filtroInicial);
   if(view==="comparacao-folha-dashboard") renderComparacaoFolhaDashboard();
+  if(view==="migracao-rejeicoes") renderMigracaoRejeicoesPane();
   if(view==="calendario" || view==="manuais"){
     // Nenhum botão/gatilho de #cfg-tabs corresponde a "calendario"/"manuais"
     // (foram retirados de lá nesta rodada) — destacarCfgTabs() (chamada por
@@ -5950,6 +6037,204 @@ function wireQuadroCicloModal(){
     if(v!=="") params.set("numero_ciclo", v);
     window.open(`${API}/itens-migracao/quadro-ciclo/exportar?${params.toString()}`, "_blank");
   });
+}
+
+// ================= REJEIÇÕES DA MIGRAÇÃO (116ª rodada) =================
+// Carga, análise e histórico das planilhas de rejeitados devolvidas pelo
+// Ergon em cada ciclo de migração -- ver app/migracao_rejeicoes.py e
+// app/migracao_rejeicoes_import.py no backend. Uma página só (confirmado
+// com o usuário), com filtro de Fase -- ver view-migracao-rejeicoes.
+const MRJ_FASE_LABEL = { fase2_depara: "Fase 2 — De-Para", fase3_carga_final: "Fase 3 — Carga final" };
+let MRJ_CARGAS = [];
+let MRJ_ANALISE_ATUAL = null; // {carga, breakdown} da carga aberta no modal de análise
+
+// Mesmos prefixos de nome de arquivo confirmados com o usuário (ver
+// migracao_rejeicoes_import.sugerir_fase_pelo_nome no backend) -- usado só
+// pra pré-selecionar a Fase no formulário de upload a partir do arquivo
+// escolhido; o que vale de verdade é o <select> de Fase (o usuário pode
+// trocar à vontade antes de importar).
+function mrjSugerirFasePeloNome(nomeArquivo){
+  const nome = (nomeArquivo||"").trim().toUpperCase();
+  if(nome.startsWith("LISTA_P_REJ_DP")) return "fase2_depara";
+  if(nome.startsWith("LISTA_P_REJ_ERG")) return "fase3_carga_final";
+  return null;
+}
+
+function renderMigracaoRejeicoesPane(){
+  const temItens = (ITENS_MIGRACAO||[]).length > 0;
+  $("mrj-sem-item").hidden = temItens;
+  $("mrj-upload-wrap").hidden = !temItens;
+  $("mrj-historico-wrap").hidden = !temItens;
+  if(!temItens) return;
+
+  const selAtual = $("mrj-item").value;
+  $("mrj-item").innerHTML = ITENS_MIGRACAO.map(i =>
+    `<option value="${i.id}">${esc(i.nome_tabela_destino || i.nome_tabela_legado)}</option>`
+  ).join("");
+  if(selAtual && ITENS_MIGRACAO.some(i=>i.id===selAtual)) $("mrj-item").value = selAtual;
+
+  mrjCarregarHistorico();
+}
+
+async function mrjCarregarHistorico(){
+  const itemId = $("mrj-item").value;
+  if(!itemId) return;
+  const fase = $("mrj-f-fase").value;
+  const qs = new URLSearchParams({ projeto_id: PROJETO.id, item_migracao_id: itemId });
+  if(fase) qs.set("fase", fase);
+  MRJ_CARGAS = await api(`/migracao-rejeicoes/cargas?${qs.toString()}`);
+  mrjRenderHistorico();
+}
+
+function mrjRenderHistorico(){
+  $("mrj-cargas-vazio").hidden = MRJ_CARGAS.length > 0;
+  $("mrj-cargas-tbody").innerHTML = MRJ_CARGAS.map(c => {
+    const pct = c.total_linhas > 0 ? (100*c.total_classificadas/c.total_linhas).toFixed(2)+"%" : "—";
+    return `<tr>
+      <td>${esc(MRJ_FASE_LABEL[c.fase]||c.fase)}</td>
+      <td class="mono">${c.numero_ciclo}</td>
+      <td class="mono">${fmtDate(c.ciclo_data_execucao)}</td>
+      <td>${esc(c.nome_arquivo||"—")}</td>
+      <td class="mono">${Number(c.total_linhas||0).toLocaleString('pt-BR')}</td>
+      <td class="mono">${Number(c.total_classificadas||0).toLocaleString('pt-BR')} (${pct})</td>
+      <td>${fmtDateTime(c.criado_em)}</td>
+      <td>${esc(c.iniciado_por_nome||"—")}</td>
+      <td style="white-space:nowrap;">
+        <button class="btn ghost small" onclick="mrjAbrirAnalise(${attrArgs(c.id)})" title="Ver análise">👁</button>
+        <button class="btn ghost small" onclick="mrjExcluirCarga(${attrArgs(c.id)})" title="Excluir carga">🗑</button>
+      </td>
+    </tr>`;
+  }).join("");
+}
+
+async function mrjExcluirCarga(cargaId){
+  if(!confirm("Excluir esta carga de rejeitados? As linhas de detalhe dela são apagadas junto (o histórico de outras cargas/ciclos não é afetado).")) return;
+  try{
+    await api(`/migracao-rejeicoes/cargas/${cargaId}`, {method:"DELETE"});
+    toast("Carga excluída.");
+    mrjCarregarHistorico();
+  }catch(e){}
+}
+
+async function mrjAbrirAnalise(cargaId){
+  let res;
+  try{ res = await api(`/migracao-rejeicoes/resumo?carga_id=${cargaId}`); }
+  catch(e){ return; }
+  MRJ_ANALISE_ATUAL = res;
+  const c = res.carga;
+  $("mrj-analise-titulo").textContent =
+    `${esc(c.nome_tabela_destino || c.nome_tabela_legado)} — Ciclo ${c.numero_ciclo} — ${MRJ_FASE_LABEL[c.fase]||c.fase}`;
+  const tiposDistintos = res.breakdown.length;
+  $("mrj-analise-kpis").innerHTML = [
+    {l:"Total de linhas rejeitadas", v: Number(c.total_linhas||0).toLocaleString('pt-BR')},
+    {l:"Classificadas", v: Number(c.total_classificadas||0).toLocaleString('pt-BR')},
+    {l:"% classificadas", v: c.total_linhas>0 ? (100*c.total_classificadas/c.total_linhas).toFixed(2)+"%" : "—"},
+    {l:"Tipos de erro distintos", v: tiposDistintos},
+  ].map(k=>`<div class="kpi"><div class="label">${k.l}</div><div class="value">${k.v}</div></div>`).join("");
+  mrjRenderBreakdown();
+  $("overlay-mrj-analise").hidden = false;
+}
+
+function mrjRenderBreakdown(){
+  if(!MRJ_ANALISE_ATUAL) return;
+  const { carga, breakdown } = MRJ_ANALISE_ATUAL;
+  $("mrj-breakdown-tbody").innerHTML = breakdown.map((b, idx) => `<tr>
+      <td class="mono">${esc(b.tipo_erro_chave)}</td>
+      <td class="mono">${Number(b.qtd).toLocaleString('pt-BR')}</td>
+      <td>${Number(b.percentual).toFixed(2)}%</td>
+      <td class="muted" style="font-size:12.5px;">${esc(b.descricao_erro||"—")}</td>
+      <td><textarea id="mrj-acao-${idx}" rows="2" style="width:100%;font-size:12.5px;" placeholder="Nenhuma ação sugerida cadastrada ainda — descreva o que fazer para sanar esse tipo de rejeição.">${esc(b.acao_sugerida||"")}</textarea></td>
+      <td style="white-space:nowrap;">
+        <button class="btn secondary small" onclick="mrjSalvarAcao(${idx}, ${attrArgs(carga.fase, b.tipo_erro_chave, b.acao_id)})">Salvar</button><br>
+        <button class="btn ghost small" onclick="mrjVerLinhas(${attrArgs(carga.id, b.tipo_erro_chave)})" style="margin-top:4px;">Ver linhas</button>
+      </td>
+    </tr>`).join("");
+}
+
+async function mrjSalvarAcao(idx, fase, tipoErroChave, acaoId){
+  const texto = $(`mrj-acao-${idx}`).value;
+  try{
+    if(acaoId){
+      await api(`/migracao-rejeicoes/acoes-sugeridas/${acaoId}`, {method:"PUT", body: JSON.stringify({acao_sugerida: texto})});
+    }else{
+      await api(`/migracao-rejeicoes/acoes-sugeridas`, {method:"POST", body: JSON.stringify({fase, tipo_erro_chave: tipoErroChave, acao_sugerida: texto})});
+    }
+    toast("Ação sugerida salva.");
+    // Recarrega a análise pra pegar o acao_id (se era uma ação nova) e manter
+    // os textos em sincronia com o que de fato foi gravado.
+    if(MRJ_ANALISE_ATUAL) mrjAbrirAnalise(MRJ_ANALISE_ATUAL.carga.id);
+  }catch(e){}
+}
+
+async function mrjVerLinhas(cargaId, tipoErroChave){
+  let linhas;
+  try{ linhas = await api(`/migracao-rejeicoes/detalhe?carga_id=${cargaId}&tipo_erro_chave=${encodeURIComponent(tipoErroChave)}&limit=200`); }
+  catch(e){ return; }
+  $("mrj-detalhe-titulo").textContent = `Linhas rejeitadas — ${tipoErroChave}`;
+  $("mrj-detalhe-aviso").textContent = linhas.length===200
+    ? "Mostrando as primeiras 200 linhas deste tipo de erro."
+    : `${linhas.length} linha(s) deste tipo de erro.`;
+  $("mrj-detalhe-tbody").innerHTML = linhas.map(l => `<tr>
+      <td class="mono">${l.linha_planilha ?? "—"}</td>
+      <td class="mono">${esc(l.identificador||"—")}</td>
+      <td style="font-size:12.5px;">${esc(l.msg_erro||"—")}</td>
+    </tr>`).join("") || `<tr class="empty-row"><td colspan="3">Nenhuma linha encontrada.</td></tr>`;
+  $("overlay-mrj-detalhe").hidden = false;
+}
+
+async function mrjImportar(){
+  const itemId = $("mrj-item").value;
+  const fase = $("mrj-upload-fase").value;
+  const numeroCiclo = $("mrj-upload-ciclo").value;
+  const dataExecucao = $("mrj-upload-data").value;
+  const input = $("mrj-upload-file");
+  const file = input.files[0];
+  if(!itemId){ toast("Selecione o item de migração.", true); return; }
+  if(!numeroCiclo){ toast("Informe o número do ciclo.", true); return; }
+  if(!file){ toast("Selecione a planilha (.csv ou .xlsx).", true); return; }
+  if(!confirm(
+    `Importar "${file.name}" como ${MRJ_FASE_LABEL[fase]} do ciclo ${numeroCiclo}?\n\n` +
+    "Se já existir uma carga para esse MESMO ciclo + fase, ela será substituída por completo (não duplica)."
+  )) return;
+
+  const btn = $("mrj-upload-btn");
+  btn.disabled = true; const textoOriginal = btn.textContent; btn.textContent = "Importando…";
+  try{
+    const fd = new FormData();
+    fd.append("projeto_id", PROJETO.id);
+    fd.append("item_migracao_id", itemId);
+    fd.append("numero_ciclo", numeroCiclo);
+    fd.append("fase", fase);
+    if(dataExecucao) fd.append("data_execucao", dataExecucao);
+    fd.append("file", file);
+    const carga = await api("/migracao-rejeicoes/importar", {method:"POST", body: fd});
+    input.value = "";
+    toast(`Carga importada: ${carga.total_linhas} linha(s) rejeitada(s).`);
+    await mrjCarregarHistorico();
+    mrjAbrirAnalise(carga.id);
+  }catch(e){
+    // api() já mostra toast com o erro específico (ex: coluna MSG_ERRO
+    // não encontrada, arquivo sem dados, fase inválida).
+  }finally{
+    btn.disabled = false; btn.textContent = textoOriginal;
+  }
+}
+
+function wireMigracaoRejeicoesPane(){
+  $("mrj-item").addEventListener("change", mrjCarregarHistorico);
+  $("mrj-f-fase").addEventListener("change", mrjCarregarHistorico);
+  $("mrj-upload-btn").addEventListener("click", mrjImportar);
+  $("mrj-upload-file").addEventListener("change", ()=>{
+    const file = $("mrj-upload-file").files[0];
+    const fase = file && mrjSugerirFasePeloNome(file.name);
+    if(fase) $("mrj-upload-fase").value = fase;
+  });
+  $("mrj-analise-close").addEventListener("click", ()=>{ $("overlay-mrj-analise").hidden = true; });
+  $("mrj-analise-fechar").addEventListener("click", ()=>{ $("overlay-mrj-analise").hidden = true; });
+  $("overlay-mrj-analise").addEventListener("click", e=>{ if(e.target.id==="overlay-mrj-analise") $("overlay-mrj-analise").hidden = true; });
+  $("mrj-detalhe-close").addEventListener("click", ()=>{ $("overlay-mrj-detalhe").hidden = true; });
+  $("mrj-detalhe-fechar").addEventListener("click", ()=>{ $("overlay-mrj-detalhe").hidden = true; });
+  $("overlay-mrj-detalhe").addEventListener("click", e=>{ if(e.target.id==="overlay-mrj-detalhe") $("overlay-mrj-detalhe").hidden = true; });
 }
 
 // ================= RUBRICAS (53ª rodada) =================

@@ -10,7 +10,7 @@ from datetime import datetime, date, timedelta
 
 from flask import Flask, request, jsonify, send_from_directory, send_file, abort, session
 
-from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_renumeracao, cronograma_anomalias, cronograma_export, cronograma_export_xml, cronograma_comparacao, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, drive_rubricas, rubricas_auto_update, comparacao_folha, comparacao_folha_import, google_drive, migracao_quadro_export, requisitos_ia
+from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_renumeracao, cronograma_anomalias, cronograma_export, cronograma_export_xml, cronograma_comparacao, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, drive_rubricas, rubricas_auto_update, comparacao_folha, comparacao_folha_import, google_drive, migracao_quadro_export, requisitos_ia, migracao_rejeicoes, migracao_rejeicoes_import
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 FRONTEND_DIR = os.environ.get(
@@ -2292,7 +2292,11 @@ def create_app():
         payload = request.get_json(force=True)
         # Rejeitados = Extraídos - Carregados, calculado automaticamente (nunca
         # digitado): recalcula aqui em vez de confiar no que a tela mandou, pra
-        # garantir a mesma regra mesmo numa chamada direta à API.
+        # garantir a mesma regra mesmo numa chamada direta à API. (116ª rodada:
+        # um ciclo recém-criado por esta rota nunca tem qtd_rejeicoes_detalhada
+        # = true ainda -- esse flag só é ligado por app/migracao_rejeicoes.py
+        # depois de uma carga detalhada de rejeições -- então a derivação
+        # abaixo sempre vale aqui, sem precisar checar o flag.)
         extraidos = payload.get("qtd_registros_extraidos")
         carregados = payload.get("qtd_registros_carregados")
         if extraidos is not None and carregados is not None:
@@ -2307,15 +2311,28 @@ def create_app():
         perdendo o número/posição original). Mesma regra de
         `create_ciclo` pra Rejeições = Extraídos - Carregados, recalculada
         aqui a partir do valor já salvo quando a edição não reenvia os
-        dois campos (patch_row só atualiza o que vier no payload)."""
+        dois campos (patch_row só atualiza o que vier no payload).
+
+        116ª rodada: quando este ciclo já tem qtd_rejeicoes "preenchido
+        sozinho" a partir de uma carga detalhada de rejeições (ver
+        app/migracao_rejeicoes.py e migration_038 -- flag
+        qtd_rejeicoes_detalhada), essa recomputação NÃO roda -- senão a
+        próxima edição manual de extraídos/carregados pela tela de
+        "Ciclos de execução" sobrescreveria silenciosamente o valor de
+        verdade vindo da planilha. Nesse caso qtd_rejeicoes nem entra no
+        payload (CICLO_FIELDS tem a coluna, mas o valor que a tela manda
+        é ignorado aqui), mantendo o que já está gravado."""
         atual = db.fetch_one(f"SELECT * FROM ciclos_migracao WHERE id = {db.q(id)}")
         if not atual:
             abort(404)
         payload = request.get_json(force=True)
-        extraidos = payload.get("qtd_registros_extraidos", atual.get("qtd_registros_extraidos"))
-        carregados = payload.get("qtd_registros_carregados", atual.get("qtd_registros_carregados"))
-        if extraidos is not None and carregados is not None:
-            payload["qtd_rejeicoes"] = max(0, int(extraidos) - int(carregados))
+        if atual.get("qtd_rejeicoes_detalhada"):
+            payload.pop("qtd_rejeicoes", None)
+        else:
+            extraidos = payload.get("qtd_registros_extraidos", atual.get("qtd_registros_extraidos"))
+            carregados = payload.get("qtd_registros_carregados", atual.get("qtd_registros_carregados"))
+            if extraidos is not None and carregados is not None:
+                payload["qtd_rejeicoes"] = max(0, int(extraidos) - int(carregados))
         row = patch_row("ciclos_migracao", id, payload, CICLO_FIELDS)
         if not row:
             abort(404)
@@ -2513,6 +2530,126 @@ def create_app():
     @app.delete("/api/itens-migracao/<id>")
     def delete_item_migracao(id):
         return delete_row("itens_migracao", id)
+
+    # -------------------------------------------------- migração: rejeitados
+    # 116ª rodada (pedido verbatim do usuário): carga, análise e histórico
+    # das planilhas de REJEITADOS que o Ergon devolve em cada ciclo de
+    # migração -- Fase 2 (De-Para, arquivo "LISTA_P_REJ_DP_*") e Fase 3
+    # (Carga final, arquivo "LISTA_P_REJ_ERG_*"). Ver app/migracao_rejeicoes.py
+    # (persistência/consulta) e app/migracao_rejeicoes_import.py (parser e
+    # classificação de MSG_ERRO em tipo_erro_chave). Arquivos pequenos (até
+    # alguns milhares de linhas, bem diferente das ~300 mil de Comparação
+    # Folha) -- a importação roda DENTRO da própria requisição, sem fila/
+    # thread em segundo plano.
+    @app.get("/api/migracao-rejeicoes/cargas")
+    def list_migracao_rejeicoes_cargas():
+        pid = request.args.get("projeto_id")
+        if not pid:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        cargas = migracao_rejeicoes.listar_cargas(
+            pid, item_migracao_id=request.args.get("item_migracao_id"), fase=request.args.get("fase"),
+        )
+        return jsonify(cargas)
+
+    @app.post("/api/migracao-rejeicoes/importar")
+    def importar_migracao_rejeicoes():
+        """Form-data: projeto_id, item_migracao_id, numero_ciclo, fase
+        ("fase2_depara"/"fase3_carga_final"), file -- e opcionalmente
+        data_execucao, só usada se o ciclo informado ainda não existir
+        (ver migracao_rejeicoes.encontrar_ou_criar_ciclo). Reimportar a
+        MESMA combinação (item, ciclo, fase) substitui a carga anterior
+        por completo (pedido verbatim) -- nunca duplica."""
+        projeto_id = request.form.get("projeto_id")
+        item_migracao_id = request.form.get("item_migracao_id")
+        fase = request.form.get("fase")
+        numero_ciclo = request.form.get("numero_ciclo")
+        data_execucao = request.form.get("data_execucao") or None
+        file = request.files.get("file")
+
+        if not projeto_id or not item_migracao_id or not fase or not numero_ciclo:
+            return jsonify({"erro": "Informe projeto, item de migração, número do ciclo e fase."}), 400
+        if fase not in migracao_rejeicoes_import.FASES_VALIDAS:
+            return jsonify({"erro": "Fase inválida."}), 400
+        if not file:
+            return jsonify({"erro": "Selecione o arquivo (.csv ou .xlsx)."}), 400
+        try:
+            numero_ciclo = int(numero_ciclo)
+        except ValueError:
+            return jsonify({"erro": "Número do ciclo inválido."}), 400
+
+        nome_arquivo = file.filename
+        conteudo = file.read()
+        usuario_atual = auth.buscar_usuario_publico(session.get("usuario_id")) or {}
+
+        try:
+            ciclo = migracao_rejeicoes.encontrar_ou_criar_ciclo(item_migracao_id, numero_ciclo, data_execucao)
+            carga = migracao_rejeicoes.importar(
+                projeto_id, item_migracao_id, ciclo["id"], fase, nome_arquivo, conteudo,
+                usuario_id=usuario_atual.get("id"), usuario_nome=usuario_atual.get("nome"),
+            )
+        except migracao_rejeicoes_import.MigracaoRejeicoesImportError as e:
+            return jsonify({"erro": str(e)}), 400
+        except db.DbError as e:
+            return jsonify({"erro": f"Falha ao gravar no banco: {e}"}), 500
+        return jsonify(carga), 201
+
+    @app.delete("/api/migracao-rejeicoes/cargas/<id>")
+    def delete_migracao_rejeicoes_carga(id):
+        carga = migracao_rejeicoes.excluir_carga(id)
+        if not carga:
+            abort(404)
+        return "", 204
+
+    @app.get("/api/migracao-rejeicoes/resumo")
+    def resumo_migracao_rejeicoes():
+        carga_id = request.args.get("carga_id")
+        if not carga_id:
+            return jsonify({"erro": "carga_id é obrigatório"}), 400
+        res = migracao_rejeicoes.resumo(carga_id)
+        if not res:
+            abort(404)
+        return jsonify(res)
+
+    @app.get("/api/migracao-rejeicoes/detalhe")
+    def detalhe_migracao_rejeicoes():
+        carga_id = request.args.get("carga_id")
+        if not carga_id:
+            return jsonify({"erro": "carga_id é obrigatório"}), 400
+        limit = request.args.get("limit", 200)
+        offset = request.args.get("offset", 0)
+        linhas = migracao_rejeicoes.detalhe(
+            carga_id, tipo_erro_chave=request.args.get("tipo_erro_chave"), limit=limit, offset=offset,
+        )
+        return jsonify(linhas)
+
+    @app.get("/api/migracao-rejeicoes/acoes-sugeridas")
+    def list_migracao_rejeicoes_acoes_sugeridas():
+        return jsonify(migracao_rejeicoes.listar_acoes_sugeridas(fase=request.args.get("fase")))
+
+    @app.post("/api/migracao-rejeicoes/acoes-sugeridas")
+    def create_migracao_rejeicoes_acao_sugerida():
+        """Usada pela tela quando o breakdown de uma carga mostra um
+        tipo_erro_chave que ainda não tem entrada no catálogo (ex: um
+        código ERG-NNNNN nunca visto antes) -- cadastra (ou completa, se
+        já existir) a ação sugerida pra esse tipo."""
+        data = request.get_json(force=True)
+        if not data.get("fase") or not data.get("tipo_erro_chave"):
+            return jsonify({"erro": "Informe fase e tipo_erro_chave."}), 400
+        row = migracao_rejeicoes.criar_acao_sugerida(
+            data["fase"], data["tipo_erro_chave"],
+            descricao_erro=data.get("descricao_erro"), acao_sugerida=data.get("acao_sugerida"),
+        )
+        return jsonify(row), 201
+
+    @app.put("/api/migracao-rejeicoes/acoes-sugeridas/<id>")
+    def update_migracao_rejeicoes_acao_sugerida(id):
+        data = request.get_json(force=True)
+        row = migracao_rejeicoes.atualizar_acao_sugerida(
+            id, acao_sugerida=data.get("acao_sugerida"), descricao_erro=data.get("descricao_erro"),
+        )
+        if not row:
+            abort(404)
+        return jsonify(row)
 
     # ---------------------------------------------------------------- rubricas
     # 53ª rodada: levantamento e homologação das rubricas (regras de negócio)
