@@ -3197,6 +3197,10 @@ def create_app():
             abort(404)
         return jsonify(row)
 
+    @app.delete("/api/marcos/<id>")
+    def delete_marco(id):
+        return delete_row("marcos", id)
+
     # -------------------------------------------------- importação de cronograma
     @app.post("/api/cronograma/importar/preview")
     def cronograma_importar_preview():
@@ -3774,6 +3778,14 @@ def create_app():
         if not row:
             abort(404)
         return jsonify(row)
+
+    @app.delete("/api/riscos/<id>")
+    def delete_risco(id):
+        # 133ª rodada: pendencias.risco_id é ON DELETE SET NULL (migração
+        # 027) -- excluir um risco referenciado por uma pendência não falha
+        # por FK, só desvincula a pendência (ela continua existindo, sem
+        # risco associado).
+        return delete_row("riscos", id)
 
     # --------------------------------------------------------------- pendências
     # 41ª rodada — ver preparar_pendencia() acima para as regras de validação.

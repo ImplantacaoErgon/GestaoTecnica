@@ -6579,23 +6579,77 @@ function renderRequisitos(){
 async function loadRiscosMarcos(){
   [RISCOS, MARCOS] = await Promise.all([api(`/riscos?projeto_id=${PROJETO.id}`), api(`/marcos?projeto_id=${PROJETO.id}`)]);
 }
+// 133ª rodada — pedido do usuário (verbatim): "Na aba de Riscos e Marcos
+// disponibilizar um botão para editar o registro e outro excluir registro".
+// Até aqui só dava pra editar clicando na linha inteira (sem excluir — a
+// API nem tinha DELETE pra riscos/marcos, ver delete_risco/delete_marco em
+// app/main.py, novos nesta rodada); o clique na linha continua funcionando
+// (compatibilidade), mas agora cada item também tem os botões explícitos
+// ✎/✕ pedidos, mesmo padrão visual já usado na tabela de ciclos de
+// migração (ver renderCiclosMigracaoModal). stopPropagation() nos dois
+// botões evita que clicar neles também dispare o clique da linha (que abre
+// o modal de edição por cima da exclusão, ou duplica a abertura ao editar).
 function renderRiscosMarcos(){
   const nivelCor = {"Baixo":"ok","Médio":"warn","Alto":"danger"};
   $("riscos-list").innerHTML = RISCOS.length ? RISCOS.map(r=>`
     <li class="clickable" data-id="${r.id}" style="flex-direction:column;align-items:flex-start;gap:4px;cursor:pointer;">
-      <div style="display:flex;justify-content:space-between;width:100%;"><strong style="font-size:12.5px;">${esc(r.descricao)}</strong>${pill(r.status, r.status==="Aberto"?"warn":r.status==="Mitigado"?"accent":"ok")}</div>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;width:100%;gap:8px;">
+        <strong style="font-size:12.5px;">${esc(r.descricao)}</strong>
+        <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+          ${pill(r.status, r.status==="Aberto"?"warn":r.status==="Mitigado"?"accent":"ok")}
+          <button class="btn ghost small" data-edit-risco="${r.id}" title="Editar risco">✎</button>
+          <button class="btn ghost small" data-del-risco="${r.id}" title="Excluir risco">✕</button>
+        </div>
+      </div>
       <div class="muted">Probabilidade ${pill(r.probabilidade, nivelCor[r.probabilidade])} · Impacto ${pill(r.impacto, nivelCor[r.impacto])} ${r.responsavel_nome?(' · '+esc(r.responsavel_nome)):''}</div>
     </li>`).join("") : `<li class="muted">Nenhum risco cadastrado.</li>`;
   $("riscos-list").querySelectorAll("li[data-id]").forEach(li=>{
     li.addEventListener("click", ()=>openRiscoModal(byId(RISCOS, li.dataset.id)));
   });
+  $("riscos-list").querySelectorAll("[data-edit-risco]").forEach(btn=>{
+    btn.addEventListener("click", e=>{ e.stopPropagation(); openRiscoModal(byId(RISCOS, btn.dataset.editRisco)); });
+  });
+  $("riscos-list").querySelectorAll("[data-del-risco]").forEach(btn=>{
+    btn.addEventListener("click", e=>{ e.stopPropagation(); deleteRisco(btn.dataset.delRisco); });
+  });
 
   $("marcos-list").innerHTML = MARCOS.length ? MARCOS.slice().sort((a,b)=>a.data_prevista.localeCompare(b.data_prevista)).map(m=>`
-    <li class="clickable" data-id="${m.id}" style="cursor:pointer;"><span>${esc(m.nome)}${m.data_real?" "+pill("Concluído","ok"):""}</span><span class="mono muted">${fmtDate(m.data_prevista)}</span></li>`).join("")
+    <li class="clickable" data-id="${m.id}" style="cursor:pointer;">
+      <span>${esc(m.nome)}${m.data_real?" "+pill("Concluído","ok"):""}</span>
+      <span style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+        <span class="mono muted">${fmtDate(m.data_prevista)}</span>
+        <button class="btn ghost small" data-edit-marco="${m.id}" title="Editar marco">✎</button>
+        <button class="btn ghost small" data-del-marco="${m.id}" title="Excluir marco">✕</button>
+      </span>
+    </li>`).join("")
     : `<li class="muted">Nenhum marco cadastrado.</li>`;
   $("marcos-list").querySelectorAll("li[data-id]").forEach(li=>{
     li.addEventListener("click", ()=>openMarcoModal(byId(MARCOS, li.dataset.id)));
   });
+  $("marcos-list").querySelectorAll("[data-edit-marco]").forEach(btn=>{
+    btn.addEventListener("click", e=>{ e.stopPropagation(); openMarcoModal(byId(MARCOS, btn.dataset.editMarco)); });
+  });
+  $("marcos-list").querySelectorAll("[data-del-marco]").forEach(btn=>{
+    btn.addEventListener("click", e=>{ e.stopPropagation(); deleteMarco(btn.dataset.delMarco); });
+  });
+}
+
+async function deleteRisco(id){
+  if(!confirm("Excluir este risco? Pendências vinculadas a ele continuam existindo, só perdem o vínculo.")) return;
+  try{
+    await api(`/riscos/${id}`, {method:"DELETE"});
+    await loadRiscosMarcos(); renderRiscosMarcos();
+    toast("Risco excluído.");
+  }catch(e){}
+}
+
+async function deleteMarco(id){
+  if(!confirm("Excluir este marco?")) return;
+  try{
+    await api(`/marcos/${id}`, {method:"DELETE"});
+    await loadRiscosMarcos(); renderRiscosMarcos();
+    toast("Marco excluído.");
+  }catch(e){}
 }
 
 // ================= MODAL RISCO / MARCO (41ª rodada) =================
