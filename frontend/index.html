@@ -643,6 +643,13 @@
   /* 118ª rodada — card maior "Folha de Pagamento" (funil de Rubricas +
      comparação Ergon×legado por competência, em dois modos: Números/Gráficos) */
   .vex-folha-comparacao{margin-top:18px;padding-top:16px;border-top:1px solid var(--border);}
+
+  /* 130ª rodada — card maior "Migração de Dados" (meter + funil de status já
+     existentes, mais o seletor de tabela + gráfico de evolução por ciclo
+     abaixo, mesmo padrão visual da seção de Comparação Folha × Ergon acima). */
+  .vex-migracao-evolucao{margin-top:18px;padding-top:16px;border-top:1px solid var(--border);}
+  .vex-migracao-select{background:var(--surface-2);border:1px solid var(--border);border-radius:7px;padding:6px 9px;font-size:12.5px;color:var(--text);font-family:inherit;max-width:280px;}
+  .vex-migracao-select:focus{outline:2px solid var(--accent);outline-offset:0;}
   .vex-toggle{display:inline-flex;background:var(--surface-2);border-radius:8px;padding:2px;gap:2px;}
   .vex-toggle button{border:none;background:none;font-family:inherit;font-size:12px;font-weight:600;color:var(--text-muted);padding:5px 11px;border-radius:6px;cursor:pointer;}
   .vex-toggle button.active{background:var(--surface);color:var(--text);box-shadow:0 1px 2px rgba(0,0,0,.08);}
@@ -1071,26 +1078,45 @@
       </div>
     </div>
 
-    <div class="vex-grid-2">
-      <div class="card">
-        <div class="vex-module-head"><h3>📦 Migração de Dados</h3><button type="button" class="vex-module-link" onclick="goToView('migracao')">Abrir →</button></div>
-        <div id="vex-migracao"></div>
+    <!-- 130ª rodada — pedido do usuário (verbatim): "aumente esse quadro de
+         migrações e apresente uma lista suspensa para escolha das tabelas,
+         ao escolher apresente gráfico de evolução de migrados x rejeitados
+         dos últimos 5 ciclos ou do que tiver no banco" — Migração de Dados
+         sai do vex-grid-2 (que dividia a largura com Financeiro) e vira um
+         card de largura total, mesmo tratamento já dado à Folha de
+         Pagamento (118ª rodada), pra caber o seletor de tabela + o novo
+         gráfico por ciclo sem apertar o card. -->
+    <div class="card vex-migracao-card">
+      <div class="vex-module-head">
+        <h3>📦 Migração de Dados</h3>
+        <button type="button" class="vex-module-link" onclick="goToView('migracao')">Abrir →</button>
       </div>
-      <div class="card">
-        <div class="vex-module-head"><h3>💵 Financeiro</h3><button type="button" class="vex-module-link" onclick="goToView('faturas')">Abrir →</button></div>
-        <div id="vex-financeiro"></div>
+      <div id="vex-migracao"></div>
+
+      <div class="vex-migracao-evolucao">
+        <div class="vex-module-head">
+          <h3 style="font-size:13.5px;">📈 Evolução por ciclo — Migrados × Rejeitados</h3>
+          <select id="vex-migracao-item" class="vex-migracao-select" title="Escolha a tabela do legado"></select>
+        </div>
+        <div class="vex-legend" id="vex-migracao-evol-legend"></div>
+        <div class="vex-svg-wrap" id="vex-migracao-evol-chart"></div>
       </div>
     </div>
 
     <div class="vex-grid-2">
       <div class="card">
+        <div class="vex-module-head"><h3>💵 Financeiro</h3><button type="button" class="vex-module-link" onclick="goToView('faturas')">Abrir →</button></div>
+        <div id="vex-financeiro"></div>
+      </div>
+      <div class="card">
         <div class="vex-module-head"><h3>🚩 Riscos &amp; Pendências</h3><button type="button" class="vex-module-link" onclick="goToView('pendencias')">Abrir →</button></div>
         <div class="vex-status-grid" id="vex-riscos-pendencias"></div>
       </div>
-      <div class="card">
-        <div class="vex-module-head"><h3>📋 Requisitos do Termo de Referência</h3><button type="button" class="vex-module-link" onclick="goToView('requisitos')">Abrir →</button></div>
-        <div id="vex-requisitos"></div>
-      </div>
+    </div>
+
+    <div class="card">
+      <div class="vex-module-head"><h3>📋 Requisitos do Termo de Referência</h3><button type="button" class="vex-module-link" onclick="goToView('requisitos')">Abrir →</button></div>
+      <div id="vex-requisitos"></div>
     </div>
   </section>
 
@@ -3485,7 +3511,7 @@ async function afterProjetoReady(){
   aplicarMarcaNoTopo();
   fillStaticSelects();
   wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireGanttToolbar(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireExportarCronograma(); wireExportarCronogramaXml(); wireRemoverCronograma(); wireRemoverRequisitos(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma(); wireRenumerarCronograma();
-  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros(); wireQuadroCicloModal(); wireMigracaoRejeicoesPane(); wireRubricaModal(); wireRubricasFiltros(); wireImportRubricas(); wireComparacaoFolhaPane(); wireComparacaoFolhaDashboard(); wireVexFolhaComparacaoToggle();
+  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros(); wireQuadroCicloModal(); wireMigracaoRejeicoesPane(); wireRubricaModal(); wireRubricasFiltros(); wireImportRubricas(); wireComparacaoFolhaPane(); wireComparacaoFolhaDashboard(); wireVexFolhaComparacaoToggle(); wireVexMigracaoEvolucaoSelect();
   setupCsvTemplateLink();
   await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias(), loadItensMigracao(), loadRubricas(), loadRubricasAutoUpdateStatus()]);
   // Reaplica agora que REQUISITOS/ATIVIDADES já estão carregados — os selects
@@ -5563,6 +5589,126 @@ function _vexRenderMigracao(){
   `;
 }
 
+// 130ª rodada — pedido do usuário (verbatim): "aumente esse quadro de
+// migrações e apresente uma lista suspensa para escolha das tabelas, ao
+// escolher apresente gráfico de evolução de migrados x rejeitados dos
+// últimos 5 ciclos ou do que tiver no banco". A lista suspensa é povoada a
+// partir de ITENS_MIGRACAO (já carregado em memória); o gráfico em si busca
+// os ciclos do item escolhido em /ciclos-migracao (mesmo endpoint que o
+// modal de item de migração já usa para a tabela de ciclos), que já vem
+// ordenado por numero_ciclo — os "últimos 5" são sempre os 5 últimos dessa
+// lista (ou todos, se houver menos de 5).
+let _vexMigracaoSelectedItemId = null;
+
+async function _vexRenderMigracaoEvolucao(){
+  const sel = $("vex-migracao-item");
+  if(!sel) return;
+  if(!ITENS_MIGRACAO.length){
+    sel.innerHTML = "";
+    sel.disabled = true;
+    $("vex-migracao-evol-legend").innerHTML = "";
+    $("vex-migracao-evol-chart").innerHTML = `<div class="vex-empty">Nenhum item de migração cadastrado.</div>`;
+    return;
+  }
+  sel.disabled = false;
+  const itensOrdenados = [...ITENS_MIGRACAO].sort((a,b)=>String(a.nome_tabela_legado).localeCompare(String(b.nome_tabela_legado), 'pt-BR'));
+  // mantém a seleção atual entre re-renders (ex.: ao voltar pra esta aba)
+  // quando o item escolhido ainda existe; senão cai pro primeiro da lista.
+  if(!_vexMigracaoSelectedItemId || !itensOrdenados.some(i=>i.id===_vexMigracaoSelectedItemId)){
+    _vexMigracaoSelectedItemId = itensOrdenados[0].id;
+  }
+  sel.innerHTML = itensOrdenados.map(i=>
+    `<option value="${i.id}" ${i.id===_vexMigracaoSelectedItemId?"selected":""}>${esc(i.nome_tabela_legado)}</option>`
+  ).join("");
+  await _vexCarregarEvolucaoMigracao(_vexMigracaoSelectedItemId);
+}
+
+function wireVexMigracaoEvolucaoSelect(){
+  const sel = $("vex-migracao-item");
+  if(!sel) return;
+  sel.addEventListener("change", ()=>{
+    _vexMigracaoSelectedItemId = sel.value;
+    _vexCarregarEvolucaoMigracao(_vexMigracaoSelectedItemId);
+  });
+}
+
+async function _vexCarregarEvolucaoMigracao(itemId){
+  const legend = $("vex-migracao-evol-legend"), chart = $("vex-migracao-evol-chart");
+  legend.innerHTML = `
+    <span class="item"><span class="swatch" style="background:var(--ok);"></span>Migrados (carregados)</span>
+    <span class="item"><span class="swatch" style="background:var(--danger);"></span>Rejeitados</span>`;
+  chart.innerHTML = `<div class="vex-empty">Carregando…</div>`;
+  let ciclos;
+  try{
+    ciclos = await api(`/ciclos-migracao?item_migracao_id=${itemId}`);
+  }catch(e){
+    chart.innerHTML = `<div class="vex-empty">Não foi possível carregar os ciclos deste item.</div>`;
+    return;
+  }
+  // já vem em ordem crescente de numero_ciclo — os "últimos 5" são o fim da lista
+  _vexDesenharEvolucaoMigracao(ciclos.slice(-5));
+}
+
+// Arredonda pra cima pro próximo "número redondo" (1/2/5 × potência de 10),
+// mesma técnica de qualquer lib de eixo — evita um teto de gráfico tipo
+// "83.417" sem sentido nenhum pra quem olha a grade.
+function _vexNiceMax(v){
+  if(v<=0) return 1;
+  const exp = Math.pow(10, Math.floor(Math.log10(v)));
+  const frac = v/exp;
+  let niceFrac;
+  if(frac<=1) niceFrac=1; else if(frac<=2) niceFrac=2; else if(frac<=5) niceFrac=5; else niceFrac=10;
+  return Math.round(niceFrac*exp);
+}
+
+function _vexDesenharEvolucaoMigracao(ciclos){
+  const chart = $("vex-migracao-evol-chart");
+  if(!ciclos || !ciclos.length){
+    chart.innerHTML = `<div class="vex-empty">Nenhum ciclo de execução registrado para este item ainda.</div>`;
+    return;
+  }
+  const n = ciclos.length;
+  const W=760, H=240, padL=56, padR=16, padT=30, padB=30;
+  const plotW = W-padL-padR, plotH = H-padT-padB;
+
+  const maxV = Math.max(1, ...ciclos.map(c=>Math.max(Number(c.qtd_registros_carregados||0), Number(c.qtd_rejeicoes||0))));
+  const topo = _vexNiceMax(maxV*1.15); // 15% de folga pra rótulo de valor nunca colar na borda de cima
+  const y = v => padT + plotH*(1 - v/topo);
+  const base = H-padB;
+  const gridLines = [0,0.25,0.5,0.75,1].map(f=>{
+    const v = Math.round(topo*f);
+    return `<line class="vex-grid-line" x1="${padL}" x2="${W-padR}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}"></line>
+      <text class="vex-axis-label" x="${padL-8}" y="${(y(v)+3).toFixed(1)}" text-anchor="end">${v.toLocaleString('pt-BR')}</text>`;
+  }).join("");
+
+  const slot = plotW/n;
+  const grupoW = Math.min(slot*0.5, 160);
+  const barGap = 4;
+  const barW = (grupoW-barGap)/2;
+
+  const corpo = ciclos.map((c,idx)=>{
+    const cx = padL + slot*(idx+0.5);
+    const x0 = cx - grupoW/2;
+    const carregados = Number(c.qtd_registros_carregados||0);
+    const rejeitados = Number(c.qtd_rejeicoes||0);
+    const yMig = y(carregados), yRej = y(rejeitados);
+    const hMig = base-yMig, hRej = base-yRej;
+    const dataFmt = fmtDate(c.data_execucao);
+    return `
+      <rect x="${x0.toFixed(1)}" y="${yMig.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0,hMig).toFixed(1)}" rx="4" fill="var(--ok)"><title>Ciclo ${c.numero_ciclo} (${esc(dataFmt)}): ${carregados.toLocaleString('pt-BR')} migrados</title></rect>
+      <rect x="${(x0+barW+barGap).toFixed(1)}" y="${yRej.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0,hRej).toFixed(1)}" rx="4" fill="var(--danger)"><title>Ciclo ${c.numero_ciclo} (${esc(dataFmt)}): ${rejeitados.toLocaleString('pt-BR')} rejeitados</title></rect>
+      <text class="vex-value-label" x="${(x0+barW/2).toFixed(1)}" y="${(yMig-6).toFixed(1)}" text-anchor="middle" style="fill:var(--ok);font-size:10.5px;">${carregados.toLocaleString('pt-BR')}</text>
+      <text class="vex-value-label" x="${(x0+barW+barGap+barW/2).toFixed(1)}" y="${(yRej-6).toFixed(1)}" text-anchor="middle" style="fill:var(--danger);font-size:10.5px;">${rejeitados.toLocaleString('pt-BR')}</text>
+      <text class="vex-axis-label" x="${cx.toFixed(1)}" y="${(H-padB+16).toFixed(1)}" text-anchor="middle">Ciclo ${c.numero_ciclo}</text>
+    `;
+  }).join("");
+
+  chart.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;overflow:visible;">
+    ${gridLines}
+    ${corpo}
+  </svg>`;
+}
+
 // Folha de Pagamento (Rubricas) — mesmo raciocínio: funil de status é estado,
 // não identidade, reaproveita STATUS_RUBRICA_COLOR (já existe na tela de
 // Rubricas) pra manter a mesma cor em todo o sistema pro mesmo status.
@@ -6060,6 +6206,7 @@ async function renderVisaoExecutiva(){
     : `<li class="muted">Nenhum marco pendente.</li>`;
 
   _vexRenderMigracao();
+  _vexRenderMigracaoEvolucao();
   _vexRenderFolha();
   api(`/comparacao-folha/resumo-competencias?projeto_id=${PROJETO.id}&limite=5`).then(_vexRenderFolhaComparacao)
     .catch(()=>{ $("vex-folha-comp-numeros").innerHTML = `<div class="vex-empty">Não foi possível carregar a comparação Folha × Ergon.</div>`; });
