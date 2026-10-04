@@ -587,16 +587,37 @@
      arredondadas, legenda sempre presente a partir de 2 séries, texto nunca
      na cor da série (só tokens de texto), grade/eixo em cinza recessivo. */
   .vex-hero-row{display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin-bottom:16px;}
-  .vex-hero-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px 26px;box-shadow:var(--shadow);display:flex;align-items:center;gap:22px;flex:1;min-width:280px;}
+  .vex-hero-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px 26px;box-shadow:var(--shadow);display:flex;align-items:center;gap:22px;flex:1;flex-wrap:wrap;min-width:280px;}
   .vex-hero-figure{font-size:52px;font-weight:700;line-height:1;letter-spacing:-.01em;}
   .vex-hero-meta{display:flex;flex-direction:column;gap:6px;}
   .vex-hero-label{font-size:12.5px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em;}
   .vex-badge{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:999px;font-size:12.5px;font-weight:700;width:fit-content;}
   .vex-badge .dot{width:8px;height:8px;border-radius:50%;}
-  .vex-subkpis{display:flex;gap:22px;flex-wrap:wrap;}
+  /* 132ª rodada — pedido do usuário: "pode aumentar um pouco essas fontes e
+     distribua-os ao longo do quadro conforme espaço da imagem" — os 5
+     subkpis (Atividades/Em andamento/Atrasadas/No caminho crítico/Marcos
+     pendentes) antes só ocupavam a largura do próprio conteúdo dentro do
+     vex-hero-card (ficavam todos colados à esquerda, sobrando bastante
+     espaço vazio à direita no card, como no print do usuário) — flex:1 faz
+     esse bloco ocupar o espaço que sobra na linha do hero-card (depois dos
+     dois números grandes), e justify-content:space-between espalha os 5
+     itens por essa largura toda, do primeiro ao último.  */
+  .vex-subkpis{display:flex;gap:22px;flex-wrap:wrap;flex:1;justify-content:space-between;}
+  /* Abaixo de ~860px os dois números grandes (Progresso/Esperado) já tomam
+     a maior parte da linha, e flex:1 sobre pouquíssimo espaço pros 5
+     subkpis — em vez de espremê-los numa coluna estreita e alta (cada um
+     quebrando numa linha, só porque "sobrava" uma faixa estreita ao lado
+     dos números), flex-basis:100% faz esse bloco pular pra sua própria
+     linha inteira abaixo dos números (truque comum de flexbox: um item com
+     100% de largura não cabe ao lado de mais nada, então força a quebra) —
+     linha larga o bastante pra eles se distribuírem normalmente lado a
+     lado outra vez.  */
+  @media (max-width: 860px){
+    .vex-subkpis{flex-basis:100%;justify-content:flex-start;}
+  }
   .vex-subkpi{display:flex;flex-direction:column;gap:2px;}
-  .vex-subkpi .v{font-size:19px;font-weight:700;}
-  .vex-subkpi .l{font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;}
+  .vex-subkpi .v{font-size:22px;font-weight:700;}
+  .vex-subkpi .l{font-size:12.5px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;}
 
   .vex-grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
   .vex-grid-2{display:grid;grid-template-columns:1.6fr 1fr;gap:14px;}
