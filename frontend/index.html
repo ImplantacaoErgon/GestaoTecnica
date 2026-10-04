@@ -1009,7 +1009,6 @@
         <div>
           <div class="vex-hero-label">Progresso geral do projeto</div>
           <div class="vex-hero-figure" id="vex-hero-pct">—</div>
-          <div id="vex-hero-badge" style="margin-top:6px;"></div>
         </div>
         <div>
           <div class="vex-hero-label" title="Quanto o projeto já deveria ter avançado até hoje, segundo o prazo final previsto (dtfim_prev) de cada atividade — mesmo critério usado pra calcular a Aderência ao prazo.">% Esperado atual</div>
@@ -5381,16 +5380,6 @@ function _vexFormatarMes(mes){
   return `${MESES_ABREV[m-1]}/${String(y).slice(2)}`;
 }
 
-// Selo de saúde do cronograma (badge do card principal) — mesmo critério de
-// cor do "Aderência ao prazo" do dash-kpis original, só que com rótulo.
-function _vexHealthBadge(diffPP){
-  let cor, texto;
-  if(diffPP >= 0){ cor="ok"; texto="No prazo"; }
-  else if(diffPP >= -5){ cor="warn"; texto="Atenção"; }
-  else { cor="danger"; texto="Atrasado"; }
-  return `<span class="vex-badge" style="background:${SOFT_VAR[cor]};color:${COLOR_VAR[cor]};"><span class="dot" style="background:${COLOR_VAR[cor]};"></span>${texto} (${diffPP>0?"+":""}${diffPP} p.p. vs. plano)</span>`;
-}
-
 // Curva S acumulada: % de atividades com prazo PREVISTO (plano) vs. % REALMENTE
 // concluídas, mês a mês — onde a linha azul (realizado) fica abaixo da cinza
 // (planejado), o projeto está atrasado em relação ao cronograma. Corte de mês
@@ -6030,7 +6019,6 @@ async function renderVisaoExecutiva(){
 
   $("vex-hero-pct").textContent = pctConcluida+"%";
   $("vex-hero-pct-esperado").textContent = pctDeveria+"%";
-  $("vex-hero-badge").innerHTML = _vexHealthBadge(diffPP);
   const marcosPendentes = MARCOS.filter(m=>!m.data_real).length;
   $("vex-subkpis").innerHTML = [
     {l:"Atividades", v:`${concluidas}/${total}`},
