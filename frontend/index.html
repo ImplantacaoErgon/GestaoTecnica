@@ -6186,6 +6186,7 @@ async function renderVisaoExecutiva(){
   const {total, concluidas, atrasadas, emAndamento, criticas, pctConcluida, pctDeveria, diffPP} = calcularKpisCronograma();
 
   $("vex-hero-pct").textContent = pctConcluida+"%";
+  $("vex-hero-pct").style.color = COLOR_VAR[diffPP < -10 ? "danger" : (diffPP < 0 ? "warn" : "ok")];
   $("vex-hero-pct-esperado").textContent = pctDeveria+"%";
   const marcosPendentes = MARCOS.filter(m=>!m.data_real).length;
   $("vex-subkpis").innerHTML = [
