@@ -10221,6 +10221,14 @@ const CONFIG_ENTIDADES = {
   },
   etapas: {
     tituloSingular: "Etapa", tituloPlural: "Etapas", endpoint: "etapas", comProjeto: true,
+    // 134ª rodada — pedido do usuário (verbatim): "Nas abas de Frente de
+    // Trabalho e Etapas habilitar botões para edição e exclusão". Editar e
+    // excluir já funcionavam (clique na linha abre o modal, que já tinha um
+    // botão "Excluir" — ver openConfigModal/cfg-delete), só que escondidos
+    // atrás do clique na linha inteira; comAcoesLinha acrescenta os botões
+    // ✎/✕ explícitos em cada linha da tabela, mesmo padrão já usado em
+    // Riscos & Marcos (133ª rodada) — ver renderConfigTable.
+    comAcoesLinha: true,
     ordenar: r => r.numero,
     colunas: [
       {chave:"numero", rotulo:"Nº"},
@@ -10238,6 +10246,7 @@ const CONFIG_ENTIDADES = {
   },
   frentes: {
     tituloSingular: "Frente de Trabalho", tituloPlural: "Frentes de Trabalho", endpoint: "frentes", comProjeto: true,
+    comAcoesLinha: true, // 134ª rodada — ver comentário em "etapas" acima
     ordenar: r => r.ordem,
     colunas: [
       {chave:"ordem", rotulo:"Ordem"},
@@ -10343,17 +10352,7 @@ function wireConfiguracoes(){
   $("cfg-cancel").addEventListener("click", closeConfigModal);
   $("overlay-config").addEventListener("click", e=>{ if(e.target.id==="overlay-config") closeConfigModal(); });
   $("cfg-save").addEventListener("click", saveConfigItem);
-  $("cfg-delete").addEventListener("click", ()=>{
-    const def = CONFIG_ENTIDADES[cfgAbaAtual];
-    askConfirm(`Excluir este(a) ${def.tituloSingular.toLowerCase()}? Isso não pode ser desfeito.`, async ()=>{
-      try{
-        await api(`/${def.endpoint}/${cfgEditandoId}`, {method:"DELETE"});
-        toast(`${def.tituloSingular} excluído(a).`);
-        closeConfigModal();
-        await reloadConfigEntidades();
-      }catch(e){}
-    });
-  });
+  $("cfg-delete").addEventListener("click", ()=>excluirConfigItem(CONFIG_ENTIDADES[cfgAbaAtual], cfgEditandoId));
   $("doc-voltar").addEventListener("click", fecharDocumentoDetalhe);
   $("doc-imprimir").addEventListener("click", ()=> window.print());
   $("cfg-calendario-duplicar").addEventListener("click", abrirDuplicarCalendarioModal);
@@ -10467,17 +10466,49 @@ function renderConfigTable(){
   $("cfg-add").style.display = def.semCriar ? "none" : "";
   $("cfg-add").textContent = `+ Novo(a) ${def.tituloSingular.toLowerCase()}`;
   $("cfg-calendario-duplicar").hidden = cfgAbaAtual !== "calendario";
-  $("cfg-thead").innerHTML = `<tr>${def.colunas.map(c=>`<th>${esc(c.rotulo)}</th>`).join("")}</tr>`;
+  // 134ª rodada: quando a entidade pede ações na própria linha
+  // (comAcoesLinha), acrescenta uma coluna "Ações" com os botões ✎/✕
+  // explícitos — além do clique na linha inteira, que continua abrindo o
+  // modal de edição como sempre (compatibilidade).
+  const colAcoes = def.comAcoesLinha ? `<th></th>` : "";
+  $("cfg-thead").innerHTML = `<tr>${def.colunas.map(c=>`<th>${esc(c.rotulo)}</th>`).join("")}${colAcoes}</tr>`;
   const linhas = [...cfgDados(cfgAbaAtual)].sort((a,b)=>{
     const va=def.ordenar(a), vb=def.ordenar(b);
     return va<vb?-1:va>vb?1:0;
   });
+  const totalColunas = def.colunas.length + (def.comAcoesLinha ? 1 : 0);
   $("cfg-tbody").innerHTML = linhas.length ? linhas.map(r=>`
     <tr class="clickable" data-id="${r.id}">
       ${def.colunas.map(c=>`<td>${c.render ? c.render(r[c.chave]) : esc(r[c.chave] ?? "—")}</td>`).join("")}
-    </tr>`).join("") : `<tr class="empty-row"><td colspan="${def.colunas.length}">Nenhum registro cadastrado.</td></tr>`;
+      ${def.comAcoesLinha ? `
+      <td style="white-space:nowrap;text-align:right;">
+        <button class="btn ghost small" data-edit-cfg="${r.id}" title="Editar ${def.tituloSingular.toLowerCase()}">✎</button>
+        ${def.semExcluir ? "" : `<button class="btn ghost small" data-del-cfg="${r.id}" title="Excluir ${def.tituloSingular.toLowerCase()}">✕</button>`}
+      </td>` : ""}
+    </tr>`).join("") : `<tr class="empty-row"><td colspan="${totalColunas}">Nenhum registro cadastrado.</td></tr>`;
   $("cfg-tbody").querySelectorAll("tr[data-id]").forEach(tr=>{
     tr.addEventListener("click", ()=>openConfigModal(byId(cfgDados(cfgAbaAtual), tr.dataset.id)));
+  });
+  $("cfg-tbody").querySelectorAll("[data-edit-cfg]").forEach(btn=>{
+    btn.addEventListener("click", e=>{ e.stopPropagation(); openConfigModal(byId(cfgDados(cfgAbaAtual), btn.dataset.editCfg)); });
+  });
+  $("cfg-tbody").querySelectorAll("[data-del-cfg]").forEach(btn=>{
+    btn.addEventListener("click", e=>{ e.stopPropagation(); excluirConfigItem(def, btn.dataset.delCfg); });
+  });
+}
+
+// 134ª rodada: extraído do listener de #cfg-delete (modal) pra ser chamado
+// também pelo botão ✕ direto na linha da tabela — mesma confirmação, mesma
+// chamada à API, mesmo recarregamento; fecha o modal só se ele por acaso
+// estiver aberto (closeConfigModal é inofensivo quando já está fechado).
+function excluirConfigItem(def, id){
+  askConfirm(`Excluir este(a) ${def.tituloSingular.toLowerCase()}? Isso não pode ser desfeito.`, async ()=>{
+    try{
+      await api(`/${def.endpoint}/${id}`, {method:"DELETE"});
+      toast(`${def.tituloSingular} excluído(a).`);
+      closeConfigModal();
+      await reloadConfigEntidades();
+    }catch(e){}
   });
 }
 
