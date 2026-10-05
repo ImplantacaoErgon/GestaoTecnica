@@ -21,8 +21,11 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, ListFlowable, ListItem, HRFlowable, Table, TableStyle,
+    SimpleDocTemplate, Paragraph, Spacer, ListFlowable, ListItem, HRFlowable, Table, TableStyle, Image,
 )
+from reportlab.lib.utils import ImageReader
+
+from . import relatorio_graficos
 
 _INLINE_BOLD = re.compile(r"\*\*(.+?)\*\*")
 _INLINE_ITALIC = re.compile(r"(?<!\*)\*([^*]+?)\*(?!\*)")
@@ -73,6 +76,8 @@ def _estilos():
         "subtitulo": ParagraphStyle("subtitulo", parent=base["Normal"], fontSize=10.5,
                                      textColor=colors.HexColor("#555555"), alignment=TA_CENTER, spaceAfter=2),
         "h2": ParagraphStyle("h2", parent=base["Heading2"], fontSize=13.5, spaceBefore=16, spaceAfter=6,
+                              textColor=colors.HexColor("#1a3d5c")),
+        "h3": ParagraphStyle("h3", parent=base["Heading3"], fontSize=10.5, spaceBefore=10, spaceAfter=2,
                               textColor=colors.HexColor("#1a3d5c")),
         "corpo": ParagraphStyle("corpo", parent=base["Normal"], fontSize=10, leading=14.5, spaceAfter=6,
                                  alignment=4),  # justify
@@ -145,11 +150,81 @@ def _tabela_flowable(linhas_tabela, estilos):
     return tabela
 
 
-def _markdown_para_flowables(conteudo_md, estilos):
+# 138ª rodada — pedido do usuário: "Gráficos das migrações (...) e Gráficos da
+# Folha" no relatório gerencial. A IA nunca desenha nada (não tem como, e não
+# deveria — gráfico é dado, não prosa); estas imagens são geradas 100% em
+# Python por app/relatorio_graficos.py a partir dos MESMOS números do JSON já
+# enviado à IA (relatorio_row["dados_enviados"]), e encaixadas logo depois do
+# texto da seção correspondente (ver _markdown_para_flowables/extra_apos_secao
+# abaixo) — nunca dentro do texto gerado pela IA.
+def _imagem_flowable(png_bytes, largura_max=_LARGURA_UTIL):
+    """PNG (BytesIO) -> reportlab Image, redimensionado pra largura útil da
+    página mantendo a proporção original (lido via ImageReader, sem precisar
+    de PIL solto)."""
+    if png_bytes is None:
+        return None
+    leitor = ImageReader(png_bytes)
+    w_px, h_px = leitor.getSize()
+    altura = largura_max * (h_px / w_px)
+    png_bytes.seek(0)
+    return Image(png_bytes, width=largura_max, height=altura)
+
+
+def _graficos_migracao(dados, estilos):
+    """Um gráfico de evolução por item de Migração de Dados com pelo menos 1
+    ciclo registrado (ver relatorio_executivo._migracao_de_dados — campo
+    "ciclos_recentes", até 5 ciclos em ordem cronológica)."""
+    itens = ((dados.get("migracao_de_dados") or {}).get("itens")) or []
+    flow = []
+    algum = False
+    for it in itens:
+        ciclos = it.get("ciclos_recentes") or []
+        if not ciclos:
+            continue
+        png = relatorio_graficos.grafico_evolucao_migracao(it.get("tabela_legado") or "—", ciclos)
+        img = _imagem_flowable(png)
+        if img is None:
+            continue
+        if not algum:
+            flow.append(Paragraph("Gráficos de evolução por item", estilos["h3"]))
+            algum = True
+        flow.append(img)
+        flow.append(Spacer(1, 10))
+    return flow
+
+
+def _graficos_folha(dados, estilos):
+    """Os 2 gráficos da visão 'Gráficos' da Comparação Folha × Ergon (ver
+    frontend/index.html:_vexGraficoConvergencia/_vexGraficoTipoRubrica)."""
+    folha = dados.get("folha_de_pagamento") or {}
+    if not folha.get("comparacao_disponivel"):
+        return []
+    competencias = folha.get("competencias") or []
+    por_tiporubr = folha.get("_por_tiporubr_grafico") or []
+    flow = [Paragraph("Gráficos", estilos["h3"])]
+    for png in (
+        relatorio_graficos.grafico_convergencia_folha(competencias, por_tiporubr),
+        relatorio_graficos.grafico_tipo_rubrica_folha(competencias, por_tiporubr),
+    ):
+        img = _imagem_flowable(png)
+        if img is not None:
+            flow.append(img)
+            flow.append(Spacer(1, 10))
+    return flow
+
+
+def _markdown_para_flowables(conteudo_md, estilos, extra_apos_secao=None):
+    extra_apos_secao = extra_apos_secao or {}
     flowables = []
     linhas = conteudo_md.replace("\r\n", "\n").split("\n")
     buffer_lista = []
     buffer_tabela = []
+    secao_atual = [None]  # lista de 1 elemento só pra mutar de dentro de fecha_secao()
+
+    def fecha_secao():
+        extras = extra_apos_secao.get(secao_atual[0])
+        if extras:
+            flowables.extend(extras)
 
     def fecha_lista():
         if buffer_lista:
@@ -192,9 +267,13 @@ def _markdown_para_flowables(conteudo_md, estilos):
         fecha_tabela()
         if linha_strip.startswith("## "):
             fecha_lista()
+            fecha_secao()
+            secao_atual[0] = linha_strip[3:].strip()
             flowables.append(Paragraph(_inline_to_reportlab(linha_strip[3:].strip()), estilos["h2"]))
         elif linha_strip.startswith("# "):
             fecha_lista()
+            fecha_secao()
+            secao_atual[0] = linha_strip[2:].strip()
             flowables.append(Paragraph(_inline_to_reportlab(linha_strip[2:].strip()), estilos["h2"]))
         elif linha_strip.startswith(("- ", "* ")):
             buffer_lista.append(linha_strip[2:].strip())
@@ -205,6 +284,7 @@ def _markdown_para_flowables(conteudo_md, estilos):
     if len(buffer_tabela) == 1:  # mesmo caso do meio do loop, mas no fim do documento
         flowables.append(Paragraph(_inline_to_reportlab(buffer_tabela.pop()), estilos["corpo"]))
     fecha_tabela()
+    fecha_secao()  # extras da última seção do documento
     return flowables
 
 
@@ -241,7 +321,14 @@ def gerar_pdf_bytes(relatorio_row):
         HRFlowable(width="100%", thickness=0.6, color=colors.HexColor("#cccccc")),
         Spacer(1, 4),
     ]
-    flow.extend(_markdown_para_flowables(relatorio_row.get("conteudo_md") or "", estilos))
+    # 138ª rodada — gráficos embutidos logo após o texto das seções correspondentes
+    # (ver _graficos_migracao/_graficos_folha acima); as chaves têm que bater
+    # EXATAMENTE com os títulos "## " do PROMPT_TEMPLATE (relatorio_executivo.py).
+    extra_apos_secao = {
+        "Migração de Dados": _graficos_migracao(dados, estilos),
+        "Folha de Pagamento": _graficos_folha(dados, estilos),
+    }
+    flow.extend(_markdown_para_flowables(relatorio_row.get("conteudo_md") or "", estilos, extra_apos_secao))
     flow.append(Spacer(1, 14))
     flow.append(HRFlowable(width="100%", thickness=0.4, color=colors.HexColor("#dddddd")))
     flow.append(Spacer(1, 6))

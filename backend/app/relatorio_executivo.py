@@ -42,7 +42,7 @@ from datetime import date, timedelta
 
 import networkx as nx
 
-from . import db, cronograma_anomalias, ia_provider
+from . import comparacao_folha, cronograma_anomalias, db, ia_provider
 from .cpm import _dur_dias, _business_day_offset, dias_uteis_entre
 
 LIMITE_ATRASADAS_NO_PROMPT = 40  # não manda a lista inteira se o projeto tiver centenas — manda uma amostra + o total
@@ -234,14 +234,21 @@ def _migracao_de_dados(projeto_id):
     linhas = db.fetch_all(f"""
         SELECT im.id AS item_id, im.nome_tabela_legado, im.nome_tabela_destino,
                im.qtd_registros_estimada, im.status,
-               c.numero_ciclo, c.data_execucao, c.qtd_registros_carregados,
-               c.qtd_rejeicoes, c.percentual_rejeicao
+               c.numero_ciclo, c.data_execucao, c.qtd_registros_extraidos,
+               c.qtd_registros_carregados, c.qtd_rejeicoes, c.percentual_rejeicao
         FROM itens_migracao im
         JOIN ciclos_migracao c ON c.item_migracao_id = im.id
         WHERE im.projeto_id = {db.q(projeto_id)}
         ORDER BY im.nome_tabela_legado, c.numero_ciclo DESC
     """)
 
+    # 138ª rodada — mantém até 5 ciclos por item (não só os 2 últimos): os 2
+    # primeiros continuam alimentando "ultimo_ciclo"/"ciclo_anterior" (tabela
+    # comparativa, sem mudança), e a lista completa (até 5) alimenta o gráfico
+    # de evolução por item embutido no PDF (ver app/relatorio_graficos.py e
+    # app/relatorio_pdf.py) — mesmos "últimos 5 ciclos" que a Visão Executiva
+    # já mostra (131ª/136ª rodadas).
+    CICLOS_PARA_GRAFICO = 5
     por_item = {}
     ordem_itens = []
     for l in linhas:
@@ -254,9 +261,10 @@ def _migracao_de_dados(projeto_id):
             ordem_itens.append(item_id)
         # já vem ORDER BY numero_ciclo DESC — os 2 primeiros de cada item são o
         # último ciclo e o imediatamente anterior
-        if len(por_item[item_id]["ciclos"]) < 2:
+        if len(por_item[item_id]["ciclos"]) < CICLOS_PARA_GRAFICO:
             por_item[item_id]["ciclos"].append({
                 "numero": l["numero_ciclo"], "data": l["data_execucao"],
+                "extraido": l.get("qtd_registros_extraidos") or 0,
                 "carregado": l["qtd_registros_carregados"] or 0,
                 # 51ª rodada — % de rejeição do ciclo, já calculado pelo banco (coluna
                 # gerada ciclos_migracao.percentual_rejeicao) — só passa adiante, não recalcula.
@@ -295,6 +303,10 @@ def _migracao_de_dados(projeto_id):
             "tabela_legado": it["tabela_legado"], "tabela_destino": it["tabela_destino"],
             "meta": it["meta"], "status": it["status"],
             "ultimo_ciclo": ultimo, "ciclo_anterior": anterior,
+            # 138ª rodada — ordem cronológica (mais antigo -> mais recente), só para o
+            # gráfico embutido no PDF; não vai para o prompt da IA (ela só usa
+            # ultimo_ciclo/ciclo_anterior, como já era).
+            "ciclos_recentes": list(reversed(ciclos)),
             "evolucao_percentual": evolucao_percentual, "evolucao_observacao": evolucao_observacao,
         })
 
@@ -313,6 +325,115 @@ def _migracao_de_dados(projeto_id):
             "total_carregado_ciclo_anterior_itens_comparaveis": total_anterior_comparavel if itens_com_2_ciclos else None,
             "evolucao_percentual_global": evolucao_percentual_global,
         },
+    }
+
+
+# 138ª rodada — pedido do usuário (verbatim): "o relatório gerencial contempla
+# as últimas novidades que incluímos no projeto, como a comparação da folha?"
+# — não contemplava: "folha_de_pagamento" ficava fixo num placeholder de
+# "ainda sem dados estruturados" escrito antes de existirem o funil de
+# Rubricas e a Comparação Folha × Ergon (118ª rodada em diante). Substitui
+# por dados reais, no mesmo espírito do resto do módulo (tudo pré-calculado
+# em Python — a IA só formata/escreve em torno dos números prontos).
+#
+# Só contagens agregadas de LINHAS COMPARADAS (quantas rubricas bateram/não
+# bateram entre o legado e o Ergon, por status/situação/tipo) saem daqui —
+# nenhum dado de servidor/folha real do órgão (ver aviso no topo deste
+# módulo) — mesma categoria de dado "de processo de implantação" que
+# migração de dados já manda (contagens de registros migrados, não os
+# registros em si).
+def _comparacao_folha(projeto_id):
+    rubricas_rows = db.fetch_all(f"""
+        SELECT status, count(*) AS total FROM rubricas
+        WHERE projeto_id = {db.q(projeto_id)} AND status <> 'Excluída'
+        GROUP BY status
+    """)
+    por_status = {r["status"]: r["total"] for r in rubricas_rows}
+    ordem_status = ["Em levantamento", "Enviada à Techne", "Liberada para testes", "Em homologação", "Homologada"]
+    rubricas_funil = {
+        "total_levantadas": sum(por_status.values()),
+        "por_status": [{"status": s, "total": por_status.get(s, 0)} for s in ordem_status],
+    }
+
+    comp = comparacao_folha.resumo_por_competencia(projeto_id, limite=5)
+    competencias = comp["competencias"]
+    if not competencias:
+        return {
+            "detalhamento_disponivel": rubricas_funil["total_levantadas"] > 0,
+            "rubricas_funil": rubricas_funil,
+            "comparacao_disponivel": False,
+            "observacao": "Nenhuma competência de Comparação Folha × Ergon importada ainda.",
+        }
+
+    # Tabela "por Situação" já pivotada (uma linha por situação, uma coluna por
+    # competência) — mesmo critério de frontend/index.html:_vexTabelaPorSituacao:
+    # "Não Divergente" sempre primeiro; mais de 6 outras situações viram uma
+    # linha "Outras situações" agregada.
+    mapa_sit, total_por_sit = {}, {}
+    for l in comp["por_situacao"]:
+        sit = l["situacao"]
+        mapa_sit.setdefault(sit, {})[l["mesano"]] = int(l["total"] or 0)
+        total_por_sit[sit] = total_por_sit.get(sit, 0) + int(l["total"] or 0)
+    categorias = sorted(mapa_sit.keys(), key=lambda s: -total_por_sit[s])
+    if "Não Divergente" in categorias:
+        categorias.remove("Não Divergente")
+        categorias.insert(0, "Não Divergente")
+    LIMITE = 6
+    linhas_show, resto = categorias[:LIMITE], categorias[LIMITE:]
+    if resto:
+        outras = {m: sum(mapa_sit[c].get(m, 0) for c in resto) for m in competencias}
+        mapa_sit["Outras situações"] = outras
+        linhas_show.append("Outras situações")
+    total_por_mes = {m: sum(mapa_sit[c].get(m, 0) for c in linhas_show) for m in competencias}
+
+    tabela_por_situacao = []
+    for cat in linhas_show:
+        linha = {"situacao": cat, "por_competencia": []}
+        for m in competencias:
+            v = mapa_sit[cat].get(m, 0)
+            tm = total_por_mes.get(m, 0)
+            linha["por_competencia"].append({
+                "competencia": m, "total": v, "percentual_do_mes": round(100 * v / tm) if tm else 0,
+            })
+        tabela_por_situacao.append(linha)
+
+    # Tabela "por Tipo de Rubrica" (Vantagem/Desconto) — % convergente por
+    # competência (mesmo critério de _vexTabelaPorTipoRubrica).
+    mapa_tipo = {}
+    for l in comp["por_tiporubr"]:
+        tipo = l["tiporubr"] or "(sem tipo)"
+        total_linhas = int(l.get("total_linhas") or 0)
+        convergente = int(l.get("total_sem_divergencia") or 0)
+        mapa_tipo.setdefault(tipo, {})[l["mesano"]] = {
+            "total_linhas": total_linhas,
+            "percentual_convergente": round(100 * convergente / total_linhas) if total_linhas else None,
+        }
+    ordem_pref = ["VANTAGEM", "DESCONTO"]
+    tipos = sorted(mapa_tipo.keys(), key=lambda t: (ordem_pref.index(t.upper()) if t.upper() in ordem_pref else 99, t))
+    tabela_por_tipo = []
+    for t in tipos:
+        linha = {"tipo": t, "por_competencia": []}
+        for m in competencias:
+            c = mapa_tipo[t].get(m)
+            linha["por_competencia"].append({
+                "competencia": m,
+                "total_linhas": c["total_linhas"] if c else 0,
+                "percentual_convergente": c["percentual_convergente"] if c else None,
+            })
+        tabela_por_tipo.append(linha)
+
+    return {
+        "detalhamento_disponivel": True,
+        "rubricas_funil": rubricas_funil,
+        "comparacao_disponivel": True,
+        "competencias": competencias,
+        "comparacao_por_situacao": tabela_por_situacao,
+        "comparacao_por_tipo_rubrica": tabela_por_tipo,
+        # Campos com "_" na frente: só para os GRÁFICOS deste relatório (ver
+        # app/relatorio_pdf.py/app/relatorio_graficos.py) — a IA deve ignorá-los
+        # ao escrever o texto (ver instrução no PROMPT_TEMPLATE), já estão
+        # cobertos pelas tabelas pivotadas acima.
+        "_por_tiporubr_grafico": comp["por_tiporubr"],
     }
 
 
@@ -495,15 +616,9 @@ def coletar_dados_projeto(projeto_id):
         "anomalias_data_fixada": cronograma_anomalias.detectar(projeto_id, STATUS_FAMILIA_CONCLUIDA),
         # 50ª rodada — dois temas novos, sempre ao final do relatório (ver PROMPT_TEMPLATE):
         "migracao_de_dados": _migracao_de_dados(projeto_id),
-        # Folha de Pagamento: tema ainda em levantamento, sem dado estruturado próprio pra
-        # coletar aqui ainda — propositalmente sem nenhum número, pra não dar à IA nenhuma
-        # brecha de inventar algo. Quando o levantamento andar, isso ganha sua própria coleta
-        # de dados (nos moldes de _migracao_de_dados), e a seção do prompt deixa de ser um
-        # texto fixo de "ainda não há dados".
-        "folha_de_pagamento": {
-            "detalhamento_disponivel": False,
-            "observacao": "Tema ainda em levantamento/parametrização — sem dados estruturados para este relatório.",
-        },
+        # 138ª rodada — antes era um placeholder fixo de "ainda sem dados"; agora reflete
+        # o funil de Rubricas + a Comparação Folha × Ergon reais (ver _comparacao_folha()).
+        "folha_de_pagamento": _comparacao_folha(projeto_id),
     }
 
 
@@ -596,17 +711,45 @@ houver — involução merece atenção da diretoria porque normalmente indica r
 de carga que precisou ser desfeito.
 
 ## Folha de Pagamento
-Este tema ainda está em levantamento/parametrização (ver
-"folha_de_pagamento.detalhamento_disponivel"). Escreva 1-2 frases registrando isso
-claramente — que o detalhamento deste tema entrará em uma versão futura do relatório assim
-que houver dados estruturados — sem inventar nenhum número, status ou prazo sobre a Folha de
-Pagamento.
+Se "folha_de_pagamento.detalhamento_disponivel" for false, escreva 1-2 frases registrando
+que o tema ainda está em levantamento/parametrização (sem Rubricas levantadas ainda) — sem
+inventar nenhum número, status ou prazo. Caso contrário, estruture assim:
 
-Não adicione seções além dessas. Não use tabelas em markdown em NENHUMA seção, EXCETO na
-tabela comparativa pedida em "Migração de Dados" — nas demais seções use listas com "-"
-quando precisar enumerar itens (o texto também vai para PDF, que só sabe renderizar "##",
-parágrafo, lista com "-", e agora essa tabela markdown; qualquer outra coisa não renderiza
-bem lá).
+1. Um parágrafo curto com o funil de Rubricas: total levantado
+("folha_de_pagamento.rubricas_funil.total_levantadas") e a distribuição por status
+("rubricas_funil.por_status" — já vem na ordem do fluxo: Em levantamento → Enviada à
+Techne → Liberada para testes → Em homologação → Homologada). Destaque o % já homologado
+sobre o total.
+
+2. Se "folha_de_pagamento.comparacao_disponivel" for false, encerre a seção com 1 frase
+dizendo que nenhuma competência de Comparação Folha × Ergon foi importada ainda — pule os
+itens 3 e 4 abaixo. Caso contrário, continue:
+
+3. Uma tabela markdown (GFM, mesma sintaxe da tabela de Migração de Dados) "Comparação por
+Situação": uma linha por item de "folha_de_pagamento.comparacao_por_situacao" (a ordem já
+vem pronta — "Não Divergente" sempre primeiro), uma coluna por competência de
+"folha_de_pagamento.competencias" (cabeçalho = a competência no formato "AAAA-MM" mesmo,
+não precisa formatar). Em cada célula, use o item correspondente em "por_competencia"
+(mesma ordem de "competencias") no formato "total (percentual_do_mes%)" — ex: "111.039
+(40%)" — usando EXATAMENTE os valores já calculados, sem recalcular, e com separador de
+milhar "." (ex: "111.039", não "111039"). Primeira coluna: "Situação".
+
+4. Logo depois, outra tabela markdown "Comparação por Tipo de Rubrica — % convergente":
+uma linha por item de "folha_de_pagamento.comparacao_por_tipo_rubrica" (primeira coluna
+"Tipo"), mesmas colunas de competência. Em cada célula use o "percentual_convergente"
+correspondente no formato "XX%" (ou "—" quando for null — significa 0 linhas comparadas
+naquela competência para aquele tipo). Depois das duas tabelas, 1-2 frases apontando a
+situação mais crítica (menor % convergente, ou tipo/situação com mais divergência) se
+houver alguma clara — sem alarmismo se os números já estiverem bons.
+
+Ignore qualquer campo de "folha_de_pagamento" cujo nome comece com "_" (ex:
+"_por_tiporubr_grafico") — é usado só pelos gráficos deste relatório, nunca no texto.
+
+Não adicione seções além dessas. Não use tabelas em markdown em NENHUMA seção, EXCETO as
+tabelas pedidas em "Migração de Dados" (1 tabela) e "Folha de Pagamento" (até 2 tabelas) —
+nas demais seções use listas com "-" quando precisar enumerar itens (o texto também vai
+para PDF, que só sabe renderizar "##", parágrafo, lista com "-" e tabela markdown; qualquer
+outra coisa não renderiza bem lá).
 """
 
 

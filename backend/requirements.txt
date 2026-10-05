@@ -20,6 +20,7 @@ openpyxl>=3.1
 # biblioteca padrão, sem dependência extra.
 anthropic>=0.40
 reportlab>=4.0
+matplotlib>=3.8
 # anthropic: chama a API da Anthropic (Claude) para gerar o texto do
 # Relatório Executivo (IA) do Dashboard — app/relatorio_executivo.py. Exige
 # a variável de ambiente ANTHROPIC_API_KEY e acesso de saída à internet
@@ -29,6 +30,12 @@ reportlab>=4.0
 # reportlab: monta o PDF do Relatório Executivo (app/relatorio_pdf.py) e do
 # Relatório de Minhas Atividades (app/relatorio_atividades.py) — puro
 # Python, sem dependência de bibliotecas de sistema extras.
+# matplotlib: gera (138ª rodada) os gráficos de Migração de Dados e de Folha
+# de Pagamento embutidos no PDF do Relatório Executivo (app/
+# relatorio_graficos.py), usando o backend "Agg" (só renderiza em memória,
+# sem display) — mesmo espírito do reportlab: o wheel do PyPI já traz tudo
+# que precisa (freetype/libpng embutidos), não exige nenhum pacote de
+# sistema extra no Dockerfile.
 google-api-python-client>=2.100
 google-auth>=2.23
 # google-api-python-client / google-auth: usados só pelo botão "Atualizar
