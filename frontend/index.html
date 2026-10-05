@@ -5689,11 +5689,17 @@ function _vexDesenharEvolucaoMigracao(ciclos){
     return;
   }
   const n = ciclos.length;
-  const W=760, H=240, padL=56, padR=16, padT=30, padB=30;
+  // 136ª rodada — pedido do usuário (verbatim): "incluir o total a ser
+  // carregado e os % respectivos" — cada ciclo ganha o total extraído
+  // (qtd_registros_extraidos, a base de 100% daquele ciclo) como 2ª linha
+  // do rótulo do eixo X, e os rótulos de valor das barras passam a trazer
+  // o % de migrados/rejeitados sobre esse total, como 2ª linha abaixo do
+  // valor absoluto. padT/padB cresceram pra caber essas linhas extras.
+  const W=760, H=260, padL=56, padR=16, padT=38, padB=46;
   const plotW = W-padL-padR, plotH = H-padT-padB;
 
   const maxV = Math.max(1, ...ciclos.map(c=>Math.max(Number(c.qtd_registros_carregados||0), Number(c.qtd_rejeicoes||0))));
-  const topo = _vexNiceMax(maxV*1.15); // 15% de folga pra rótulo de valor nunca colar na borda de cima
+  const topo = _vexNiceMax(maxV*1.25); // folga maior (25%) pra caber as 2 linhas do rótulo de valor+percentual
   const y = v => padT + plotH*(1 - v/topo);
   const base = H-padB;
   const gridLines = [0,0.25,0.5,0.75,1].map(f=>{
@@ -5706,21 +5712,28 @@ function _vexDesenharEvolucaoMigracao(ciclos){
   const grupoW = Math.min(slot*0.5, 160);
   const barGap = 4;
   const barW = (grupoW-barGap)/2;
+  const fmtPct = p => p===null ? "—" : p.toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})+"%";
 
   const corpo = ciclos.map((c,idx)=>{
     const cx = padL + slot*(idx+0.5);
     const x0 = cx - grupoW/2;
+    const extraidos = Number(c.qtd_registros_extraidos||0);
     const carregados = Number(c.qtd_registros_carregados||0);
     const rejeitados = Number(c.qtd_rejeicoes||0);
+    const pctMig = extraidos>0 ? 100*carregados/extraidos : null;
+    const pctRej = extraidos>0 ? 100*rejeitados/extraidos : null;
     const yMig = y(carregados), yRej = y(rejeitados);
     const hMig = base-yMig, hRej = base-yRej;
     const dataFmt = fmtDate(c.data_execucao);
     return `
-      <rect x="${x0.toFixed(1)}" y="${yMig.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0,hMig).toFixed(1)}" rx="4" fill="var(--ok)"><title>Ciclo ${c.numero_ciclo} (${esc(dataFmt)}): ${carregados.toLocaleString('pt-BR')} migrados</title></rect>
-      <rect x="${(x0+barW+barGap).toFixed(1)}" y="${yRej.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0,hRej).toFixed(1)}" rx="4" fill="var(--danger)"><title>Ciclo ${c.numero_ciclo} (${esc(dataFmt)}): ${rejeitados.toLocaleString('pt-BR')} rejeitados</title></rect>
-      <text class="vex-value-label" x="${(x0+barW/2).toFixed(1)}" y="${(yMig-6).toFixed(1)}" text-anchor="middle" style="fill:var(--ok);font-size:10.5px;">${carregados.toLocaleString('pt-BR')}</text>
-      <text class="vex-value-label" x="${(x0+barW+barGap+barW/2).toFixed(1)}" y="${(yRej-6).toFixed(1)}" text-anchor="middle" style="fill:var(--danger);font-size:10.5px;">${rejeitados.toLocaleString('pt-BR')}</text>
+      <rect x="${x0.toFixed(1)}" y="${yMig.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0,hMig).toFixed(1)}" rx="4" fill="var(--ok)"><title>Ciclo ${c.numero_ciclo} (${esc(dataFmt)}): ${carregados.toLocaleString('pt-BR')} migrados de ${extraidos.toLocaleString('pt-BR')} extraídos (${fmtPct(pctMig)})</title></rect>
+      <rect x="${(x0+barW+barGap).toFixed(1)}" y="${yRej.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0,hRej).toFixed(1)}" rx="4" fill="var(--danger)"><title>Ciclo ${c.numero_ciclo} (${esc(dataFmt)}): ${rejeitados.toLocaleString('pt-BR')} rejeitados de ${extraidos.toLocaleString('pt-BR')} extraídos (${fmtPct(pctRej)})</title></rect>
+      <text class="vex-value-label" x="${(x0+barW/2).toFixed(1)}" y="${(yMig-16).toFixed(1)}" text-anchor="middle" style="fill:var(--ok);font-size:10.5px;">${carregados.toLocaleString('pt-BR')}</text>
+      <text class="vex-value-label" x="${(x0+barW/2).toFixed(1)}" y="${(yMig-5).toFixed(1)}" text-anchor="middle" style="fill:var(--ok);font-size:9px;opacity:.8;">${fmtPct(pctMig)}</text>
+      <text class="vex-value-label" x="${(x0+barW+barGap+barW/2).toFixed(1)}" y="${(yRej-16).toFixed(1)}" text-anchor="middle" style="fill:var(--danger);font-size:10.5px;">${rejeitados.toLocaleString('pt-BR')}</text>
+      <text class="vex-value-label" x="${(x0+barW+barGap+barW/2).toFixed(1)}" y="${(yRej-5).toFixed(1)}" text-anchor="middle" style="fill:var(--danger);font-size:9px;opacity:.8;">${fmtPct(pctRej)}</text>
       <text class="vex-axis-label" x="${cx.toFixed(1)}" y="${(H-padB+16).toFixed(1)}" text-anchor="middle">Ciclo ${c.numero_ciclo}</text>
+      <text class="vex-axis-label" x="${cx.toFixed(1)}" y="${(H-padB+29).toFixed(1)}" text-anchor="middle" style="font-size:9.5px;opacity:.75;">${extraidos.toLocaleString('pt-BR')} extraídos</text>
     `;
   }).join("");
 
