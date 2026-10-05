@@ -1088,14 +1088,17 @@
           <h3 style="font-size:13.5px;">⚖️ Comparação Folha × Ergon <span class="muted" id="vex-folha-comp-sub" style="font-weight:400;font-size:11.5px;"></span></h3>
           <div style="display:flex;align-items:center;gap:10px;">
             <div class="vex-toggle" id="vex-folha-comp-toggle">
-              <button type="button" data-modo="numeros" class="active">📋 Números</button>
-              <button type="button" data-modo="graficos">📈 Gráficos</button>
+              <button type="button" data-modo="numeros">📋 Números</button>
+              <button type="button" data-modo="graficos" class="active">📈 Gráficos</button>
             </div>
             <button type="button" class="vex-module-link" onclick="goToView('comparacao-folha-dashboard')">Abrir Comparação →</button>
           </div>
         </div>
-        <div id="vex-folha-comp-numeros"></div>
-        <div id="vex-folha-comp-graficos" hidden></div>
+        <!-- 137ª rodada — pedido do usuário: "por padrão apresente o gráfico
+             ao invés da lista" — o toggle Números/Gráficos passa a abrir em
+             Gráficos por padrão (Números continua disponível a um clique). -->
+        <div id="vex-folha-comp-numeros" hidden></div>
+        <div id="vex-folha-comp-graficos"></div>
       </div>
     </div>
 
@@ -5570,6 +5573,15 @@ function _vexRenderFrentes(rows){
   const el = $("vex-frentes");
   const list = (rows||[]).filter(r=>r.total_atividades>0);
   if(!list.length){ el.innerHTML = `<div class="vex-empty">Nenhuma frente de trabalho com atividades cadastradas.</div>`; return; }
+  // 137ª rodada — pedido do usuário: "apresente as frentes pelo seu número
+  // de ordem" — a API devolve em ordem alfabética (ORDER BY frente_nome);
+  // reordena aqui pelo mesmo campo frentes_trabalho.ordem já usado em
+  // Configurações > Frentes de Trabalho, com o nome como desempate.
+  list.sort((a,b)=>{
+    const oa = byId(FRENTES, a.frente_trabalho_id)?.ordem ?? 0;
+    const ob = byId(FRENTES, b.frente_trabalho_id)?.ordem ?? 0;
+    return oa-ob || String(a.frente_nome).localeCompare(String(b.frente_nome), 'pt-BR');
+  });
   el.innerHTML = list.map(r=>{
     const pct = Math.round(100*r.concluidas/r.total_atividades);
     const frente = byId(FRENTES, r.frente_trabalho_id);
@@ -5743,32 +5755,26 @@ function _vexDesenharEvolucaoMigracao(ciclos){
   </svg>`;
 }
 
-// Folha de Pagamento (Rubricas) — mesmo raciocínio: funil de status é estado,
-// não identidade, reaproveita STATUS_RUBRICA_COLOR (já existe na tela de
-// Rubricas) pra manter a mesma cor em todo o sistema pro mesmo status.
+// Folha de Pagamento (Rubricas) — 137ª rodada: pedido do usuário (verbatim,
+// apontando pra um print do card de Rubricas da própria tela de Rubricas):
+// "ao invés desse gráfico, apresente os números como na imagem 3" — troca o
+// funil (meter + barra empilhada + legenda) pelos MESMOS tiles .kpi usados
+// em #rub-kpis (tela de Rubricas), com os mesmos rótulos, pra ler igual nos
+// dois lugares.
 function _vexRenderFolha(){
   const el = $("vex-folha");
   const validas = RUBRICAS.filter(r=>r.status!=="Excluída");
   if(!validas.length){ el.innerHTML = `<div class="vex-empty">Nenhuma rubrica levantada.</div>`; return; }
   const porStatus = {};
   validas.forEach(r=>{ porStatus[r.status] = (porStatus[r.status]||0)+1; });
-  const total = validas.length;
-  const homologadas = porStatus["Homologada"]||0;
-  const pct = Math.round(100*homologadas/total);
-  const ordem = [
-    {k:"Em levantamento", cor:"faint"}, {k:"Enviada à Techne", cor:"accent"},
-    {k:"Liberada para testes", cor:"accent"}, {k:"Em homologação", cor:"warn"},
-    {k:"Homologada", cor:"ok"},
-  ];
-  const segs = ordem.map(o=>({...o, v:porStatus[o.k]||0})).filter(o=>o.v>0);
-  el.innerHTML = `
-    <div class="vex-meter" style="margin-bottom:12px;">
-      <div class="track"><div class="fill" style="width:${pct}%;background:var(--ok);"></div></div>
-      <div class="labelrow"><span>${pct}% homologadas</span><span>${homologadas} / ${total}</span></div>
-    </div>
-    <div class="vex-stacked-bar">${segs.map(s=>`<div class="seg" style="width:${Math.round(100*s.v/total)}%;background:${COLOR_VAR[s.cor]};border-right:2px solid var(--surface);" title="${s.k}: ${s.v}"></div>`).join("")}</div>
-    <div class="vex-legend" style="margin-top:8px;">${segs.map(s=>`<span class="item"><span class="swatch" style="background:${COLOR_VAR[s.cor]};"></span>${s.k} (${s.v})</span>`).join("")}</div>
-  `;
+  el.innerHTML = `<div class="kpis">${[
+    {l:"Total levantadas", v: validas.length},
+    {l:"Em levantamento", v: porStatus["Em levantamento"]||0},
+    {l:"Enviadas à Techne", v: porStatus["Enviada à Techne"]||0},
+    {l:"Liberadas p/ testes", v: porStatus["Liberada para testes"]||0},
+    {l:"Em homologação", v: porStatus["Em homologação"]||0},
+    {l:"Homologadas", v: porStatus["Homologada"]||0},
+  ].map(k=>`<div class="kpi"><div class="label">${k.l}</div><div class="value">${k.v}</div></div>`).join("")}</div>`;
 }
 
 // 118ª rodada — Comparação Folha × Ergon dentro do card de Folha de
