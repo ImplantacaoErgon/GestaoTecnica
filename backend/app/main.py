@@ -10,7 +10,7 @@ from datetime import datetime, date, timedelta
 
 from flask import Flask, request, jsonify, send_from_directory, send_file, abort, session
 
-from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_renumeracao, cronograma_anomalias, cronograma_export, cronograma_export_xml, cronograma_comparacao, relatorio_executivo, relatorio_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, drive_rubricas, rubricas_auto_update, comparacao_folha, comparacao_folha_import, google_drive, migracao_quadro_export, requisitos_ia, migracao_rejeicoes, migracao_rejeicoes_import
+from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_renumeracao, cronograma_anomalias, cronograma_export, cronograma_export_xml, cronograma_comparacao, relatorio_executivo, relatorio_pdf, dashboard_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, drive_rubricas, rubricas_auto_update, comparacao_folha, comparacao_folha_import, google_drive, migracao_quadro_export, requisitos_ia, migracao_rejeicoes, migracao_rejeicoes_import
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 FRONTEND_DIR = os.environ.get(
@@ -4020,6 +4020,37 @@ def create_app():
             traceback.print_exc()
             return jsonify({"erro": f"Falha ao gerar o PDF: {e}"}), 500
         nome_arquivo = f"relatorio-executivo-{row['gerado_em'][:10] if isinstance(row['gerado_em'], str) else id}.pdf"
+        return send_file(
+            io.BytesIO(pdf_bytes), mimetype="application/pdf",
+            as_attachment=True, download_name=nome_arquivo,
+        )
+
+    # ------------------------------------------------- PDF do Dashboard (139ª rodada)
+    # Pedido do usuário (verbatim): "Gere um PDF da pagina de Dashboard" — diferente
+    # do Relatório Executivo (IA, acima), este PDF nunca chama IA nenhuma: é gerado
+    # na hora (sem persistir nada — mesmo padrão de relatorio_atividades_pdf, abaixo),
+    # com os mesmos números que a Visão Executiva mostra, direto em quadros/tabelas.
+    @app.get("/api/relatorios/dashboard/pdf")
+    def dashboard_executivo_pdf():
+        pid = request.args.get("projeto_id")
+        if not pid:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        # Até 5 ids de itens_migracao escolhidos no modal do front-end ("quais tabelas
+        # devem ter gráfico no documento") — opcional; capado em 5 aqui (defesa, mesmo
+        # já limitado no front) e de novo dentro de dashboard_pdf.gerar_pdf_bytes().
+        itens_grafico_raw = request.args.get("itens_migracao_ids") or ""
+        itens_migracao_ids = [v for v in itens_grafico_raw.split(",") if v][:dashboard_pdf.LIMITE_GRAFICOS_MIGRACAO]
+        try:
+            dados = dashboard_pdf.coletar_dados_dashboard(pid)
+        except relatorio_executivo.RelatorioExecutivoError as e:
+            return jsonify({"erro": str(e)}), 404
+        try:
+            pdf_bytes = dashboard_pdf.gerar_pdf_bytes(dados, itens_migracao_ids)
+        except Exception as e:
+            print(f"[dashboard_pdf] erro ao gerar PDF do dashboard (projeto {pid}): {e}", flush=True)
+            traceback.print_exc()
+            return jsonify({"erro": f"Falha ao gerar o PDF: {e}"}), 500
+        nome_arquivo = f"dashboard-executivo-{date.today().isoformat()}.pdf"
         return send_file(
             io.BytesIO(pdf_bytes), mimetype="application/pdf",
             as_attachment=True, download_name=nome_arquivo,

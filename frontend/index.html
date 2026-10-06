@@ -1028,6 +1028,7 @@
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
         <span class="muted" id="vex-atualizado-em" style="font-size:11.5px;"></span>
         <button class="btn secondary" id="btn-refresh-vex">↻ Atualizar</button>
+        <button class="btn secondary" id="btn-dashboard-pdf-vex" title="Gera um PDF com o retrato atual de todos os quadros desta tela — sem IA, só os números do sistema">📄 Exportar PDF do Dashboard</button>
         <button class="btn" id="btn-relatorio-executivo-vex" title="Gera um diagnóstico do projeto usando IA a partir dos dados atuais do cronograma">🧠 Gerar Relatório Executivo (IA)</button>
       </div>
     </div>
@@ -2960,6 +2961,41 @@
   </div>
 </div>
 
+<!-- ================= MODAL: PDF DO DASHBOARD (139ª rodada) =================
+     Pedido do usuário (verbatim): "Gere um PDF da pagina de Dashboard...
+     na hora de gerar o pdf pergunte quais até 5 tabelas devem ser gerados
+     os gráficos no documento" — PDF determinístico (sem IA, ver
+     app/dashboard_pdf.py), diferente do Relatório Executivo (IA) acima.
+     A única escolha do usuário é esta: quais tabelas de Migração de Dados
+     (até 5) ganham gráfico de evolução no documento — o quadro comparativo
+     de TODAS as tabelas entra sempre, goste ou não da seleção de gráfico. -->
+<div class="overlay" id="overlay-dashboard-pdf" hidden>
+  <div class="modal" style="max-width:520px;">
+    <div class="modal-head"><h2>📄 Exportar PDF do Dashboard</h2><button class="btn ghost" id="dpdf-close">✕</button></div>
+    <div class="modal-body single-col">
+      <p class="muted" style="margin-bottom:12px;">
+        Gera um PDF com o retrato atual de todos os quadros da Visão Executiva (cronograma, frentes,
+        atrasos, marcos, riscos, financeiro, requisitos, migração e folha) — direto dos números do
+        sistema, sem IA.
+      </p>
+      <div class="field full">
+        <label>Quais tabelas de Migração de Dados devem ter gráfico de evolução no PDF? (até 5)</label>
+        <div id="dpdf-itens-migracao" style="display:flex;flex-direction:column;gap:6px;margin-top:6px;max-height:260px;overflow:auto;"></div>
+        <div class="muted" id="dpdf-aviso-limite" style="font-size:11.5px;margin-top:6px;" hidden>
+          Limite de 5 tabelas atingido — desmarque uma para escolher outra.
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <span class="muted" id="dpdf-contagem" style="font-size:12px;"></span>
+      <div style="display:flex;gap:8px;">
+        <button class="btn secondary" id="dpdf-cancelar">Cancelar</button>
+        <button class="btn" id="dpdf-gerar">⬇ Gerar PDF</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ================= MODAL: RELATÓRIO DE HORAS DOS RECURSOS ================= -->
 <div class="overlay" id="overlay-relatorio-atividades" hidden>
   <div class="modal" style="max-width:520px;">
@@ -3534,7 +3570,7 @@ async function afterProjetoReady(){
   ]);
   aplicarMarcaNoTopo();
   fillStaticSelects();
-  wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireGanttToolbar(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireExportarCronograma(); wireExportarCronogramaXml(); wireRemoverCronograma(); wireRemoverRequisitos(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma(); wireRenumerarCronograma();
+  wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireDashboardPdf(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireGanttToolbar(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireExportarCronograma(); wireExportarCronogramaXml(); wireRemoverCronograma(); wireRemoverRequisitos(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma(); wireRenumerarCronograma();
   wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros(); wireQuadroCicloModal(); wireMigracaoRejeicoesPane(); wireRubricaModal(); wireRubricasFiltros(); wireImportRubricas(); wireComparacaoFolhaPane(); wireComparacaoFolhaDashboard(); wireVexFolhaComparacaoToggle(); wireVexMigracaoEvolucaoSelect();
   setupCsvTemplateLink();
   await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias(), loadItensMigracao(), loadRubricas(), loadRubricasAutoUpdateStatus()]);
@@ -10109,6 +10145,60 @@ function wireRelatorioExecutivo(){
     const row = await api(`/relatorios/executivo/${id}`);
     mostrarRelatorioExecutivo(row);
   });
+}
+
+// ================= PDF do Dashboard (139ª rodada) =================
+// Pedido do usuário (verbatim): "na hora de gerar o pdf pergunte quais até 5
+// tabelas devem ser gerados os gráficos no documento" — diferente do
+// Relatório Executivo (IA), este PDF é gerado na hora, sem persistir nada
+// (mesmo padrão de "Exportar Cronograma (Excel)" etc.: window.open baixa
+// direto) — por isso não tem histórico nem necessidade de recarregar a
+// tela depois. A única pergunta ao usuário é a seleção de tabelas de
+// Migração pro gráfico; o resto do PDF (todos os outros quadros) o
+// backend monta sozinho, sem escolha nenhuma (ver app/dashboard_pdf.py).
+const LIMITE_GRAFICOS_MIGRACAO_PDF = 5;
+
+function wireDashboardPdf(){
+  $("btn-dashboard-pdf-vex")?.addEventListener("click", abrirDashboardPdfModal);
+  $("dpdf-close").addEventListener("click", ()=>{ $("overlay-dashboard-pdf").hidden = true; });
+  $("dpdf-cancelar").addEventListener("click", ()=>{ $("overlay-dashboard-pdf").hidden = true; });
+  $("overlay-dashboard-pdf").addEventListener("click", e=>{ if(e.target.id==="overlay-dashboard-pdf") $("overlay-dashboard-pdf").hidden = true; });
+  $("dpdf-gerar").addEventListener("click", gerarDashboardPdf);
+}
+
+function abrirDashboardPdfModal(){
+  const wrap = $("dpdf-itens-migracao");
+  if(!ITENS_MIGRACAO.length){
+    wrap.innerHTML = `<span class="muted">Nenhum item de migração cadastrado — o PDF sairá sem gráficos de migração.</span>`;
+  } else {
+    const itensOrdenados = [...ITENS_MIGRACAO].sort((a,b)=>String(a.nome_tabela_legado).localeCompare(String(b.nome_tabela_legado), 'pt-BR'));
+    wrap.innerHTML = itensOrdenados.map(i=>`
+      <label style="display:flex;align-items:center;gap:8px;font-weight:400;text-transform:none;font-size:13px;">
+        <input type="checkbox" class="dpdf-item-check" value="${i.id}"> ${esc(i.nome_tabela_legado)}
+      </label>`).join("");
+  }
+  _dpdfAtualizarContagem();
+  wrap.querySelectorAll(".dpdf-item-check").forEach(chk=>{
+    chk.addEventListener("change", _dpdfAtualizarContagem);
+  });
+  $("overlay-dashboard-pdf").hidden = false;
+}
+
+function _dpdfAtualizarContagem(){
+  const checks = [...document.querySelectorAll(".dpdf-item-check")];
+  const marcados = checks.filter(c=>c.checked);
+  const noLimite = marcados.length >= LIMITE_GRAFICOS_MIGRACAO_PDF;
+  checks.forEach(c=>{ if(!c.checked) c.disabled = noLimite; });
+  $("dpdf-aviso-limite").hidden = !noLimite;
+  $("dpdf-contagem").textContent = `${marcados.length}/${LIMITE_GRAFICOS_MIGRACAO_PDF} tabelas escolhidas`;
+}
+
+function gerarDashboardPdf(){
+  const ids = [...document.querySelectorAll(".dpdf-item-check")].filter(c=>c.checked).map(c=>c.value);
+  const qs = new URLSearchParams({projeto_id: PROJETO.id});
+  if(ids.length) qs.set("itens_migracao_ids", ids.join(","));
+  window.open(`${API}/relatorios/dashboard/pdf?${qs.toString()}`, "_blank");
+  $("overlay-dashboard-pdf").hidden = true;
 }
 
 async function abrirRelatorioExecutivoModal(){

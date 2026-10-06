@@ -300,6 +300,11 @@ def _migracao_de_dados(projeto_id):
             evolucao_observacao = "sem ciclo anterior para comparação (só 1 ciclo registrado)"
 
         itens.append({
+            # 139ª rodada — "_item_id": usado só pelo PDF do Dashboard (app/dashboard_pdf.py)
+            # pra filtrar quais itens o usuário escolheu ter gráfico no documento (modal "até
+            # 5 tabelas"); nome com "_" na frente de propósito (mesmo padrão já usado em
+            # "_por_tiporubr_grafico" na Folha de Pagamento, abaixo) — a IA deve ignorá-lo.
+            "_item_id": item_id,
             "tabela_legado": it["tabela_legado"], "tabela_destino": it["tabela_destino"],
             "meta": it["meta"], "status": it["status"],
             "ultimo_ciclo": ultimo, "ciclo_anterior": anterior,
@@ -708,7 +713,8 @@ Depois da tabela, escreva um parágrafo curto com o total geral
 (resumo.total_carregado_ultimo_ciclo, resumo.evolucao_percentual_global) e destacando por
 nome qualquer tabela com involução (percentual negativo) ou com taxa de rejeição alta, se
 houver — involução merece atenção da diretoria porque normalmente indica retrabalho ou erro
-de carga que precisou ser desfeito.
+de carga que precisou ser desfeito. Ignore o campo "_item_id" de cada item (começa com "_") —
+é só um identificador interno, nunca usado no texto.
 
 ## Folha de Pagamento
 Se "folha_de_pagamento.detalhamento_disponivel" for false, escreva 1-2 frases registrando
