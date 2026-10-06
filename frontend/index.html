@@ -10173,8 +10173,8 @@ function abrirDashboardPdfModal(){
   } else {
     const itensOrdenados = [...ITENS_MIGRACAO].sort((a,b)=>String(a.nome_tabela_legado).localeCompare(String(b.nome_tabela_legado), 'pt-BR'));
     wrap.innerHTML = itensOrdenados.map(i=>`
-      <label style="display:flex;align-items:center;gap:8px;font-weight:400;text-transform:none;font-size:13px;">
-        <input type="checkbox" class="dpdf-item-check" value="${i.id}"> ${esc(i.nome_tabela_legado)}
+      <label style="display:flex;align-items:center;justify-content:flex-start;gap:8px;font-weight:400;text-transform:none;font-size:13px;text-align:left;">
+        <input type="checkbox" class="dpdf-item-check" value="${i.id}" style="width:auto;flex:none;"> ${esc(i.nome_tabela_legado)}
       </label>`).join("");
   }
   _dpdfAtualizarContagem();

@@ -48,7 +48,8 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, HRFlowable, ListFlowable, ListItem,
+    SimpleDocTemplate, Paragraph, Spacer, HRFlowable, ListFlowable, ListItem, Table, TableStyle,
+    KeepTogether,
 )
 
 from . import db, relatorio_executivo, relatorio_graficos, relatorio_pdf
@@ -56,6 +57,65 @@ from . import db, relatorio_executivo, relatorio_graficos, relatorio_pdf
 LIMITE_GRAFICOS_MIGRACAO = 5
 LIMITE_TOP_RUBRICAS_DIVERGENTES = 10
 LIMITE_ATRASADAS_NA_TABELA = 20  # a amostra de coletar_dados_projeto já vem limitada a 40; no PDF (impresso) 20 já é bastante
+
+# 140ª rodada — pedido do usuário: "Resumo geral trocar o que aparece na
+# imagem 2 pela imagem 3" (a própria Visão Executiva) / "NA folha de
+# pagamento apresentar o quadro cmo na imagem 5" — os quadros "Indicador |
+# Valor" em tabela viraram tiles coloridos, mesmos tokens de cor/limiares já
+# usados na tela (ver frontend/index.html, COLOR_VAR/SOFT_VAR e os cálculos
+# de renderVisaoExecutiva() — _TOKEN_BG/_TOKEN_FG abaixo são os valores hex
+# por trás de var(--ok-soft)/var(--ok) etc., copiados do bloco :root do CSS).
+_TOKEN_BG = {"ok": "#e4f3ea", "warn": "#faecda", "danger": "#faeaea", "accent": "#e6edf4", "faint": "#eef0f3"}
+_TOKEN_FG = {"ok": "#1f7a4d", "warn": "#a15c0d", "danger": "#ab2f2f", "accent": "#2f5f8a", "faint": "#5c6670"}
+
+
+def _token_progresso(diff_pp):
+    """Mesma regra de 3 faixas da 135ª rodada (hero "Progresso geral do
+    projeto"): < -10 p.p. vermelho, < 0 p.p. laranja, senão verde."""
+    if diff_pp is None:
+        return "faint"
+    if diff_pp < -10:
+        return "danger"
+    if diff_pp < 0:
+        return "warn"
+    return "ok"
+
+
+def _token_limiar(pct):
+    """Mesmo critério dos tiles cruzados de renderVisaoExecutiva() (Migração,
+    Rubricas, Financeiro): null -> cinza, >=90% verde, >=50% azul, senão laranja."""
+    if pct is None:
+        return "faint"
+    if pct >= 90:
+        return "ok"
+    if pct >= 50:
+        return "accent"
+    return "warn"
+
+
+def _token_limiar_requisitos(pct):
+    """Requisitos usa limiares um pouco mais tolerantes na tela (>=80/>=50)."""
+    if pct is None:
+        return "faint"
+    if pct >= 80:
+        return "ok"
+    if pct >= 50:
+        return "accent"
+    return "warn"
+
+
+def _token_alerta(n):
+    return "warn" if n else "faint"
+
+
+def _token_aderencia_tile(diff_pp):
+    """Regra do TILE cruzado "Aderência ao prazo" em renderVisaoExecutiva()
+    — 2 faixas (diferente da regra de 3 faixas do HERO, _token_progresso
+    acima, que usa o corte de -10 p.p.): negativo = vermelho, positivo =
+    verde, zero = cinza."""
+    if not diff_pp:
+        return "faint"
+    return "danger" if diff_pp < 0 else "ok"
 
 
 class DashboardPdfError(Exception):
@@ -184,6 +244,114 @@ def _requisitos(projeto_id):
     }
 
 
+def _marcos_pendentes_total(projeto_id):
+    """Mesmo critério de frontend/index.html:renderVisaoExecutiva() —
+    "marcosPendentes" = MARCOS.filter(m=>!m.data_real).length (TODOS os
+    pendentes, não só os próximos 8 de marcos_proximos)."""
+    row = db.fetch_one(f"SELECT count(*) AS n FROM marcos WHERE projeto_id = {db.q(projeto_id)} AND data_real IS NULL")
+    return (row or {}).get("n") or 0
+
+
+def _curva_s(projeto_id):
+    """Porta Python, fiel, de frontend/index.html:_vexCurvaSCalcular() — curva
+    de avanço acumulado (Planejado × Realizado) mês a mês, janela dos últimos
+    18 meses. "Planejado" conta toda atividade cujo Fim Previsto (dtfim_prev)
+    já tenha passado até aquele mês; "Realizado" conta só a concluída que
+    TAMBÉM tem Data Fim Real preenchida (mesma ressalva da tela: concluída
+    sem essa data não entra aqui, mesmo contando como "Concluída" alhures)."""
+    atividades = db.fetch_all(f"""
+        SELECT dtfim_prev, dtfim_real, status FROM atividades WHERE projeto_id = {db.q(projeto_id)}
+    """)
+    com_prazo = [a for a in atividades if a.get("dtfim_prev")]
+    if not com_prazo:
+        return None
+
+    def ym(v):
+        return str(v)[:7]
+
+    hoje = date.today()
+    hoje_iso = hoje.isoformat()
+    min_mes = min(ym(a["dtfim_prev"]) for a in com_prazo)
+    max_mes = hoje_iso[:7]
+    for a in atividades:
+        if a.get("dtfim_prev") and ym(a["dtfim_prev"]) > max_mes:
+            max_mes = ym(a["dtfim_prev"])
+        if a.get("dtfim_real") and ym(a["dtfim_real"]) > max_mes:
+            max_mes = ym(a["dtfim_real"])
+
+    y, m = (int(v) for v in min_mes.split("-"))
+    y_max, m_max = (int(v) for v in max_mes.split("-"))
+    meses = []
+    while y < y_max or (y == y_max and m <= m_max):
+        meses.append(f"{y}-{m:02d}")
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+    janela = meses[-18:] if len(meses) > 18 else meses
+
+    total = len(atividades)
+    concluida_familia = relatorio_executivo.STATUS_FAMILIA_CONCLUIDA
+    planejado, realizado = [], []
+    for mes in janela:
+        corte = mes + "-31"
+        n_plan = sum(1 for a in atividades if a.get("dtfim_prev") and str(a["dtfim_prev"]) <= corte)
+        planejado.append(round(100 * n_plan / total) if total else 0)
+        n_real = sum(1 for a in atividades
+                     if a["status"] in concluida_familia and a.get("dtfim_real") and str(a["dtfim_real"]) <= corte)
+        realizado.append(round(100 * n_real / total) if total else 0)
+    concluidas_sem_data = sum(
+        1 for a in atividades if a["status"] in concluida_familia and not a.get("dtfim_real")
+    )
+    return {"meses": janela, "planejado": planejado, "realizado": realizado,
+            "hoje_mes": hoje_iso[:7], "concluidas_sem_data": concluidas_sem_data}
+
+
+def _frentes_com_cor(projeto_id):
+    """Mesma base de resumo_por_frente de relatorio_executivo.py, mas com a
+    cor PRÓPRIA de cada frente (frentes_trabalho.cor_hex) e já na ordem de
+    exibição da tela (frentes_trabalho.ordem, nome como desempate — mesmo
+    critério da 137ª rodada em frontend/index.html:_vexRenderFrentes()),
+    pro gráfico de barras (ver app/relatorio_graficos.grafico_frentes)."""
+    linhas = db.fetch_all(f"""
+        SELECT
+          COALESCE(f.nome, 'Sem frente de trabalho') AS frente,
+          f.cor_hex,
+          COALESCE(f.ordem, 0) AS ordem,
+          COUNT(*) AS total,
+          COUNT(*) FILTER (WHERE a.status IN (
+            'Concluída', 'Concluída com atraso', 'Concluída com esforço maior', 'Concluída com atraso e esforço maior'
+          )) AS concluidas
+        FROM atividades a
+        LEFT JOIN frentes_trabalho f ON f.id = a.frente_trabalho_id
+        WHERE a.projeto_id = {db.q(projeto_id)}
+        GROUP BY f.nome, f.cor_hex, f.ordem
+        ORDER BY ordem, frente
+    """)
+    return linhas
+
+
+def _pct_migracao_carregado(migracao_de_dados):
+    """Mesmo cálculo do tile cruzado "Migração — % carregado" de
+    renderVisaoExecutiva() — soma de meta (qtd_registros_estimada) × soma do
+    carregado no ÚLTIMO ciclo de cada item (mesmos números já usados na
+    tabela comparativa, nenhuma consulta nova)."""
+    itens = (migracao_de_dados or {}).get("itens") or []
+    total_estimado = sum(it.get("meta") or 0 for it in itens)
+    total_carregado = sum((it.get("ultimo_ciclo") or {}).get("carregado") or 0 for it in itens)
+    return round(100 * total_carregado / total_estimado) if total_estimado else None
+
+
+def _pct_rubricas_homologadas(folha_de_pagamento):
+    """Mesmo cálculo do tile cruzado "Rubricas — % homologadas"."""
+    funil = (folha_de_pagamento or {}).get("rubricas_funil") or {}
+    total = funil.get("total_levantadas") or 0
+    if not total:
+        return None
+    homologadas = next((s["total"] for s in funil.get("por_status") or [] if s["status"] == "Homologada"), 0)
+    return round(100 * homologadas / total)
+
+
 def _top_rubricas_divergentes(projeto_id, limite=LIMITE_TOP_RUBRICAS_DIVERGENTES):
     """"10 rubricas com mais divergências" (139ª rodada) — ranking pela
     QUANTIDADE de linhas divergentes (mesmo critério de impacto absoluto já
@@ -226,12 +394,30 @@ def coletar_dados_dashboard(projeto_id):
     deveria, pct_deveria = _pct_esperado(projeto_id, total_atividades)
     dados["kpis"]["deveria_estar_concluido_hoje"] = deveria
     dados["kpis"]["percentual_deveria_estar_concluido_hoje"] = pct_deveria
-    dados["kpis"]["aderencia_ao_prazo_pp"] = round(dados["kpis"]["percentual_concluido_geral"] - pct_deveria, 1)
+    # 140ª rodada — revisão visual: percentual_concluido_geral vem de
+    # coletar_dados_projeto() com 1 casa decimal (ex: 68,7%), mas a tela
+    # (calcularKpisCronograma()) arredonda pra inteiro ANTES de tirar a
+    # diferença (Math.round primeiro, subtração depois) — então "Aderência ao
+    # prazo" da tela nunca bate com round(68,7 - 48, 1) aqui. Pra o Resumo
+    # Geral do PDF mostrar os MESMOS números da tela (objetivo desta seção,
+    # ver _secao_resumo_geral), replica esse arredondamento: % inteiro antes,
+    # diferença de inteiros depois.
+    pct_concluido_int = round(100 * dados["kpis"]["concluidas"] / total_atividades) if total_atividades else 0
+    dados["kpis"]["percentual_concluido_geral_dashboard"] = pct_concluido_int
+    dados["kpis"]["aderencia_ao_prazo_pp"] = pct_concluido_int - pct_deveria
+    dados["kpis"]["marcos_pendentes"] = _marcos_pendentes_total(projeto_id)
 
     dados["financeiro"] = _financeiro(projeto_id)
     dados["pendencias"] = _pendencias(projeto_id)
     dados["requisitos_tr"] = _requisitos(projeto_id)
     dados["folha_de_pagamento"]["top_rubricas_divergentes"] = _top_rubricas_divergentes(projeto_id)
+
+    # 140ª rodada — dados extras só pro novo visual do Resumo Geral/Frentes
+    # (tiles coloridos + gráficos, ver docstring das seções no final do arquivo).
+    dados["_curva_s"] = _curva_s(projeto_id)
+    dados["_frentes_com_cor"] = _frentes_com_cor(projeto_id)
+    dados["kpis"]["pct_migracao_carregado"] = _pct_migracao_carregado(dados.get("migracao_de_dados"))
+    dados["kpis"]["pct_rubricas_homologadas"] = _pct_rubricas_homologadas(dados.get("folha_de_pagamento"))
     return dados
 
 
@@ -257,39 +443,124 @@ def _lista(flow, estilos, itens):
     flow.append(Spacer(1, 4))
 
 
+def _tile_row(flow, estilos, tiles, tam_valor=14, padding=9):
+    """tiles: lista de {"valor": str, "rotulo": str, "token": "ok"/"warn"/
+    "danger"/"accent"/"faint" (opcional, default "faint")} — monta uma linha
+    de tiles coloridos (valor em destaque + rótulo abaixo), mesmo efeito
+    visual dos quadros ".kpi"/".vex-status-tile" da Visão Executiva (ver
+    frontend/index.html), usando um Table de 1 linha com fundo por célula
+    (ReportLab não tem "card" nativo — a célula de tabela com padding e
+    cor de fundo é o jeito mais simples de reproduzir o mesmo efeito)."""
+    if not tiles:
+        return
+    n = len(tiles)
+    gap = 6  # pt — coluna "vazia" entre tiles, pro mesmo efeito de gap:10px dos .kpi da tela
+    largura_tile = (relatorio_pdf._LARGURA_UTIL - gap * (n - 1)) / n
+    col_widths = []
+    linha = []
+    for i, t in enumerate(tiles):
+        linha.append(Paragraph(
+            f'<font size="{tam_valor}" color="{_TOKEN_FG.get(t.get("token", "faint"), _TOKEN_FG["faint"])}">'
+            f'<b>{t["valor"]}</b></font><br/><font size="7" color="#5c6670">{t["rotulo"].upper()}</font>',
+            estilos["tabela_cel"],
+        ))
+        col_widths.append(largura_tile)
+        if i < n - 1:
+            linha.append("")
+            col_widths.append(gap)
+    tabela = Table([linha], colWidths=col_widths)
+    estilo = [
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), padding), ("RIGHTPADDING", (0, 0), (-1, -1), padding),
+        ("TOPPADDING", (0, 0), (-1, -1), padding), ("BOTTOMPADDING", (0, 0), (-1, -1), padding),
+    ]
+    for i, t in enumerate(tiles):
+        col = i * 2
+        estilo.append(("BACKGROUND", (col, 0), (col, 0), colors.HexColor(_TOKEN_BG.get(t.get("token", "faint"), _TOKEN_BG["faint"]))))
+    tabela.setStyle(TableStyle(estilo))
+    flow.append(tabela)
+    flow.append(Spacer(1, 10))
+
+
 def _secao_resumo_geral(flow, estilos, dados):
+    """140ª rodada — pedido do usuário: "Resumo geral trocar o que aparece na
+    imagem 2 pela imagem 3" (a imagem 3 era a própria Visão Executiva) — saiu
+    da tabela "Indicador | Valor" e virou o mesmo visual da tela: hero (2
+    números grandes) + sub-kpis + a fileira de tiles cruzados por módulo +
+    o gráfico de Avanço do Cronograma (Curva S)."""
     flow.append(Paragraph("Resumo Geral", estilos["h2"]))
     k = dados["kpis"]
     aderencia = k["aderencia_ao_prazo_pp"]
-    flow.append(Paragraph(
-        f"Progresso geral: <b>{k['percentual_concluido_geral']}%</b> concluído "
-        f"(esperado para hoje, segundo o plano: {k['percentual_deveria_estar_concluido_hoje']}%) — "
-        f"aderência ao prazo de <b>{_fmt_pp(aderencia)} p.p.</b>"
-        + (" (adiantado em relação ao plano)." if aderencia > 0 else
-           " (atrasado em relação ao plano)." if aderencia < 0 else " (exatamente dentro do plano)."),
-        estilos["corpo"],
-    ))
-    _tabela(flow, estilos, ["Indicador", "Valor"], [
-        ["Total de atividades", _fmt_int(k["total_atividades"])],
-        ["Concluídas", f"{_fmt_int(k['concluidas'])} ({k['percentual_concluido_geral']}%)"],
-        ["Em andamento", _fmt_int(k["em_andamento"])],
-        ["Atrasadas", _fmt_int(k["atrasadas"])],
-        ["Bloqueadas", _fmt_int(k["bloqueadas"])],
-        ["No caminho crítico (do plano)", _fmt_int(k["no_caminho_critico_do_plano"])],
-    ])
+
+    _tile_row(flow, estilos, [
+        {"valor": f"{k['percentual_concluido_geral_dashboard']}%", "rotulo": "Progresso geral do projeto",
+         "token": _token_progresso(aderencia)},
+        {"valor": f"{k['percentual_deveria_estar_concluido_hoje']}%", "rotulo": "% esperado atual", "token": "faint"},
+    ], tam_valor=20)
+
+    _tile_row(flow, estilos, [
+        {"valor": f"{_fmt_int(k['concluidas'])}/{_fmt_int(k['total_atividades'])}", "rotulo": "Atividades", "token": "faint"},
+        {"valor": _fmt_int(k["em_andamento"]), "rotulo": "Em andamento", "token": "faint"},
+        {"valor": _fmt_int(k["atrasadas"]), "rotulo": "Atrasadas", "token": _token_alerta(k["atrasadas"])},
+        {"valor": _fmt_int(k["no_caminho_critico_do_plano"]), "rotulo": "No caminho crítico", "token": _token_alerta(k["no_caminho_critico_do_plano"])},
+        {"valor": _fmt_int(k.get("marcos_pendentes")), "rotulo": "Marcos pendentes", "token": "faint"},
+    ], tam_valor=13)
+
+    riscos_pend_abertos = len(dados.get("riscos_abertos") or []) + ((dados.get("pendencias") or {}).get("abertas") or 0)
+    pct_mig, pct_rub = k.get("pct_migracao_carregado"), k.get("pct_rubricas_homologadas")
+    pct_fin = (dados.get("financeiro") or {}).get("pct_recebido") if (dados.get("financeiro") or {}).get("disponivel") else None
+    pct_req = (dados.get("requisitos_tr") or {}).get("pct_atendido") if (dados.get("requisitos_tr") or {}).get("disponivel") else None
+    # padding=6 (em vez do default 9): com 6 tiles na fileira, a largura útil de
+    # texto por tile fica justa demais com o padding default e algumas palavras
+    # ("HOMOLOGADAS", "+20,7 p.p.") quebram no meio — visto na revisão visual
+    # da 140ª rodada. Com padding=6 tudo cabe em uma linha.
+    _tile_row(flow, estilos, [
+        {"valor": f"{_fmt_pp(aderencia, casas=0)} p.p.", "rotulo": "Aderência ao prazo", "token": _token_aderencia_tile(aderencia)},
+        {"valor": f"{pct_mig}%" if pct_mig is not None else "—", "rotulo": "Migração — % carregado", "token": _token_limiar(pct_mig)},
+        {"valor": f"{pct_rub}%" if pct_rub is not None else "—", "rotulo": "Rubricas — % homologadas", "token": _token_limiar(pct_rub)},
+        {"valor": f"{pct_fin}%" if pct_fin is not None else "—", "rotulo": "Financeiro — % recebido", "token": _token_limiar(pct_fin)},
+        {"valor": _fmt_int(riscos_pend_abertos), "rotulo": "Riscos + Pendências em aberto", "token": _token_alerta(riscos_pend_abertos)},
+        {"valor": f"{pct_req}%" if pct_req is not None else "—", "rotulo": "Requisitos — % atendidos", "token": _token_limiar_requisitos(pct_req)},
+    ], tam_valor=13, padding=6)
+
+    curva = dados.get("_curva_s")
+    flow.append(Paragraph("Avanço do cronograma — planejado × realizado (acumulado)", estilos["h3"]))
+    if not curva:
+        flow.append(Paragraph("Sem atividades com prazo previsto suficiente para montar a curva de avanço.", estilos["corpo"]))
+    else:
+        img = relatorio_pdf._imagem_flowable(relatorio_graficos.grafico_curva_s(
+            curva["meses"], curva["planejado"], curva["realizado"], curva["hoje_mes"],
+        ))
+        if img is not None:
+            flow.append(img)
+        if curva.get("concluidas_sem_data"):
+            n = curva["concluidas_sem_data"]
+            flow.append(Paragraph(
+                f"Atenção: {n} atividade{'s' if n>1 else ''} concluída{'s' if n>1 else ''} sem Data Fim Real preenchida "
+                f"não entra{'m' if n>1 else ''} nesta curva.",
+                estilos["rodape"],
+            ))
+        flow.append(Spacer(1, 6))
 
 
 def _secao_frentes(flow, estilos, dados):
-    flow.append(Paragraph("Progresso por Frente de Trabalho", estilos["h2"]))
-    frentes = dados.get("resumo_por_frente") or []
+    """140ª rodada — pedido do usuário: "NA frente de trabalho usar o gráfico
+    como na imagem 4" — saiu da tabela e virou o mesmo gráfico de barras
+    horizontais (1 por frente, cor própria da frente) da Visão Executiva."""
+    titulo = Paragraph("Progresso por Frente de Trabalho", estilos["h2"])
+    frentes = [f for f in (dados.get("_frentes_com_cor") or []) if f["total"]]
     if not frentes:
+        flow.append(titulo)
         flow.append(Paragraph("Nenhuma frente de trabalho cadastrada.", estilos["corpo"]))
         return
-    _tabela(flow, estilos, ["Frente", "Total", "Concluídas", "Em andamento", "Atrasadas", "% concluído"], [
-        [f["frente"], _fmt_int(f["total"]), _fmt_int(f["concluidas"]), _fmt_int(f["em_andamento"]),
-         _fmt_int(f["atrasadas"]), f"{f['percentual_concluido']}%"]
-        for f in frentes
-    ])
+    img = relatorio_pdf._imagem_flowable(relatorio_graficos.grafico_frentes(frentes))
+    if img is not None:
+        # KeepTogether: sem isso o título pode cair sozinho no fim de uma
+        # página e o gráfico "pular" pra próxima (visto na revisão visual da
+        # 140ª rodada).
+        flow.append(KeepTogether([titulo, img, Spacer(1, 6)]))
+    else:
+        flow.append(titulo)
 
 
 def _secao_atrasos_bloqueios(flow, estilos, dados):
@@ -321,7 +592,7 @@ def _secao_atividades_master(flow, estilos, dados):
     master = dados.get("atividades_master") or []
     if not master:
         flow.append(Paragraph(
-            "Nenhuma atividade foi marcada como ★ atividade master (entregável mestre do projeto, "
+            "Nenhuma atividade foi marcada como “atividade master” (entregável mestre do projeto, "
             "ex: Folha definitiva) — sem essa marcação não é possível estimar uma data de conclusão do projeto.",
             estilos["corpo"],
         ))
@@ -460,8 +731,15 @@ def _secao_folha(flow, estilos, dados):
     if not funil.get("total_levantadas"):
         flow.append(Paragraph("Nenhuma rubrica levantada ainda.", estilos["corpo"]))
         return
-    flow.append(Paragraph(f"Total de rubricas levantadas: <b>{_fmt_int(funil['total_levantadas'])}</b>.", estilos["corpo"]))
-    _tabela(flow, estilos, ["Status", "Total"], [[s["status"], _fmt_int(s["total"])] for s in funil["por_status"]])
+    # 140ª rodada — pedido do usuário: "NA folha de pagamento apresentar o
+    # quadro cmo na imagem 5" (a imagem 5 era o próprio card "Folha de
+    # Pagamento" da Visão Executiva — fileira de tiles, sem cor semântica,
+    # igual ao card #vex-folha da tela) — saiu da tabela "Status | Total".
+    _tile_row(flow, estilos, [
+        {"valor": _fmt_int(funil["total_levantadas"]), "rotulo": "Total levantadas", "token": "faint"},
+    ] + [
+        {"valor": _fmt_int(s["total"]), "rotulo": s["status"], "token": "faint"} for s in funil["por_status"]
+    ], tam_valor=13, padding=6)  # padding=6: rótulos de status (ex: "Em levantamento") são longos
 
     if not folha.get("comparacao_disponivel"):
         flow.append(Paragraph(

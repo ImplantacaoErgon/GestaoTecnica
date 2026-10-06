@@ -64,6 +64,105 @@ def _fig_para_png(fig, dpi=170):
     return buf
 
 
+# 140ª rodada — pedido do usuário (verbatim, sobre o PDF do Dashboard criado na
+# 139ª rodada): "Resumo geral trocar o que aparece na imagem 2 pela imagem 3"
+# — a imagem 3 era a própria tela da Visão Executiva, com a Curva S (Avanço
+# do cronograma — planejado × realizado). Replica fielmente
+# frontend/index.html:_vexRenderCurvaS() (dados vindos de
+# app/dashboard_pdf._curva_s(), porta Python de _vexCurvaSCalcular()): 1 linha
+# cinza (Planejado, só contexto) + 1 linha laranja --series-2 (Realizado, é o
+# destaque — mesmo critério de "uma série é o ponto, a outra é contexto" da
+# skill de dataviz), com uma linha vertical tracejada em "hoje" quando ainda
+# sobra pelo menos 1 mês de plano depois dela.
+def grafico_curva_s(meses, planejado, realizado, hoje_mes):
+    if not meses or len(meses) < 2:
+        return None
+    n = len(meses)
+    x = list(range(n))
+    fig, ax = plt.subplots(figsize=(7.4, 2.9))
+
+    try:
+        hoje_idx = meses.index(hoje_mes)
+    except ValueError:
+        hoje_idx = -1
+    if 0 <= hoje_idx < n - 1:
+        ax.axvline(hoje_idx, color=_COR_TEXT_FAINT, linewidth=1, linestyle=(0, (3, 3)), zorder=1)
+        ax.text(hoje_idx, 103, "hoje", ha="center", va="bottom", fontsize=7.6, color=_COR_TEXT_FAINT)
+
+    ax.plot(x, planejado, color=_COR_TEXT_FAINT, linewidth=2, zorder=3, solid_capstyle="round")
+    ax.plot(x, realizado, color=_COR_SERIES_2, linewidth=2.5, zorder=4, solid_capstyle="round")
+    ax.scatter([n - 1], [planejado[-1]], color=_COR_TEXT_FAINT, s=26, zorder=5, edgecolor="white", linewidth=1.2)
+    ax.scatter([n - 1], [realizado[-1]], color=_COR_SERIES_2, s=26, zorder=5, edgecolor="white", linewidth=1.2)
+
+    y_plan, y_real = planejado[-1], realizado[-1]
+    if abs(y_plan - y_real) < 6:
+        meio = (y_plan + y_real) / 2
+        y_plan, y_real = (meio + 3, meio - 3) if planejado[-1] >= realizado[-1] else (meio - 3, meio + 3)
+    # bbox branco + zorder acima da linha: sem isso, quando o trecho final da série
+    # é "chato" (sem variação até o fim), a própria linha passa por cima do rótulo
+    # e cria um efeito de "texto riscado" (visto na revisão da 140ª rodada).
+    _rotulo_bbox = dict(facecolor="white", edgecolor="none", pad=1.5)
+    ax.text(n - 1.15, y_plan, f"{planejado[-1]}%", ha="right", va="center", fontsize=8, fontweight="bold",
+            color=_COR_TEXT_MUTED, zorder=6, bbox=_rotulo_bbox)
+    ax.text(n - 1.15, y_real, f"{realizado[-1]}%", ha="right", va="center", fontsize=8, fontweight="bold",
+            color=_COR_SERIES_2, zorder=6, bbox=_rotulo_bbox)
+
+    passo = max(1, -(-n // 8))  # ceil(n/8)
+    xticks = [i for i in x if i == 0 or i == n - 1 or i % passo == 0]
+    ax.set_xticks(xticks)
+    ax.set_xticklabels([_formatar_mes(meses[i]) for i in xticks], fontsize=8, color=_COR_TEXT_FAINT)
+    ax.set_yticks([0, 25, 50, 75, 100])
+    ax.set_yticklabels([f"{v}%" for v in (0, 25, 50, 75, 100)], fontsize=8, color=_COR_TEXT_FAINT)
+    ax.set_ylim(-4, 112)
+    for spine in ("top", "right", "left"):
+        ax.spines[spine].set_visible(False)
+    ax.spines["bottom"].set_color(_COR_BORDER)
+    ax.grid(axis="y", color=_COR_BORDER, linewidth=0.6, zorder=0)
+    ax.set_axisbelow(True)
+    ax.tick_params(left=False, bottom=False)
+
+    handles = [Patch(color=_COR_TEXT_FAINT, label="Planejado"), Patch(color=_COR_SERIES_2, label="Realizado")]
+    ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, -0.22), ncol=2, frameon=False, fontsize=8.5)
+    fig.tight_layout()
+    return _fig_para_png(fig)
+
+
+# 140ª rodada — pedido do usuário: "NA frente de trabalho usar o gráfico como
+# na imagem 4" — a imagem 4 era o próprio card "Progresso por Frente de
+# Trabalho" da Visão Executiva (ver frontend/index.html:_vexRenderFrentes()):
+# 1 barra horizontal por frente, com a cor PRÓPRIA da frente (frentes_trabalho.
+# cor_hex, identidade categórica real, cadastrada pelo usuário — não um token
+# de status), largura = % concluído, rótulo "concluídas/total" no fim da barra.
+def grafico_frentes(frentes):
+    """frentes: lista (JÁ na ordem a desenhar, de cima pra baixo — mesma
+    ordem de frentes_trabalho.ordem usada na tela) de
+    {"frente", "cor_hex", "total", "concluidas"}."""
+    if not frentes:
+        return None
+    n = len(frentes)
+    nomes = [f["frente"] for f in frentes]
+    pcts = [100 * f["concluidas"] / f["total"] if f["total"] else 0 for f in frentes]
+    cores = [f.get("cor_hex") or _COR_SERIES_1 for f in frentes]
+    rotulos_fim = [f"{_fmt_int(f['concluidas'])}/{_fmt_int(f['total'])}" for f in frentes]
+
+    altura = max(2.0, 0.46 * n + 0.5)
+    fig, ax = plt.subplots(figsize=(7.4, altura))
+    y = list(range(n))
+    ax.barh(y, pcts, color=cores, height=0.58, zorder=3)
+    for i, (p, rot) in enumerate(zip(pcts, rotulos_fim)):
+        ax.text(min(p, 100) + 2, i, rot, va="center", fontsize=8, color=_COR_TEXT)
+    ax.set_yticks(y)
+    ax.set_yticklabels(nomes, fontsize=8.6, color=_COR_TEXT)
+    ax.invert_yaxis()  # primeiro item da lista fica no topo, igual à tela
+    ax.set_xlim(0, 112)
+    ax.set_xticks([])
+    for spine in ("top", "right", "bottom", "left"):
+        ax.spines[spine].set_visible(False)
+    ax.tick_params(left=False, bottom=False)
+    fig.tight_layout()
+    return _fig_para_png(fig)
+
+
 def grafico_evolucao_migracao(nome_item, ciclos):
     """ciclos: lista em ordem CRONOLÓGICA (mais antigo -> mais recente, até 5) de
     {numero, carregado, rejeitado, extraido}. Replica o gráfico de barras
