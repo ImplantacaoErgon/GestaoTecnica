@@ -147,7 +147,8 @@ _NAO_PROGRAMADA_CARVE_OUT_SQL = f"(UPPER(situacao) IN {_SITUACOES_NAO_PROGRAMADA
 
 def _where_filtros(projeto_id=None, mesano=None, situacao=None, tipo_comparacao=None,
                     tiporubr=None, empresa=None, tipovinc=None, rubrica_ergon=None,
-                    verba_consist=None, busca=None, so_divergentes=False):
+                    verba_consist=None, matricula=None, numfunc=None, setorfunc=None,
+                    busca=None, so_divergentes=False):
     cond = []
     if projeto_id:
         cond.append(f"projeto_id = {db.q(projeto_id)}")
@@ -176,6 +177,20 @@ def _where_filtros(projeto_id=None, mesano=None, situacao=None, tipo_comparacao=
         cond.append(f"rubrica_ergon = {db.q(rubrica_ergon)}")
     if verba_consist:
         cond.append(f"verba_consist = {db.q(verba_consist)}")
+    # 141ª rodada — pedido do usuário: "incluir como campos de filtros
+    # Matrícula, Número Funcional, Setor Funcional". Matrícula/Nº funcional
+    # são texto livre (ILIKE), mesmo critério que já valia pra matrícula
+    # dentro de `busca` — só que agora como campo dedicado (não precisa
+    # digitar nome/CPF/rubrica junto pra achar). Setor Funcional é igualdade
+    # exata, mesmo critério de Empresa/TipoVINC: o combo no front-end só
+    # oferece valor que já existe de verdade nos dados (ver resumo() abaixo
+    # — setores_disponiveis).
+    if matricula:
+        cond.append(f"matricula ILIKE {db.q(f'%{matricula}%')}")
+    if numfunc:
+        cond.append(f"numfunc ILIKE {db.q(f'%{numfunc}%')}")
+    if setorfunc:
+        cond.append(f"setorfunc = {db.q(setorfunc)}")
     if so_divergentes:
         cond.append("UPPER(situacao) <> 'NÃO DIVERGENTE'")
     if busca:
@@ -301,6 +316,13 @@ def resumo(projeto_id=None, **filtros):
     tipovinc = db.fetch_all(f"""
         SELECT DISTINCT tipovinc FROM comparacao_folha{where_projeto}{conector}tipovinc IS NOT NULL ORDER BY 1
     """)
+    # 141ª rodada — lista de Setor Funcional disponíveis, pro novo filtro
+    # cf-f-setorfunc (mesmo critério de empresas/tipovinc acima: calculada
+    # a partir do PROJETO inteiro, ignorando o filtro atual, pra não esconder
+    # opção nenhuma do combo).
+    setores = db.fetch_all(f"""
+        SELECT DISTINCT setorfunc FROM comparacao_folha{where_projeto}{conector}setorfunc IS NOT NULL ORDER BY 1
+    """)
     rubricas_ergon = db.fetch_all(f"""
         SELECT rubrica_ergon AS codigo, MAX(rubrica_nome_ergon) AS nome
         FROM comparacao_folha{where_projeto}{conector}rubrica_ergon IS NOT NULL
@@ -328,6 +350,7 @@ def resumo(projeto_id=None, **filtros):
         "tipos_rubrica_disponiveis": [t["tiporubr"] for t in tipos_rubrica],
         "empresas_disponiveis": [e["empresa_consist"] for e in empresas],
         "tipovinc_disponiveis": [t["tipovinc"] for t in tipovinc],
+        "setores_disponiveis": [s["setorfunc"] for s in setores],
         "rubricas_ergon_disponiveis": rubricas_ergon,
         "verbas_consist_disponiveis": verbas_consist,
         "tipos_comparacao_disponiveis": [t["tipo_comparacao"] for t in tipos_comparacao],

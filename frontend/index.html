@@ -1554,6 +1554,17 @@
       <select id="cf-f-tipovinc"><option value="">Tipo de vínculo (todos)</option></select>
       <select id="cf-f-rubrica-ergon" title="Só lista rubricas que já aparecem na Comparação (código válido)."><option value="">Rubrica Ergon (todas)</option></select>
       <select id="cf-f-verba-consist" title="Só lista verbas que já aparecem na Comparação (código válido)."><option value="">Verba Consist (todas)</option></select>
+      <!-- 141ª rodada — pedido do usuário: "incluir como campos de filtros
+           Matrícula, Número Funcional, Setor Funcional". Matrícula/Nº
+           funcional viram <input> de texto livre (ILIKE), mesmo critério já
+           usado dentro de cf-f-busca pra matrícula — só que como campo
+           dedicado, sem precisar digitar nome/CPF/rubrica junto. Setor
+           Funcional vira <select> (mesmo critério de Empresa/TipoVINC: só
+           lista valor que já existe de verdade nos dados, populado em
+           cfCarregarResumo() a partir de resumo().setores_disponiveis). -->
+      <input type="text" id="cf-f-matricula" placeholder="Matrícula" style="max-width:130px;">
+      <input type="text" id="cf-f-numfunc" placeholder="Nº funcional" style="max-width:130px;">
+      <select id="cf-f-setorfunc"><option value="">Setor funcional (todos)</option></select>
       <input type="text" id="cf-f-busca" placeholder="Buscar por matrícula, nome, CPF, rubrica…">
       <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;white-space:nowrap;">
         <input type="checkbox" id="cf-f-divergentes"> Só divergentes
@@ -10817,6 +10828,9 @@ function cfFiltrosAtuais(){
     tipovinc: $("cf-f-tipovinc").value || null,
     rubrica_ergon: $("cf-f-rubrica-ergon").value || null,
     verba_consist: $("cf-f-verba-consist").value || null,
+    matricula: $("cf-f-matricula").value.trim() || null,
+    numfunc: $("cf-f-numfunc").value.trim() || null,
+    setorfunc: $("cf-f-setorfunc").value || null,
     busca: $("cf-f-busca").value.trim() || null,
     so_divergentes: $("cf-f-divergentes").checked,
   };
@@ -11088,6 +11102,7 @@ async function cfCarregarResumo(){
   cfPopularSelect("cf-f-tiporubr", "Tipo de rubrica (todos)", r.tipos_rubrica_disponiveis);
   cfPopularSelect("cf-f-empresa", "Empresa (todas)", r.empresas_disponiveis);
   cfPopularSelect("cf-f-tipovinc", "Tipo de vínculo (todos)", r.tipovinc_disponiveis);
+  cfPopularSelect("cf-f-setorfunc", "Setor funcional (todos)", r.setores_disponiveis);
   cfPopularSelect("cf-f-rubrica-ergon", "Rubrica Ergon (todas)",
     (r.rubricas_ergon_disponiveis||[]).map(x=>({valor:x.codigo, rotulo:x.nome?`${x.codigo} — ${x.nome}`:x.codigo})));
   cfPopularSelect("cf-f-verba-consist", "Verba Consist (todas)",
@@ -11378,7 +11393,7 @@ function abrirDetalheComparacaoFolha(id){
 }
 
 function wireComparacaoFolhaPane(){
-  ["cf-f-mesano","cf-f-situacao","cf-f-tiporubr","cf-f-empresa","cf-f-tipovinc",
+  ["cf-f-mesano","cf-f-situacao","cf-f-tiporubr","cf-f-empresa","cf-f-tipovinc","cf-f-setorfunc",
    "cf-f-rubrica-ergon","cf-f-verba-consist","cf-f-divergentes"].forEach(id=>{
     $(id).addEventListener("change", ()=>{ CF_PAGINA = 1; cfCarregarResumo(); cfCarregarLista(false); });
   });
@@ -11386,6 +11401,20 @@ function wireComparacaoFolhaPane(){
   $("cf-f-busca").addEventListener("input", ()=>{
     clearTimeout(cfBuscaTimer);
     cfBuscaTimer = setTimeout(()=>{ CF_PAGINA = 1; cfCarregarLista(false); }, 350);
+  });
+  // 141ª rodada — Matrícula/Nº funcional: mesmo padrão de cf-f-busca (texto
+  // livre, debounce de 350ms, só recarrega a lista — não o resumo/KPIs —
+  // igual já era feito pra busca, por ser um campo de texto que muda a cada
+  // tecla digitada).
+  let cfMatriculaTimer = null;
+  $("cf-f-matricula").addEventListener("input", ()=>{
+    clearTimeout(cfMatriculaTimer);
+    cfMatriculaTimer = setTimeout(()=>{ CF_PAGINA = 1; cfCarregarLista(false); }, 350);
+  });
+  let cfNumfuncTimer = null;
+  $("cf-f-numfunc").addEventListener("input", ()=>{
+    clearTimeout(cfNumfuncTimer);
+    cfNumfuncTimer = setTimeout(()=>{ CF_PAGINA = 1; cfCarregarLista(false); }, 350);
   });
   $("cf-carregar-mais").addEventListener("click", ()=>{ CF_PAGINA += 1; cfCarregarLista(true); });
   $("cf-exportar").addEventListener("click", ()=>{

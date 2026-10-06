@@ -2928,6 +2928,11 @@ def create_app():
             "tipovinc": request.args.get("tipovinc") or None,
             "rubrica_ergon": request.args.get("rubrica_ergon") or None,
             "verba_consist": request.args.get("verba_consist") or None,
+            # 141ª rodada: Matrícula/Nº Funcional (texto livre) e Setor
+            # Funcional (igualdade exata) — ver comparacao_folha._where_filtros().
+            "matricula": request.args.get("matricula") or None,
+            "numfunc": request.args.get("numfunc") or None,
+            "setorfunc": request.args.get("setorfunc") or None,
             "busca": request.args.get("busca") or None,
             "so_divergentes": request.args.get("so_divergentes") == "1",
         }
