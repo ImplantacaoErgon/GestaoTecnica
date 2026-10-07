@@ -3,6 +3,7 @@ import csv
 import io
 import json
 import os
+import signal
 import threading
 import traceback
 import uuid
@@ -884,44 +885,61 @@ def aplicar_percentual_inicial(atual, data):
 # funcionam de qualquer thread (ver comentário de threading em db.py: cada
 # chamada abre seu próprio subprocess `psql`, sem estado compartilhado).
 #
-# 143ª rodada — registro das cargas que, agora mesmo, têm um processo
-# `psql` aberto (ver db.execute_stream), pra dar suporte ao botão
-# "Cancelar": carga_id -> {"proc": <Popen>, "cancelado": {"valor": bool}}.
-# É um dict em memória DESTE processo (não uma coluna no banco) porque o
-# que o endpoint de cancelar precisa alcançar é o objeto Popen em si, que
-# só existe na memória da thread que iniciou a carga — por isso também não
-# sobrevive a um redeploy/restart do servidor, mas nesse caso a própria
-# carga já teria morrido com ele, então não há nada a cancelar. Protegido
-# por lock porque é lido/escrito tanto pela thread da carga (ao registrar e
-# ao liberar, no fim) quanto pela requisição HTTP do botão "Cancelar", em
-# paralelo.
-_CARGAS_COMPARACAO_FOLHA_PROCESSOS = {}
-_CARGAS_COMPARACAO_FOLHA_PROCESSOS_LOCK = threading.Lock()
+# 143ª/144ª rodada — suporte ao botão "Cancelar" de uma carga em
+# andamento. A 143ª rodada guardava o processo `psql` (Popen) num dict em
+# MEMÓRIA deste processo Python — e quebrou em produção (usuário reportou,
+# verbatim: "roda desde as 14h03 e não permite cancelar"): o Dockerfile
+# sobe `gunicorn -w 4`, ou seja, QUATRO processos do sistema operacional
+# separados, cada um com sua própria memória. A carga roda numa thread
+# dentro do worker que recebeu o POST /importar/upload — mas o POST
+# .../cancelar pode cair em QUALQUER um dos 4 (gunicorn distribui as
+# requisições entre eles), e só o worker original tinha aquele Popen na
+# memória; os outros três sempre devolviam 404 ("não está em andamento"),
+# mesmo a carga estando genuinamente ativa.
+#
+# 144ª rodada corrige guardando o que o botão precisa (o PID do processo
+# `psql` e se um cancelamento foi pedido) na própria tabela
+# cargas_comparacao_folha (colunas `pid`/`cancelamento_solicitado`, ver
+# migration_041) — o banco é a única coisa que os 4 workers realmente
+# compartilham. Cancelar vira: ler o PID da carga no banco (de QUALQUER
+# worker) e mandar SIGTERM pra esse PID diretamente via os.kill — os 4
+# workers são processos-IRMÃOS no mesmo container/SO (filhos do mesmo
+# gunicorn), então o PID é alcançável de qualquer um deles, sem precisar
+# que seja o mesmo worker que o criou.
+def _ao_iniciar_processo_carga_comparacao_folha(carga_id, proc):
+    """Chamado por db.execute_stream logo depois de abrir o `psql` desta
+    carga — grava o PID no banco e, se um cancelamento já tinha sido
+    pedido ENQUANTO a carga ainda estava na fase de leitura/detecção da
+    planilha (antes de existir processo pra matar), aplica agora, na
+    hora, em vez de deixar a carga inteira rodar sem motivo."""
+    linha = db.execute_returning_one(
+        f"UPDATE cargas_comparacao_folha SET pid = {db.q(proc.pid)} "
+        f"WHERE id = {db.q(carga_id)} RETURNING cancelamento_solicitado"
+    )
+    if linha and linha.get("cancelamento_solicitado"):
+        try:
+            os.kill(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
 
 
-def _registrar_processo_carga_comparacao_folha(carga_id, proc, cancelado):
-    with _CARGAS_COMPARACAO_FOLHA_PROCESSOS_LOCK:
-        _CARGAS_COMPARACAO_FOLHA_PROCESSOS[carga_id] = {"proc": proc, "cancelado": cancelado}
-
-
-def _liberar_processo_carga_comparacao_folha(carga_id):
-    with _CARGAS_COMPARACAO_FOLHA_PROCESSOS_LOCK:
-        _CARGAS_COMPARACAO_FOLHA_PROCESSOS.pop(carga_id, None)
+def _foi_cancelado_carga_comparacao_folha(carga_id):
+    linha = db.fetch_one(f"SELECT cancelamento_solicitado FROM cargas_comparacao_folha WHERE id = {db.q(carga_id)}")
+    return bool(linha and linha.get("cancelamento_solicitado"))
 
 
 def _processar_carga_comparacao_folha_picker(
     carga_id, projeto_id, file_id, mime_type, access_token, resource_key,
     nome_arquivo, usuario_id, usuario_nome, usuario_email,
 ):
-    cancelado = {"valor": False}
     try:
         conteudo = google_drive.baixar_arquivo_selecionado(
             file_id, mime_type, access_token, nome_arquivo, resource_key=resource_key,
         )
         resultado = comparacao_folha_import.importar_comparacao_folha(
             projeto_id, conteudo,
-            ao_iniciar_processo=lambda proc: _registrar_processo_carga_comparacao_folha(carga_id, proc, cancelado),
-            foi_cancelado=lambda: cancelado["valor"],
+            ao_iniciar_processo=lambda proc: _ao_iniciar_processo_carga_comparacao_folha(carga_id, proc),
+            foi_cancelado=lambda: _foi_cancelado_carga_comparacao_folha(carga_id),
         )
     except google_drive.GoogleDriveError as e:
         _marcar_carga_comparacao_folha_erro(carga_id, str(e))
@@ -935,8 +953,6 @@ def _processar_carga_comparacao_folha_picker(
     except Exception as e:
         _marcar_carga_comparacao_folha_erro(carga_id, f'Falha ao importar a planilha "{nome_arquivo}": {e}')
         return
-    finally:
-        _liberar_processo_carga_comparacao_folha(carga_id)
 
     try:
         db.execute(
@@ -1011,12 +1027,11 @@ def _marcar_carga_comparacao_folha_cancelada(carga_id):
 def _processar_carga_comparacao_folha_upload(
     carga_id, projeto_id, conteudo, nome_arquivo, usuario_id, usuario_nome, usuario_email,
 ):
-    cancelado = {"valor": False}
     try:
         resultado = comparacao_folha_import.importar_comparacao_folha(
             projeto_id, conteudo,
-            ao_iniciar_processo=lambda proc: _registrar_processo_carga_comparacao_folha(carga_id, proc, cancelado),
-            foi_cancelado=lambda: cancelado["valor"],
+            ao_iniciar_processo=lambda proc: _ao_iniciar_processo_carga_comparacao_folha(carga_id, proc),
+            foi_cancelado=lambda: _foi_cancelado_carga_comparacao_folha(carga_id),
         )
     except comparacao_folha_import.ComparacaoFolhaImportError as e:
         _marcar_carga_comparacao_folha_erro(carga_id, f'{e} (arquivo enviado: "{nome_arquivo}")')
@@ -1027,8 +1042,6 @@ def _processar_carga_comparacao_folha_upload(
     except Exception as e:
         _marcar_carga_comparacao_folha_erro(carga_id, f'Falha ao importar a planilha "{nome_arquivo}": {e}')
         return
-    finally:
-        _liberar_processo_carga_comparacao_folha(carga_id)
 
     try:
         db.execute(
@@ -3246,33 +3259,47 @@ def create_app():
 
     @app.post("/api/comparacao-folha/carga/<carga_id>/cancelar")
     def cancelar_carga_comparacao_folha(carga_id):
-        """143ª rodada — botão "Cancelar" numa carga em andamento (upload
-        manual ou Google Picker). Só funciona enquanto o processo `psql`
-        daquela carga ainda estiver registrado em memória
-        (_CARGAS_COMPARACAO_FOLHA_PROCESSOS, ver comentário grande acima de
-        _processar_carga_comparacao_folha_picker) — se a carga ainda está
-        lendo/detectando a planilha (antes de começar a gravar no banco),
-        ou se já tinha terminado, devolve 404: não tem o que cancelar agora
-        (no primeiro caso, o front-end tenta de novo pouco depois).
+        """143ª/144ª rodada — botão "Cancelar" numa carga em andamento
+        (upload manual ou Google Picker). 144ª rodada: lê e grava o estado
+        no BANCO (colunas pid/cancelamento_solicitado em
+        cargas_comparacao_folha, migration_041), não mais num dict em
+        memória — o Render roda 4 processos gunicorn separados (ver
+        Dockerfile, `-w 4`) e este endpoint pode cair em qualquer um deles,
+        diferente do worker que iniciou a carga; o banco é a única coisa
+        que todos compartilham (ver comentário grande acima de
+        _ao_iniciar_processo_carga_comparacao_folha pro histórico do bug).
 
-        Terminar o processo (SIGTERM) é seguro mesmo no meio da gravação:
-        todo o DELETE+COPY roda dentro de uma única transação (ver
+        Terminar o processo (SIGTERM, via PID direto — os workers são
+        processos-irmãos no mesmo container, então um PID aberto por um é
+        alcançável pelos outros) é seguro mesmo no meio da gravação: todo
+        o DELETE+COPY roda dentro de uma única transação (ver
         comparacao_folha_import.importar_comparacao_folha) — fechar a
         conexão antes do COMMIT faz o PRÓPRIO Postgres desfazer (rollback)
         o que ainda não tinha sido confirmado, preservando intactos os
         dados que já existiam daquele mês."""
-        with _CARGAS_COMPARACAO_FOLHA_PROCESSOS_LOCK:
-            info = _CARGAS_COMPARACAO_FOLHA_PROCESSOS.get(carga_id)
-        if not info:
+        carga = db.fetch_one(f"SELECT status, pid FROM cargas_comparacao_folha WHERE id = {db.q(carga_id)}")
+        if not carga or carga["status"] != "em_andamento":
+            return jsonify({"erro": "Essa carga não está mais em andamento — nada para cancelar."}), 404
+
+        db.execute(
+            f"UPDATE cargas_comparacao_folha SET cancelamento_solicitado = true WHERE id = {db.q(carga_id)}"
+        )
+        if not carga.get("pid"):
+            # Ainda está lendo/detectando a planilha, antes de abrir o psql
+            # (ver _ao_iniciar_processo_carga_comparacao_folha) — não tem
+            # processo pra matar AINDA, mas a flag já foi gravada: assim
+            # que o processo for aberto, ele mesmo confere a flag e se
+            # encerra na hora, sem rodar a carga inteira à toa.
             return jsonify({
-                "erro": "Essa carga não está mais em andamento, ou ainda não chegou na "
-                "etapa de gravação no banco — tente de novo em alguns segundos."
-            }), 404
-        info["cancelado"]["valor"] = True
+                "ok": True,
+                "aviso": "Ainda lendo o arquivo — o cancelamento será aplicado assim que "
+                "a gravação no banco começar.",
+            }), 202
+
         try:
-            info["proc"].terminate()
-        except Exception:
-            pass
+            os.kill(int(carga["pid"]), signal.SIGTERM)
+        except ProcessLookupError:
+            pass  # processo já tinha terminado sozinho nesse meio-tempo
         return jsonify({"ok": True}), 202
 
     # ------------------------------------------------------------------ marcos
