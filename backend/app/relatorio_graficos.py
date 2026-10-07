@@ -74,7 +74,7 @@ def _fig_para_png(fig, dpi=170):
 # destaque — mesmo critério de "uma série é o ponto, a outra é contexto" da
 # skill de dataviz), com uma linha vertical tracejada em "hoje" quando ainda
 # sobra pelo menos 1 mês de plano depois dela.
-def grafico_curva_s(meses, planejado, realizado, hoje_mes):
+def grafico_curva_s(meses, planejado, realizado, hoje_mes, hoje_data=None):
     if not meses or len(meses) < 2:
         return None
     n = len(meses)
@@ -87,7 +87,15 @@ def grafico_curva_s(meses, planejado, realizado, hoje_mes):
         hoje_idx = -1
     if 0 <= hoje_idx < n - 1:
         ax.axvline(hoje_idx, color=_COR_TEXT_FAINT, linewidth=1, linestyle=(0, (3, 3)), zorder=1)
-        ax.text(hoje_idx, 103, "hoje", ha="center", va="bottom", fontsize=7.6, color=_COR_TEXT_FAINT)
+        # 142ª rodada — pedido do usuário: mostrar a data ao lado de "hoje"
+        # (só "hoje" sozinho não dizia qual dia, pra quem olha o PDF depois).
+        # bbox branco: o rótulo ficou bem mais largo que só "hoje", e sem o
+        # fundo branco a linha tracejada passa visível pelos vãos entre os
+        # caracteres (ex: entre "07" e "/10") — mesmo cuidado já tomado nos
+        # rótulos de valor no fim das linhas, um pouco acima.
+        rotulo_hoje = f"hoje ({hoje_data})" if hoje_data else "hoje"
+        ax.text(hoje_idx, 103, rotulo_hoje, ha="center", va="bottom", fontsize=7.6, color=_COR_TEXT_FAINT,
+                zorder=6, bbox=dict(facecolor="white", edgecolor="none", pad=1.5))
 
     ax.plot(x, planejado, color=_COR_TEXT_FAINT, linewidth=2, zorder=3, solid_capstyle="round")
     ax.plot(x, realizado, color=_COR_SERIES_2, linewidth=2.5, zorder=4, solid_capstyle="round")

@@ -304,7 +304,8 @@ def _curva_s(projeto_id):
         1 for a in atividades if a["status"] in concluida_familia and not a.get("dtfim_real")
     )
     return {"meses": janela, "planejado": planejado, "realizado": realizado,
-            "hoje_mes": hoje_iso[:7], "concluidas_sem_data": concluidas_sem_data}
+            "hoje_mes": hoje_iso[:7], "hoje_data": _fmt_data_br(hoje),
+            "concluidas_sem_data": concluidas_sem_data}
 
 
 def _frentes_com_cor(projeto_id):
@@ -529,7 +530,7 @@ def _secao_resumo_geral(flow, estilos, dados):
         flow.append(Paragraph("Sem atividades com prazo previsto suficiente para montar a curva de avanço.", estilos["corpo"]))
     else:
         img = relatorio_pdf._imagem_flowable(relatorio_graficos.grafico_curva_s(
-            curva["meses"], curva["planejado"], curva["realizado"], curva["hoje_mes"],
+            curva["meses"], curva["planejado"], curva["realizado"], curva["hoje_mes"], curva.get("hoje_data"),
         ))
         if img is not None:
             flow.append(img)
