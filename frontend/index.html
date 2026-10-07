@@ -10970,6 +10970,31 @@ async function cfVerificarCargaAtual(){
   if(carga && carga.status === "em_andamento") cfIniciarPollingCarga();
 }
 
+// 143ª rodada — botão "Cancelar" no banner de carga em andamento. Seguro
+// mesmo no meio da gravação: ver comentário grande em
+// POST /comparacao-folha/carga/<id>/cancelar (app/main.py) — tudo roda
+// dentro de uma transação só, então cancelar nunca deixa um mês importado
+// pela metade, só desfaz (rollback) o que ainda não tinha sido confirmado.
+async function cfCancelarCarga(cargaId){
+  if(!confirm("Cancelar esta carga? Os dados que já existiam nesta competência não serão alterados.")) return;
+  const btn = $("cf-carga-btn-cancelar");
+  if(btn){ btn.disabled = true; btn.textContent = "Cancelando…"; }
+  try{
+    await api(`/comparacao-folha/carga/${cargaId}/cancelar`, {method:"POST"});
+    toast("Cancelando a carga…");
+  }catch(e){
+    // api() já mostra um toast com o erro específico (ex: carga já tinha
+    // terminado, ou ainda não chegou na etapa de gravação no banco) — só
+    // reabilita o botão pro usuário poder tentar de novo.
+    if(btn){ btn.disabled = false; btn.textContent = "Cancelar"; }
+    return;
+  }
+  // O próprio polling (a cada 3s, já em andamento) vai pegar o novo status
+  // (cancelado) sozinho; só força uma consulta imediata pra não esperar
+  // até 3s parado no texto "Cancelando…".
+  cfVerificarCargaAtual();
+}
+
 function cfIniciarPollingCarga(){
   if(CF_CARGA_POLL_TIMER) return; // já tem um polling rodando, não duplica
   CF_CARGA_POLL_TIMER = setInterval(async ()=>{
@@ -11005,7 +11030,27 @@ function cfRenderCargaBanner(carga){
           <div style="font-weight:600;">Carga em andamento — "${esc(carga.nome_arquivo||"arquivo")}"</div>
           <div class="muted" style="font-size:12px;">Iniciada às ${hora(carga.criado_em)}${quem}. Pode continuar usando o sistema normalmente e até fechar esta aba — a importação segue no servidor; esta mensagem se atualiza sozinha.</div>
         </div>
+        <button class="btn secondary small" id="cf-carga-btn-cancelar" onclick="cfCancelarCarga('${carga.id}')" style="flex:0 0 auto;">Cancelar</button>
       </div>`;
+    return;
+  }
+
+  if(carga.status === "cancelado"){
+    el.hidden = false;
+    el.style.background = "var(--warn-soft)";
+    el.innerHTML = `
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div style="font-size:18px;flex:0 0 auto;">⏹️</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:600;color:var(--warn);">Carga cancelada — "${esc(carga.nome_arquivo||"arquivo")}"</div>
+          <div class="muted" style="font-size:12px;">Nenhum dado foi alterado — a importação foi interrompida antes de confirmar as mudanças no banco.</div>
+        </div>
+        <button class="btn secondary small" onclick="$('cf-carga-banner').hidden=true;" style="flex:0 0 auto;">Dispensar</button>
+      </div>`;
+    if(CF_ULTIMA_CARGA_NOTIFICADA !== carga.id){
+      CF_ULTIMA_CARGA_NOTIFICADA = carga.id;
+      toast("Carga cancelada — nenhum dado foi alterado.");
+    }
     return;
   }
 

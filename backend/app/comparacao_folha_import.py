@@ -502,13 +502,18 @@ def _linhas_copy(ws, indice_para_coluna, projeto_id, mesano_alvo, contadores):
         yield "\t".join(campos) + "\n"
 
 
-def importar_comparacao_folha(projeto_id, conteudo_bytes, timeout=3600):
+def importar_comparacao_folha(projeto_id, conteudo_bytes, timeout=3600,
+                               ao_iniciar_processo=None, foi_cancelado=None):
     """Ponto de entrada único (sem prévia — ver comentário no topo do
     arquivo): lê a planilha, detecta a competência (MESANO), substitui as
     linhas daquela competência (delete + copy, uma transação só) e devolve
     um resumo. Nunca materializa as ~300 mil linhas como lista de dicts
     Python nem como uma string SQL única — tudo é passado em streaming pro
     banco (ver db.execute_stream).
+
+    143ª rodada — `ao_iniciar_processo`/`foi_cancelado` só repassam pra
+    db.execute_stream (ver docstring lá) pra dar suporte ao botão
+    "Cancelar" de uma carga em andamento, chamado de app/main.py.
 
     91ª rodada — `timeout` (padrão) subiu de 900s pra 3600s (1h): mesmo
     depois do alinhamento dos "três lados" feito na 88ª rodada (gunicorn +
@@ -565,7 +570,8 @@ def importar_comparacao_folha(projeto_id, conteudo_bytes, timeout=3600):
     sufixo = "\\.\nCOMMIT;\n"
 
     linhas = _linhas_copy(ws, indice_para_coluna, projeto_id, mesano_alvo, contadores)
-    db.execute_stream(prefixo, linhas, sufixo, timeout=timeout)
+    db.execute_stream(prefixo, linhas, sufixo, timeout=timeout,
+                       ao_iniciar_processo=ao_iniciar_processo, foi_cancelado=foi_cancelado)
 
     avisos = []
     if contadores["mesano_divergente"]:

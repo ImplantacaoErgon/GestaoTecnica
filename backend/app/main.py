@@ -883,24 +883,60 @@ def aplicar_percentual_inicial(atual, data):
 # arquivo (db, google_drive, comparacao_folha_import, auditoria), que
 # funcionam de qualquer thread (ver comentário de threading em db.py: cada
 # chamada abre seu próprio subprocess `psql`, sem estado compartilhado).
+#
+# 143ª rodada — registro das cargas que, agora mesmo, têm um processo
+# `psql` aberto (ver db.execute_stream), pra dar suporte ao botão
+# "Cancelar": carga_id -> {"proc": <Popen>, "cancelado": {"valor": bool}}.
+# É um dict em memória DESTE processo (não uma coluna no banco) porque o
+# que o endpoint de cancelar precisa alcançar é o objeto Popen em si, que
+# só existe na memória da thread que iniciou a carga — por isso também não
+# sobrevive a um redeploy/restart do servidor, mas nesse caso a própria
+# carga já teria morrido com ele, então não há nada a cancelar. Protegido
+# por lock porque é lido/escrito tanto pela thread da carga (ao registrar e
+# ao liberar, no fim) quanto pela requisição HTTP do botão "Cancelar", em
+# paralelo.
+_CARGAS_COMPARACAO_FOLHA_PROCESSOS = {}
+_CARGAS_COMPARACAO_FOLHA_PROCESSOS_LOCK = threading.Lock()
+
+
+def _registrar_processo_carga_comparacao_folha(carga_id, proc, cancelado):
+    with _CARGAS_COMPARACAO_FOLHA_PROCESSOS_LOCK:
+        _CARGAS_COMPARACAO_FOLHA_PROCESSOS[carga_id] = {"proc": proc, "cancelado": cancelado}
+
+
+def _liberar_processo_carga_comparacao_folha(carga_id):
+    with _CARGAS_COMPARACAO_FOLHA_PROCESSOS_LOCK:
+        _CARGAS_COMPARACAO_FOLHA_PROCESSOS.pop(carga_id, None)
+
+
 def _processar_carga_comparacao_folha_picker(
     carga_id, projeto_id, file_id, mime_type, access_token, resource_key,
     nome_arquivo, usuario_id, usuario_nome, usuario_email,
 ):
+    cancelado = {"valor": False}
     try:
         conteudo = google_drive.baixar_arquivo_selecionado(
             file_id, mime_type, access_token, nome_arquivo, resource_key=resource_key,
         )
-        resultado = comparacao_folha_import.importar_comparacao_folha(projeto_id, conteudo)
+        resultado = comparacao_folha_import.importar_comparacao_folha(
+            projeto_id, conteudo,
+            ao_iniciar_processo=lambda proc: _registrar_processo_carga_comparacao_folha(carga_id, proc, cancelado),
+            foi_cancelado=lambda: cancelado["valor"],
+        )
     except google_drive.GoogleDriveError as e:
         _marcar_carga_comparacao_folha_erro(carga_id, str(e))
         return
     except comparacao_folha_import.ComparacaoFolhaImportError as e:
         _marcar_carga_comparacao_folha_erro(carga_id, f'{e} (arquivo selecionado: "{nome_arquivo}")')
         return
+    except db.ImportacaoCancelada:
+        _marcar_carga_comparacao_folha_cancelada(carga_id)
+        return
     except Exception as e:
         _marcar_carga_comparacao_folha_erro(carga_id, f'Falha ao importar a planilha "{nome_arquivo}": {e}')
         return
+    finally:
+        _liberar_processo_carga_comparacao_folha(carga_id)
 
     try:
         db.execute(
@@ -944,6 +980,23 @@ def _marcar_carga_comparacao_folha_erro(carga_id, mensagem):
         traceback.print_exc()
 
 
+def _marcar_carga_comparacao_folha_cancelada(carga_id):
+    """143ª rodada — chamada quando db.execute_stream detecta que o
+    processo psql da carga foi terminado de propósito (botão "Cancelar"),
+    não por um erro de verdade (ver db.ImportacaoCancelada). O DELETE+COPY
+    inteiro roda numa transação só — como ela nunca chegou no COMMIT, os
+    dados que já existiam daquele mês continuam intactos; só a carga em si
+    é que fica marcada como 'cancelado' em vez de 'concluido'/'erro'."""
+    try:
+        db.execute(
+            "UPDATE cargas_comparacao_folha SET status = 'cancelado', "
+            f"mensagem_erro = 'Cancelada pelo usuário.', concluido_em = now() WHERE id = {db.q(carga_id)}"
+        )
+    except Exception:
+        print("[comparacao_folha] falha ao marcar carga como cancelada:", flush=True)
+        traceback.print_exc()
+
+
 # 90ª rodada — mesmo motivo/padrão de _processar_carga_comparacao_folha_picker
 # acima, agora pro upload manual (POST /comparacao-folha/importar/upload):
 # usuário reportou (mesma reclamação de antes, agora pro botão "📤 Enviar
@@ -958,14 +1011,24 @@ def _marcar_carga_comparacao_folha_erro(carga_id, mensagem):
 def _processar_carga_comparacao_folha_upload(
     carga_id, projeto_id, conteudo, nome_arquivo, usuario_id, usuario_nome, usuario_email,
 ):
+    cancelado = {"valor": False}
     try:
-        resultado = comparacao_folha_import.importar_comparacao_folha(projeto_id, conteudo)
+        resultado = comparacao_folha_import.importar_comparacao_folha(
+            projeto_id, conteudo,
+            ao_iniciar_processo=lambda proc: _registrar_processo_carga_comparacao_folha(carga_id, proc, cancelado),
+            foi_cancelado=lambda: cancelado["valor"],
+        )
     except comparacao_folha_import.ComparacaoFolhaImportError as e:
         _marcar_carga_comparacao_folha_erro(carga_id, f'{e} (arquivo enviado: "{nome_arquivo}")')
+        return
+    except db.ImportacaoCancelada:
+        _marcar_carga_comparacao_folha_cancelada(carga_id)
         return
     except Exception as e:
         _marcar_carga_comparacao_folha_erro(carga_id, f'Falha ao importar a planilha "{nome_arquivo}": {e}')
         return
+    finally:
+        _liberar_processo_carga_comparacao_folha(carga_id)
 
     try:
         db.execute(
@@ -3180,6 +3243,37 @@ def create_app():
         )
         thread.start()
         return jsonify(carga), 202
+
+    @app.post("/api/comparacao-folha/carga/<carga_id>/cancelar")
+    def cancelar_carga_comparacao_folha(carga_id):
+        """143ª rodada — botão "Cancelar" numa carga em andamento (upload
+        manual ou Google Picker). Só funciona enquanto o processo `psql`
+        daquela carga ainda estiver registrado em memória
+        (_CARGAS_COMPARACAO_FOLHA_PROCESSOS, ver comentário grande acima de
+        _processar_carga_comparacao_folha_picker) — se a carga ainda está
+        lendo/detectando a planilha (antes de começar a gravar no banco),
+        ou se já tinha terminado, devolve 404: não tem o que cancelar agora
+        (no primeiro caso, o front-end tenta de novo pouco depois).
+
+        Terminar o processo (SIGTERM) é seguro mesmo no meio da gravação:
+        todo o DELETE+COPY roda dentro de uma única transação (ver
+        comparacao_folha_import.importar_comparacao_folha) — fechar a
+        conexão antes do COMMIT faz o PRÓPRIO Postgres desfazer (rollback)
+        o que ainda não tinha sido confirmado, preservando intactos os
+        dados que já existiam daquele mês."""
+        with _CARGAS_COMPARACAO_FOLHA_PROCESSOS_LOCK:
+            info = _CARGAS_COMPARACAO_FOLHA_PROCESSOS.get(carga_id)
+        if not info:
+            return jsonify({
+                "erro": "Essa carga não está mais em andamento, ou ainda não chegou na "
+                "etapa de gravação no banco — tente de novo em alguns segundos."
+            }), 404
+        info["cancelado"]["valor"] = True
+        try:
+            info["proc"].terminate()
+        except Exception:
+            pass
+        return jsonify({"ok": True}), 202
 
     # ------------------------------------------------------------------ marcos
     @app.get("/api/marcos")

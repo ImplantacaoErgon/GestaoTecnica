@@ -28,6 +28,18 @@ class DbError(Exception):
     pass
 
 
+class ImportacaoCancelada(DbError):
+    """143ª rodada — carga grande (ex: Comparação Folha) interrompida DE
+    PROPÓSITO pelo usuário (botão "Cancelar"), não um erro de verdade. Ver
+    execute_stream(): quando o processo psql é terminado de fora (SIGTERM,
+    via Popen.terminate()) em vez de morrer por conta própria, o retorno
+    teria caído no mesmo `raise DbError` genérico de qualquer outra falha —
+    essa subclasse deixa quem chamou (ex: app/main.py) distinguir "usuário
+    cancelou" de "deu erro" e gravar o status certo em cargas_*, sem
+    precisar inspecionar a mensagem de texto do stderr pra adivinhar."""
+    pass
+
+
 def q(value):
     """Quota um valor Python como literal SQL seguro (dollar-quoting para texto)."""
     if value is None:
@@ -104,7 +116,8 @@ def execute(sql_body: str, timeout: int = 60) -> None:
     _run(sql_body + ";", timeout=timeout)
 
 
-def execute_stream(sql_prefix: str, linhas, sql_suffix: str, timeout: int = 600) -> None:
+def execute_stream(sql_prefix: str, linhas, sql_suffix: str, timeout: int = 600,
+                    ao_iniciar_processo=None, foi_cancelado=None) -> None:
     """Como execute(), mas pra scripts GRANDES (55ª rodada — carga da
     Comparação Folha, ~300 mil linhas por importação): em vez de montar o
     script inteiro como uma string só na memória e mandar tudo de uma vez
@@ -120,7 +133,24 @@ def execute_stream(sql_prefix: str, linhas, sql_suffix: str, timeout: int = 600)
     saída (ex: avisos, ou o "COPY N" de cada comando) enquanto o buffer do
     pipe de stdin ainda não foi todo consumido, escrever tudo de uma vez
     sem drenar a saída em paralelo pode travar os dois lados esperando um
-    pelo outro (deadlock clássico de pipe cheio)."""
+    pelo outro (deadlock clássico de pipe cheio).
+
+    143ª rodada — `ao_iniciar_processo` e `foi_cancelado` existem só pra dar
+    suporte ao botão "Cancelar" de uma carga em segundo plano (ver
+    app/main.py, registro CARGAS_PROCESSOS): logo depois de abrir o `psql`,
+    chamamos `ao_iniciar_processo(proc)` pra quem chamou guardar essa
+    referência num lugar que o endpoint de cancelar também alcança (a
+    carga roda numa THREAD separada da requisição que vai cancelar —
+    precisa de um registro compartilhado, não dá pra passar o proc "de
+    volta" de outro jeito). Cancelar é só terminar esse processo: como todo
+    o DELETE+COPY roda dentro de um único BEGIN...COMMIT (ver
+    comparacao_folha_import.importar_comparacao_folha), matar o psql antes
+    do COMMIT fecha a conexão e o PRÓPRIO Postgres desfaz (rollback) o que
+    não tinha sido confirmado ainda — não precisa de nenhum "undo" manual
+    nosso. `foi_cancelado()` é só pra, depois que o processo morrer,
+    decidir se o `raise` vai ser ImportacaoCancelada (usuário pediu) ou
+    DbError (erro de verdade) — sem isso não teria como diferenciar os dois
+    casos, já que ambos terminam com returncode != 0."""
     env = dict(os.environ)
     env["PGPASSWORD"] = PGPASSWORD
     try:
@@ -132,6 +162,9 @@ def execute_stream(sql_prefix: str, linhas, sql_suffix: str, timeout: int = 600)
         )
     except FileNotFoundError as e:
         raise DbError(f"psql não encontrado: {e}")
+
+    if ao_iniciar_processo:
+        ao_iniciar_processo(proc)
 
     saida = {}
 
@@ -170,6 +203,8 @@ def execute_stream(sql_prefix: str, linhas, sql_suffix: str, timeout: int = 600)
     t_err.join(timeout=5)
 
     if returncode != 0:
+        if foi_cancelado and foi_cancelado():
+            raise ImportacaoCancelada("Cancelada pelo usuário.")
         detalhe = (saida.get("stderr") or "").strip()
         if not detalhe and erro_escrita:
             detalhe = str(erro_escrita)
