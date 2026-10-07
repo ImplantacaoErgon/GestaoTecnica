@@ -911,11 +911,27 @@ def _ao_iniciar_processo_carga_comparacao_folha(carga_id, proc):
     carga — grava o PID no banco e, se um cancelamento já tinha sido
     pedido ENQUANTO a carga ainda estava na fase de leitura/detecção da
     planilha (antes de existir processo pra matar), aplica agora, na
-    hora, em vez de deixar a carga inteira rodar sem motivo."""
-    linha = db.execute_returning_one(
-        f"UPDATE cargas_comparacao_folha SET pid = {db.q(proc.pid)} "
-        f"WHERE id = {db.q(carga_id)} RETURNING cancelamento_solicitado"
-    )
+    hora, em vez de deixar a carga inteira rodar sem motivo.
+
+    145ª rodada — envolto em try/except: isso é só o APOIO ao botão
+    "Cancelar", não a carga em si. Descoberto na prática (deploy do código
+    novo rodou antes da migration que cria estas colunas — "column
+    cancelamento_solicitado does not exist") que, sem isso, uma falha
+    aqui (coluna faltando, hiccup passageiro de rede/banco) derrubava a
+    carga INTEIRA com um erro confuso, apontando pra uma query interna de
+    bookkeeping em vez do problema real. Agora uma falha aqui só desliga o
+    suporte a cancelamento NESTA carga (loga pra investigar) — a
+    importação em si segue normalmente."""
+    try:
+        linha = db.execute_returning_one(
+            f"UPDATE cargas_comparacao_folha SET pid = {db.q(proc.pid)} "
+            f"WHERE id = {db.q(carga_id)} RETURNING cancelamento_solicitado"
+        )
+    except Exception:
+        print(f"[comparacao_folha] falha ao registrar PID da carga {carga_id} "
+              "(cancelamento ficará indisponível nesta carga, mas ela segue normalmente):", flush=True)
+        traceback.print_exc()
+        return
     if linha and linha.get("cancelamento_solicitado"):
         try:
             os.kill(proc.pid, signal.SIGTERM)
@@ -924,8 +940,15 @@ def _ao_iniciar_processo_carga_comparacao_folha(carga_id, proc):
 
 
 def _foi_cancelado_carga_comparacao_folha(carga_id):
-    linha = db.fetch_one(f"SELECT cancelamento_solicitado FROM cargas_comparacao_folha WHERE id = {db.q(carga_id)}")
-    return bool(linha and linha.get("cancelamento_solicitado"))
+    """145ª rodada — mesmo motivo do try/except acima: se checar o pedido
+    de cancelamento falhar (coluna faltando, etc.), assume que NÃO foi
+    cancelado — melhor devolver o erro de verdade (DbError, com a causa
+    real) do que mascará-lo atrás de um ImportacaoCancelada incorreto."""
+    try:
+        linha = db.fetch_one(f"SELECT cancelamento_solicitado FROM cargas_comparacao_folha WHERE id = {db.q(carga_id)}")
+        return bool(linha and linha.get("cancelamento_solicitado"))
+    except Exception:
+        return False
 
 
 def _processar_carga_comparacao_folha_picker(
