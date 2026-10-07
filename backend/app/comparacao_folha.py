@@ -825,3 +825,38 @@ def exportar_csv(**filtros):
     )
     corpo = [[l.get(c) for c in _COLUNAS_EXPORT] for l in linhas_raw]
     return _ROTULOS_EXPORT, corpo, total > LIMITE_EXPORT_CSV
+
+
+# ---------------------------------------------------------------------------
+# 146ª rodada — pedido do usuário (verbatim): "Na aba comparação de folha
+# crie um botão para limpar uma competência". Diferente da substituição que
+# já acontece sozinha ao reimportar um mês (DELETE+COPY numa única transação,
+# ver comparacao_folha_import.importar_comparacao_folha) — aqui é só o
+# DELETE, sem nenhum COPY depois: o usuário quer esvaziar uma competência sem
+# necessariamente já ter uma planilha nova pra subir no mesmo instante (ex:
+# descobriu que o arquivo usado estava errado e quer limpar antes de buscar o
+# certo). `mesano` chega no formato AAAA-MM (mesmo formato do <select> de
+# Competência no front-end e do filtro em _where_filtros() acima — reaproveita
+# o mesmo idioma `to_char(mesano, 'YYYY-MM') = ...` usado lá, por consistência).
+def contar_competencia(projeto_id, mesano):
+    """Quantas linhas seriam apagadas por limpar_competencia(), SEM apagar
+    nada — usado pela prévia (GET /comparacao-folha/resumo-remocao) exibida
+    antes do usuário confirmar, e de novo bem antes do DELETE de verdade em
+    main.py (pro evento de auditoria registrar quantas linhas saíram)."""
+    linha = db.fetch_one(f"""
+        SELECT COUNT(*) AS total FROM comparacao_folha
+        WHERE projeto_id = {db.q(projeto_id)} AND to_char(mesano, 'YYYY-MM') = {db.q(mesano)}
+    """)
+    return (linha or {}).get("total") or 0
+
+
+def limpar_competencia(projeto_id, mesano):
+    """Apaga TODAS as linhas da Comparação Folha de uma única competência.
+    Ação irreversível — a única forma de ter os dados de volta é reimportar
+    a planilha daquela competência. A confirmação (digitar o nome do
+    projeto, mesmo padrão de POST /cronograma/remover-tudo) já aconteceu
+    antes, em main.py; esta função só executa o DELETE em si."""
+    db.execute(f"""
+        DELETE FROM comparacao_folha
+        WHERE projeto_id = {db.q(projeto_id)} AND to_char(mesano, 'YYYY-MM') = {db.q(mesano)}
+    """)

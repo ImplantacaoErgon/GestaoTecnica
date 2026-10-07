@@ -11,7 +11,7 @@ from datetime import datetime, date, timedelta
 
 from flask import Flask, request, jsonify, send_from_directory, send_file, abort, session
 
-from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_renumeracao, cronograma_anomalias, cronograma_export, cronograma_export_xml, cronograma_comparacao, relatorio_executivo, relatorio_pdf, dashboard_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, drive_rubricas, rubricas_auto_update, comparacao_folha, comparacao_folha_import, google_drive, migracao_quadro_export, requisitos_ia, migracao_rejeicoes, migracao_rejeicoes_import
+from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_renumeracao, cronograma_anomalias, cronograma_export, cronograma_export_xml, cronograma_comparacao, relatorio_executivo, relatorio_pdf, dashboard_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, drive_rubricas, rubricas_auto_update, comparacao_folha, comparacao_folha_import, comparacao_folha_dashboard_snapshots, google_drive, migracao_quadro_export, requisitos_ia, migracao_rejeicoes, migracao_rejeicoes_import
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 FRONTEND_DIR = os.environ.get(
@@ -3324,6 +3324,115 @@ def create_app():
         except ProcessLookupError:
             pass  # processo já tinha terminado sozinho nesse meio-tempo
         return jsonify({"ok": True}), 202
+
+    # --------------------------------------------- limpar uma competência
+    # 146ª rodada — pedido do usuário (verbatim): "Na aba comparação de
+    # folha crie um botão para limpar uma competência". Mesmo padrão de
+    # confirmação já usado em /cronograma/remover-tudo (digitar o nome do
+    # projeto, conferido aqui no servidor) — ação irreversível e em massa
+    # (pode ser centenas de milhares de linhas numa competência só).
+    @app.get("/api/comparacao-folha/resumo-remocao")
+    def comparacao_folha_resumo_remocao():
+        """Prévia (sem apagar nada) de quantas linhas o botão "Limpar
+        competência" vai apagar — mesmo espírito de GET
+        /cronograma/resumo-remocao, mostrado no modal de confirmação antes
+        do usuário poder confirmar."""
+        projeto_id = request.args.get("projeto_id")
+        mesano = request.args.get("mesano")
+        if not projeto_id or not mesano:
+            return jsonify({"erro": "projeto_id e mesano são obrigatórios"}), 400
+        return jsonify({"total": comparacao_folha.contar_competencia(projeto_id, mesano)})
+
+    @app.post("/api/comparacao-folha/limpar-competencia")
+    def comparacao_folha_limpar_competencia():
+        """Apaga TODAS as linhas da Comparação Folha de uma única
+        competência (`mesano`, formato AAAA-MM). Ação irreversível — exige
+        que o cliente reenvie, em `confirmacao`, o nome exato do projeto,
+        conferido aqui no servidor antes de tocar no banco (mesmo padrão de
+        /cronograma/remover-tudo). Não mexe em nenhuma outra competência,
+        nem nos registros de `cargas_comparacao_folha` (histórico de
+        importações) — só nos dados em si."""
+        data = request.get_json(force=True) or {}
+        projeto_id = data.get("projeto_id")
+        mesano = data.get("mesano")
+        confirmacao = (data.get("confirmacao") or "").strip()
+        if not projeto_id or not mesano:
+            return jsonify({"erro": "projeto_id e mesano são obrigatórios"}), 400
+        projeto = db.fetch_one(f"SELECT nome FROM projetos WHERE id = {db.q(projeto_id)}")
+        if not projeto:
+            abort(404)
+        if not confirmacao or confirmacao != projeto["nome"]:
+            return jsonify({"erro": "Confirmação não confere com o nome do projeto. Nada foi apagado."}), 400
+        total = comparacao_folha.contar_competencia(projeto_id, mesano)
+        comparacao_folha.limpar_competencia(projeto_id, mesano)
+        auditoria.registrar_evento_manual(
+            "exclusao",
+            f'Limpou a competência {mesano} da Comparação Folha do projeto "{projeto["nome"]}" '
+            f'({total} linha(s))',
+            entidade="comparacao_folha", entidade_id=mesano, entidade_rotulo=f'{projeto["nome"]} — {mesano}',
+            projeto_id=projeto_id, sensivel=True,
+            detalhes={"mesano": mesano, "linhas_removidas": total},
+        )
+        return jsonify({"ok": True, "total": total})
+
+    # --------------------------------------------- salvamentos do Dashboard
+    # 146ª rodada — pedido do usuário (verbatim): "crie um botão para salvar
+    # o dashboard [...] vai permitir fazer comparações de uma mesma
+    # competência". Ver app/comparacao_folha_dashboard_snapshots.py.
+    @app.get("/api/comparacao-folha/dashboard/snapshots")
+    def comparacao_folha_dashboard_listar_snapshots():
+        projeto_id = request.args.get("projeto_id")
+        mesano = request.args.get("mesano")
+        if not projeto_id or not mesano:
+            return jsonify({"erro": "projeto_id e mesano são obrigatórios"}), 400
+        return jsonify(comparacao_folha_dashboard_snapshots.listar_snapshots(projeto_id, mesano))
+
+    @app.post("/api/comparacao-folha/dashboard/snapshots")
+    def comparacao_folha_dashboard_criar_snapshot():
+        """Recalcula o dashboard NA HORA (não confia num payload que o
+        front-end mandasse de volta — evita salvar um estado adulterado ou
+        já desatualizado) e grava a foto. `mesano` é obrigatório: salvar
+        "todas as competências" juntas não serve pro propósito de comparar
+        uma competência específica ao longo do tempo."""
+        data = request.get_json(force=True) or {}
+        projeto_id = data.get("projeto_id")
+        mesano = data.get("mesano")
+        rotulo = (data.get("rotulo") or "").strip() or None
+        if not projeto_id or not mesano:
+            return jsonify({"erro": "projeto_id e mesano são obrigatórios"}), 400
+        projeto = db.fetch_one(f"SELECT nome FROM projetos WHERE id = {db.q(projeto_id)}")
+        if not projeto:
+            abort(404)
+        payload = comparacao_folha.dashboard(projeto_id, mesano=mesano)
+        usuario = request.headers.get("X-Usuario", "")
+        snapshot = comparacao_folha_dashboard_snapshots.criar_snapshot(projeto_id, mesano, rotulo, usuario, payload)
+        auditoria.registrar_evento_manual(
+            "criacao",
+            f'Salvou o Dashboard Comparação Folha — competência {mesano}, versão {snapshot["numero_versao"]} '
+            f'do projeto "{projeto["nome"]}"' + (f' — "{rotulo}"' if rotulo else ""),
+            entidade="comparacao_folha_dashboard_snapshots", entidade_id=str(snapshot["id"]),
+            entidade_rotulo=f'{projeto["nome"]} — {mesano}',
+            projeto_id=projeto_id,
+            detalhes={"mesano": mesano, "numero_versao": snapshot["numero_versao"], "rotulo": rotulo},
+        )
+        return jsonify(snapshot), 201
+
+    @app.delete("/api/comparacao-folha/dashboard/snapshots/<id>")
+    def comparacao_folha_dashboard_excluir_snapshot(id):
+        snapshot = comparacao_folha_dashboard_snapshots.excluir_snapshot(id)
+        if not snapshot:
+            abort(404)
+        projeto = db.fetch_one(f"SELECT nome FROM projetos WHERE id = {db.q(snapshot['projeto_id'])}")
+        projeto_nome = projeto["nome"] if projeto else None
+        auditoria.registrar_evento_manual(
+            "exclusao",
+            f'Excluiu o salvamento (versão {snapshot["numero_versao"]}) do Dashboard Comparação Folha '
+            f'do projeto "{projeto_nome}"' + (f' — "{snapshot["rotulo"]}"' if snapshot["rotulo"] else ""),
+            entidade="comparacao_folha_dashboard_snapshots", entidade_id=str(snapshot["id"]), entidade_rotulo=projeto_nome,
+            projeto_id=snapshot["projeto_id"], sensivel=True,
+            detalhes={"numero_versao": snapshot["numero_versao"], "rotulo": snapshot["rotulo"]},
+        )
+        return jsonify({"ok": True})
 
     # ------------------------------------------------------------------ marcos
     @app.get("/api/marcos")

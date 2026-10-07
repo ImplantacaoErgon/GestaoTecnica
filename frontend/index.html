@@ -1574,6 +1574,11 @@
         <button class="btn secondary small" id="btn-atualizar-comparacao" title="Abre o Google Drive para você escolher o arquivo — cada comparação sai num arquivo/diretório novo, então não dá pra buscar sozinho numa pasta fixa">📁 Selecionar arquivo no Drive</button>
         <input type="file" id="cf-upload-file" accept=".csv,.xlsx,.xlsm" hidden>
         <button class="btn secondary small" id="btn-upload-comparacao" title="Escolhe o arquivo direto do seu computador — sem depender do Google">📤 Enviar arquivo do computador</button>
+        <!-- 146ª rodada — pedido do usuário (verbatim): "crie um botão para
+             limpar uma competência". Exige uma competência ESPECÍFICA
+             selecionada no filtro acima (não "todas") — ver
+             abrirLimparCompetenciaModal(). -->
+        <button class="btn danger small" id="btn-limpar-competencia" title="Apaga todas as linhas da Comparação Folha da competência selecionada no filtro acima">🗑️ Limpar competência</button>
       </div>
     </div>
     <!-- 83ª rodada: banner de acompanhamento da carga em segundo plano
@@ -1610,8 +1615,29 @@
     <div class="view-sub">Indicadores de convergência entre o Ergon e a ficha financeira do sistema legado — foco em quantidade e cobertura de rubricas, não em valor financeiro.</div>
     <div class="filters">
       <select id="cfd-f-mesano"><option value="">Competência (todas)</option></select>
+      <!-- 146ª rodada — pedido do usuário (verbatim): "crie um botão para
+           salvar o dashboard. Com a carga da comparação da folha as
+           informações anteriores do dashboard se perdem." Só habilitado com
+           uma competência ESPECÍFICA selecionada (não "todas") — ver
+           cfdAtualizarBotaoSalvar(). -->
+      <input type="text" id="cfd-snap-rotulo" placeholder="Rótulo (opcional)" style="max-width:220px;">
+      <button class="btn secondary small" id="cfd-snap-salvar" disabled
+              title="Selecione uma competência específica para salvar">💾 Salvar dashboard desta competência</button>
     </div>
     <div class="kpis" id="cfd-kpis"></div>
+    <!-- 146ª rodada — histórico de salvamentos da competência selecionada:
+         o jeito de "fazer comparações de uma mesma competência" pedido pelo
+         usuário, já que reimportar um mês substitui os indicadores ao vivo.
+         Ver cfdCarregarSnapshots()/cfdSalvarSnapshot() abaixo e
+         app/comparacao_folha_dashboard_snapshots.py no backend. -->
+    <details class="card" id="cfd-snap-painel" style="margin-bottom:14px;">
+      <summary style="cursor:pointer;font-weight:600;">📌 Salvamentos desta competência</summary>
+      <div class="muted" style="font-size:12px;margin:8px 0 12px;">Fotos dos indicadores acima, salvas sob demanda — como a carga de uma nova planilha para esta competência substitui os dados, salvar aqui é o jeito de comparar a mesma competência ao longo do tempo (ex.: antes/depois de corrigir uma regra de cálculo).</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Versão</th><th>Rótulo</th><th>Quando</th><th>Quem</th><th>Linhas</th><th>Convergente</th><th>% sem div.</th><th>% não prog.</th><th>% com div.</th><th></th></tr></thead>
+        <tbody id="cfd-snap-tbody"></tbody>
+      </table></div>
+    </details>
     <div class="grid-2 cfd-situacao-tiporubr-grid">
       <div class="card card--zona-azul">
         <h3>% de comparação por Situação</h3>
@@ -2667,6 +2693,29 @@
         <button class="btn secondary" id="cr-cancel">Cancelar</button>
         <button class="btn" id="cr-analisar">Analisar planilha</button>
         <button class="btn" id="cr-confirmar" hidden>Confirmar importação</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= MODAL: LIMPAR COMPETÊNCIA (COMPARAÇÃO FOLHA) ================= -->
+<div class="overlay" id="overlay-limpar-competencia-cf" hidden>
+  <div class="modal" style="max-width:480px;">
+    <div class="modal-head"><h2 style="color:var(--danger);">⚠ Limpar competência</h2><button class="btn ghost" id="lccf-close">✕</button></div>
+    <div class="modal-body single-col">
+      <p>Isso vai apagar <strong>permanentemente</strong>, do projeto <strong id="lccf-nome-projeto"></strong>, competência <strong id="lccf-mesano"></strong>:</p>
+      <ul id="lccf-resumo" style="margin:0 0 14px;padding-left:20px;line-height:1.7;"></ul>
+      <p class="muted" style="margin-bottom:14px;">Só os dados da Comparação Folha desta competência são apagados — nenhuma outra competência, nem nenhuma outra tela, é afetada. Não existe desfazer; pra ter os dados de volta seria preciso importar a planilha desta competência novamente.</p>
+      <div class="field full">
+        <label>Para confirmar, digite o nome do projeto exatamente como mostrado acima:</label>
+        <input type="text" id="lccf-confirma-nome" autocomplete="off">
+      </div>
+    </div>
+    <div class="modal-foot">
+      <span></span>
+      <div style="display:flex;gap:8px;">
+        <button class="btn secondary" id="lccf-cancel">Cancelar</button>
+        <button class="btn danger" id="lccf-confirmar" disabled>Limpar competência</button>
       </div>
     </div>
   </div>
@@ -11471,6 +11520,76 @@ function wireComparacaoFolhaPane(){
   $("btn-upload-comparacao").addEventListener("click", ()=> $("cf-upload-file").click());
   $("cf-upload-file").addEventListener("change", uploadComparacaoFolhaDoComputador);
   $("cfq-btn-consultar").addEventListener("click", cfqConsultar);
+  wireLimparCompetenciaCf();
+}
+
+// ---------------------------------------------------------------------
+// 146ª rodada — "Limpar competência" (pedido do usuário, verbatim: "Na aba
+// comparação de folha crie um botão para limpar uma competência"). Mesmo
+// padrão de confirmação já usado em "Remover cronograma inteiro" (digitar
+// o nome do projeto, conferido de novo no servidor) — ação irreversível e
+// em massa (pode ser centenas de milhares de linhas numa competência só).
+// ---------------------------------------------------------------------
+let lccfRemovendo = false;
+
+function wireLimparCompetenciaCf(){
+  $("btn-limpar-competencia").addEventListener("click", abrirLimparCompetenciaModal);
+  $("lccf-close").addEventListener("click", fecharLimparCompetenciaModal);
+  $("lccf-cancel").addEventListener("click", fecharLimparCompetenciaModal);
+  $("overlay-limpar-competencia-cf").addEventListener("click", e=>{ if(e.target.id==="overlay-limpar-competencia-cf") fecharLimparCompetenciaModal(); });
+  $("lccf-confirma-nome").addEventListener("input", ()=>{
+    $("lccf-confirmar").disabled = $("lccf-confirma-nome").value.trim() !== PROJETO.nome;
+  });
+  $("lccf-confirmar").addEventListener("click", limparCompetenciaCfConfirmado);
+}
+
+async function abrirLimparCompetenciaModal(){
+  const mesano = $("cf-f-mesano").value;
+  if(!mesano){
+    toast("Selecione uma competência específica no filtro acima antes de limpar — \"todas\" não pode ser limpo de uma vez.", true);
+    return;
+  }
+  $("lccf-nome-projeto").textContent = PROJETO.nome;
+  $("lccf-mesano").textContent = mesano;
+  $("lccf-confirma-nome").value = "";
+  $("lccf-confirmar").disabled = true;
+  $("lccf-confirmar").textContent = "Limpar competência";
+  $("lccf-resumo").innerHTML = `<li class="muted">Carregando…</li>`;
+  $("overlay-limpar-competencia-cf").hidden = false;
+  try{
+    const r = await api(`/comparacao-folha/resumo-remocao?projeto_id=${PROJETO.id}&mesano=${encodeURIComponent(mesano)}`);
+    $("lccf-resumo").innerHTML = r.total
+      ? `<li><strong>${Number(r.total).toLocaleString('pt-BR')}</strong> linha(s) da Comparação Folha</li>`
+      : `<li class="muted">Esta competência já está vazia — nada a apagar.</li>`;
+  }catch(e){
+    $("lccf-resumo").innerHTML = `<li class="muted">Não foi possível carregar a prévia — confira sua conexão e tente de novo.</li>`;
+  }
+}
+function fecharLimparCompetenciaModal(){ $("overlay-limpar-competencia-cf").hidden = true; }
+
+async function limparCompetenciaCfConfirmado(){
+  if(lccfRemovendo) return;
+  const mesano = $("cf-f-mesano").value;
+  const digitado = $("lccf-confirma-nome").value.trim();
+  if(!mesano || digitado !== PROJETO.nome) return;
+  lccfRemovendo = true;
+  $("lccf-confirmar").disabled = true; $("lccf-confirmar").textContent = "Limpando…";
+  try{
+    await api("/comparacao-folha/limpar-competencia", {
+      method: "POST",
+      body: JSON.stringify({ projeto_id: PROJETO.id, mesano, confirmacao: digitado }),
+    });
+    toast(`Competência ${mesano} limpa: todas as linhas da Comparação Folha deste mês foram apagadas.`);
+    fecharLimparCompetenciaModal();
+    CF_PAGINA = 1;
+    $("cf-f-mesano").value = "";
+    await cfCarregarCompetencias();
+    cfCarregarResumo();
+    cfCarregarLista(false);
+  }catch(e){}
+  lccfRemovendo = false;
+  $("lccf-confirmar").textContent = "Limpar competência";
+  $("lccf-confirmar").disabled = $("lccf-confirma-nome").value.trim() !== PROJETO.nome;
 }
 
 // ---------------------------------------------------------------------
@@ -11538,6 +11657,8 @@ function cfdMostrarAguardandoCompetencia(){
   $("cfd-verbas-sem-uso-tbody").innerHTML = `<tr class="empty-row"><td colspan="3">Selecione uma competência acima.</td></tr>`;
   $("cfd-rubricas-sem-param-tbody").innerHTML = `<tr class="empty-row"><td colspan="3">Selecione uma competência acima.</td></tr>`;
   $("cfd-verbas-sem-param-tbody").innerHTML = `<tr class="empty-row"><td colspan="3">Selecione uma competência acima.</td></tr>`;
+  $("cfd-snap-tbody").innerHTML = `<tr class="empty-row"><td colspan="10">Selecione uma competência acima.</td></tr>`;
+  cfdAtualizarBotaoSalvar();
 }
 
 function cfdListaCoberturaHtml(lista, campoLinhas, colspan){
@@ -11550,6 +11671,11 @@ function cfdListaCoberturaHtml(lista, campoLinhas, colspan){
 async function cfdCarregarDados(){
   CFD_CARREGADO = true; // 113ª rodada — ver comentário em renderComparacaoFolhaDashboard()
   const mesano = $("cfd-f-mesano").value || "";
+  // 146ª rodada — botão "Salvar" e lista de salvamentos dependem só de QUAL
+  // competência está selecionada, não do resultado pesado abaixo — dispara
+  // em paralelo, sem esperar o dashboard() terminar de calcular.
+  cfdAtualizarBotaoSalvar();
+  cfdCarregarSnapshots();
   let r;
   try{ r = await api(`/comparacao-folha/dashboard?projeto_id=${PROJETO.id}${mesano?`&mesano=${encodeURIComponent(mesano)}`:""}`); }
   catch(e){ return; }
@@ -11649,6 +11775,88 @@ async function cfdCarregarDados(){
 
 function wireComparacaoFolhaDashboard(){
   $("cfd-f-mesano").addEventListener("change", cfdCarregarDados);
+  $("cfd-snap-salvar").addEventListener("click", cfdSalvarSnapshot);
+}
+
+// ---------------------------------------------------------------------
+// 146ª rodada — "Salvar dashboard" + histórico de salvamentos. Pedido do
+// usuário (verbatim): "crie um botão para salvar o dashboard. Com a carga
+// da comparação da folha as informações anteriores do dashboard se
+// perdem. Salvar esses dados vai permitir fazer comparações de uma mesma
+// competência. Mais fácil salvar essas informações do que uma imagem
+// completa da Comparação que são milhares de linhas." Ver
+// app/comparacao_folha_dashboard_snapshots.py no backend — cada
+// salvamento é uma foto dos indicadores já exibidos acima (não das ~300
+// mil linhas da planilha em si), por isso é leve.
+// ---------------------------------------------------------------------
+function cfdAtualizarBotaoSalvar(){
+  // Só faz sentido "salvar esta competência" com uma competência
+  // ESPECÍFICA selecionada — "todas" agregaria meses diferentes numa única
+  // foto, o que não serve pro propósito de comparar a MESMA competência ao
+  // longo do tempo.
+  $("cfd-snap-salvar").disabled = !$("cfd-f-mesano").value;
+}
+
+async function cfdCarregarSnapshots(){
+  const mesano = $("cfd-f-mesano").value;
+  if(!mesano){
+    $("cfd-snap-tbody").innerHTML = `<tr class="empty-row"><td colspan="10">Selecione uma competência específica para ver/salvar o histórico.</td></tr>`;
+    return;
+  }
+  let lista = [];
+  try{ lista = await api(`/comparacao-folha/dashboard/snapshots?projeto_id=${PROJETO.id}&mesano=${encodeURIComponent(mesano)}`); }
+  catch(e){ return; }
+  $("cfd-snap-tbody").innerHTML = lista.length ? lista.map(s=>{
+    const g = s.geral || {};
+    return `<tr>
+      <td class="mono">v${s.numero_versao}</td>
+      <td>${esc(s.rotulo || "—")}</td>
+      <td>${fmtDateTime(s.criado_em)}</td>
+      <td>${esc(s.criado_por || "—")}</td>
+      <td class="mono">${Number(g.total||0).toLocaleString('pt-BR')}</td>
+      <td class="mono">${Number(g.total_nao_divergentes||0).toLocaleString('pt-BR')}</td>
+      <td>${g.pct_nao_divergente==null ? "—" : g.pct_nao_divergente+"%"}</td>
+      <td>${g.pct_nao_programada==null ? "—" : g.pct_nao_programada+"%"}</td>
+      <td>${g.pct_divergente==null ? "—" : g.pct_divergente+"%"}</td>
+      <td><button class="btn ghost small" data-excluir-snap="${s.id}" title="Excluir este salvamento">🗑️</button></td>
+    </tr>`;
+  }).join("") : `<tr class="empty-row"><td colspan="10">Nenhum salvamento ainda para esta competência.</td></tr>`;
+  $("cfd-snap-tbody").querySelectorAll("button[data-excluir-snap]").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const id = btn.dataset.excluirSnap;
+      askConfirm("Excluir este salvamento do Dashboard? Isso apaga só esta foto do histórico; os dados ao vivo não são afetados. Não pode ser desfeito.", async ()=>{
+        try{
+          await api(`/comparacao-folha/dashboard/snapshots/${id}`, {method:"DELETE"});
+          toast("Salvamento excluído.");
+          cfdCarregarSnapshots();
+        }catch(e){}
+      });
+    });
+  });
+}
+
+let CFD_SALVANDO_SNAPSHOT = false;
+async function cfdSalvarSnapshot(){
+  if(CFD_SALVANDO_SNAPSHOT) return;
+  const mesano = $("cfd-f-mesano").value;
+  if(!mesano) return;
+  CFD_SALVANDO_SNAPSHOT = true;
+  const btn = $("cfd-snap-salvar");
+  btn.disabled = true; btn.textContent = "Salvando…";
+  try{
+    const rotulo = $("cfd-snap-rotulo").value.trim();
+    await api("/comparacao-folha/dashboard/snapshots", {
+      method: "POST",
+      body: JSON.stringify({ projeto_id: PROJETO.id, mesano, rotulo }),
+    });
+    toast("Dashboard desta competência salvo — já aparece em \"Salvamentos desta competência\".");
+    $("cfd-snap-rotulo").value = "";
+    $("cfd-snap-painel").open = true;
+    await cfdCarregarSnapshots();
+  }catch(e){}
+  CFD_SALVANDO_SNAPSHOT = false;
+  btn.textContent = "💾 Salvar dashboard desta competência";
+  btn.disabled = !$("cfd-f-mesano").value;
 }
 
 // ---------------------------------------------------------------------
