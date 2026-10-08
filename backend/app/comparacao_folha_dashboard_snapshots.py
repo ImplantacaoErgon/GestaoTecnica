@@ -58,18 +58,30 @@ def criar_snapshot(projeto_id, mesano, rotulo, usuario, dashboard_payload):
     return row
 
 
-def listar_snapshots(projeto_id, mesano):
+def listar_snapshots(projeto_id, mesano=None):
     """Lista leve (sem o jsonb pesado de `dados`) para a tela mostrar o
-    histórico de salvamentos desta competência. `geral` vem extraído de
-    `dados->'geral'` — os 5 indicadores do topo do Dashboard — suficiente
-    pra comparar de relance sem precisar abrir cada snapshot."""
+    histórico de salvamentos. `geral` vem extraído de `dados->'geral'` — os
+    5 indicadores do topo do Dashboard — suficiente pra comparar de relance
+    sem precisar abrir cada snapshot.
+
+    148ª rodada — pedido do usuário (verbatim): "permita visualizar os
+    salvamentos da competência escolhida [...] mas permita por uma opção
+    visualiza os demais salvamentos, mesmo de outras competências." Com
+    `mesano=None`, lista os salvamentos de TODAS as competências do
+    projeto — por isso o retorno sempre inclui `mesano` (formatado
+    AAAA-MM, mesmo idioma de `_where_filtros()` em comparacao_folha.py):
+    no modo "todas" a competência varia linha a linha e a tela precisa
+    mostrá-la; no modo escopado ela é sempre a mesma, mas não custa nada
+    devolver do mesmo jeito.
+    """
+    filtro_mesano = f"AND to_char(mesano, 'YYYY-MM') = {db.q(mesano)}" if mesano else ""
     return db.fetch_all(f"""
-        SELECT id, projeto_id, numero_versao, rotulo, total_linhas, criado_em, criado_por,
-               dados->'geral' AS geral
+        SELECT id, projeto_id, to_char(mesano, 'YYYY-MM') AS mesano, numero_versao, rotulo,
+               total_linhas, criado_em, criado_por, dados->'geral' AS geral
         FROM comparacao_folha_dashboard_snapshots
         WHERE projeto_id = {db.q(projeto_id)}
-          AND date_trunc('month', mesano) = date_trunc('month', {db.q(mesano + '-01')}::date)
-        ORDER BY numero_versao DESC
+          {filtro_mesano}
+        ORDER BY mesano DESC, numero_versao DESC
     """)
 
 

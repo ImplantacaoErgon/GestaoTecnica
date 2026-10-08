@@ -3381,10 +3381,15 @@ def create_app():
     # competência". Ver app/comparacao_folha_dashboard_snapshots.py.
     @app.get("/api/comparacao-folha/dashboard/snapshots")
     def comparacao_folha_dashboard_listar_snapshots():
+        # 148ª rodada — `mesano` virou opcional: ausente/vazio lista os
+        # salvamentos de TODAS as competências do projeto (pedido do
+        # usuário: "permita [...] visualizar os demais salvamentos, mesmo
+        # de outras competências"). Com `mesano`, continua escopado como
+        # antes — compatível com quem já chamava este endpoint.
         projeto_id = request.args.get("projeto_id")
-        mesano = request.args.get("mesano")
-        if not projeto_id or not mesano:
-            return jsonify({"erro": "projeto_id e mesano são obrigatórios"}), 400
+        mesano = request.args.get("mesano") or None
+        if not projeto_id:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
         return jsonify(comparacao_folha_dashboard_snapshots.listar_snapshots(projeto_id, mesano))
 
     @app.post("/api/comparacao-folha/dashboard/snapshots")

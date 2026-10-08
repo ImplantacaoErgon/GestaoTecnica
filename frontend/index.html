@@ -1638,10 +1638,18 @@
          Ver cfdCarregarSnapshots()/cfdSalvarSnapshot() abaixo e
          app/comparacao_folha_dashboard_snapshots.py no backend. -->
     <details class="card" id="cfd-snap-painel" style="margin-bottom:14px;">
-      <summary style="cursor:pointer;font-weight:600;">📌 Salvamentos desta competência</summary>
+      <summary style="cursor:pointer;font-weight:600;">📌 Salvamentos <span id="cfd-snap-titulo">desta competência</span></summary>
       <div class="muted" style="font-size:12px;margin:8px 0 12px;">Fotos dos indicadores acima, salvas sob demanda — como a carga de uma nova planilha para esta competência substitui os dados, salvar aqui é o jeito de comparar a mesma competência ao longo do tempo (ex.: antes/depois de corrigir uma regra de cálculo).</div>
+      <!-- 148ª rodada — pedido do usuário (verbatim): "permita visualizar
+           os salvamentos da competência escolhida [...] mas permita por
+           uma opção visualiza os demais salvamentos, mesmo de outras
+           competências." Só afeta a LISTAGEM — salvar continua exigindo
+           uma competência específica no filtro acima (cfdAtualizarBotaoSalvar). -->
+      <label style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;margin-bottom:10px;cursor:pointer;">
+        <input type="checkbox" id="cfd-snap-todas"> Ver salvamentos de todas as competências
+      </label>
       <div class="table-wrap"><table>
-        <thead><tr><th>Versão</th><th>Rótulo</th><th>Quando</th><th>Quem</th><th>Linhas</th><th>Convergente</th><th>% sem div.</th><th>% não prog.</th><th>% com div.</th><th></th></tr></thead>
+        <thead><tr><th>Versão</th><th id="cfd-snap-th-mes" hidden>Competência</th><th>Rótulo</th><th>Quando</th><th>Quem</th><th>Linhas</th><th>Convergente</th><th>% sem div.</th><th>% não prog.</th><th>% com div.</th><th></th></tr></thead>
         <tbody id="cfd-snap-tbody"></tbody>
       </table></div>
     </details>
@@ -11664,8 +11672,12 @@ function cfdMostrarAguardandoCompetencia(){
   $("cfd-verbas-sem-uso-tbody").innerHTML = `<tr class="empty-row"><td colspan="3">Selecione uma competência acima.</td></tr>`;
   $("cfd-rubricas-sem-param-tbody").innerHTML = `<tr class="empty-row"><td colspan="3">Selecione uma competência acima.</td></tr>`;
   $("cfd-verbas-sem-param-tbody").innerHTML = `<tr class="empty-row"><td colspan="3">Selecione uma competência acima.</td></tr>`;
-  $("cfd-snap-tbody").innerHTML = `<tr class="empty-row"><td colspan="10">Selecione uma competência acima.</td></tr>`;
   cfdAtualizarBotaoSalvar();
+  // 148ª rodada — o painel de salvamentos agora pode mostrar "todas as
+  // competências" independente do filtro principal (checkbox cfd-snap-todas)
+  // — delega pra cfdCarregarSnapshots() decidir o que exibir, em vez de
+  // sempre sobrescrever com "selecione uma competência" como antes.
+  cfdCarregarSnapshots();
 }
 
 function cfdListaCoberturaHtml(lista, campoLinhas, colspan){
@@ -11784,6 +11796,7 @@ function wireComparacaoFolhaDashboard(){
   $("cfd-f-mesano").addEventListener("change", cfdCarregarDados);
   $("cfd-refresh").addEventListener("click", cfdAtualizarClique);
   $("cfd-snap-salvar").addEventListener("click", cfdSalvarSnapshot);
+  $("cfd-snap-todas").addEventListener("change", cfdCarregarSnapshots);
 }
 
 // 147ª rodada — pedido do usuário (verbatim): "crie um botão para fazer
@@ -11838,19 +11851,34 @@ function cfdAtualizarBotaoSalvar(){
   $("cfd-snap-salvar").disabled = !$("cfd-f-mesano").value;
 }
 
+// 148ª rodada — pedido do usuário (verbatim): "permita visualizar os
+// salvamentos da competência escolhida como a que está na imagem, mas
+// permita por uma opção visualiza os demais salvamentos, mesmo de outras
+// competências." Checkbox cfd-snap-todas alterna entre os dois modos; no
+// modo "todas" a coluna Competência aparece (th#cfd-snap-th-mes) pra
+// identificar de qual mês é cada linha, já que deixam de ser todas da
+// mesma. O botão "Salvar" continua só pra competência específica do filtro
+// principal — isso aqui é só sobre o que a LISTA mostra.
 async function cfdCarregarSnapshots(){
+  const todas = $("cfd-snap-todas").checked;
   const mesano = $("cfd-f-mesano").value;
-  if(!mesano){
-    $("cfd-snap-tbody").innerHTML = `<tr class="empty-row"><td colspan="10">Selecione uma competência específica para ver/salvar o histórico.</td></tr>`;
+  $("cfd-snap-th-mes").hidden = !todas;
+  $("cfd-snap-titulo").textContent = todas ? "(todas as competências)" : "desta competência";
+  if(!todas && !mesano){
+    $("cfd-snap-tbody").innerHTML = `<tr class="empty-row"><td colspan="10">Selecione uma competência específica para ver/salvar o histórico, ou marque "Ver salvamentos de todas as competências" acima.</td></tr>`;
     return;
   }
   let lista = [];
-  try{ lista = await api(`/comparacao-folha/dashboard/snapshots?projeto_id=${PROJETO.id}&mesano=${encodeURIComponent(mesano)}`); }
-  catch(e){ return; }
+  try{
+    const qs = `projeto_id=${PROJETO.id}` + (todas ? "" : `&mesano=${encodeURIComponent(mesano)}`);
+    lista = await api(`/comparacao-folha/dashboard/snapshots?${qs}`);
+  }catch(e){ return; }
+  const colspan = todas ? 11 : 10;
   $("cfd-snap-tbody").innerHTML = lista.length ? lista.map(s=>{
     const g = s.geral || {};
     return `<tr>
       <td class="mono">v${s.numero_versao}</td>
+      ${todas ? `<td class="mono">${esc(s.mesano || "—")}</td>` : ""}
       <td>${esc(s.rotulo || "—")}</td>
       <td>${fmtDateTime(s.criado_em)}</td>
       <td>${esc(s.criado_por || "—")}</td>
@@ -11861,7 +11889,7 @@ async function cfdCarregarSnapshots(){
       <td>${g.pct_divergente==null ? "—" : g.pct_divergente+"%"}</td>
       <td><button class="btn ghost small" data-excluir-snap="${s.id}" title="Excluir este salvamento">🗑️</button></td>
     </tr>`;
-  }).join("") : `<tr class="empty-row"><td colspan="10">Nenhum salvamento ainda para esta competência.</td></tr>`;
+  }).join("") : `<tr class="empty-row"><td colspan="${colspan}">Nenhum salvamento ${todas ? "ainda." : "ainda para esta competência."}</td></tr>`;
   $("cfd-snap-tbody").querySelectorAll("button[data-excluir-snap]").forEach(btn=>{
     btn.addEventListener("click", ()=>{
       const id = btn.dataset.excluirSnap;
