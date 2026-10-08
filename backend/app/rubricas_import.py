@@ -222,8 +222,22 @@ def parse_rubricas_document(conteudo_bytes, nome_arquivo=""):
     for r in range(LINHA_PRIMEIRA_DADOS, ws.max_row + 1):
         verba = ws.cell(row=r, column=2).value
         descricao = ws.cell(row=r, column=3).value
-        if verba is None and not _texto(descricao):
-            continue  # linha em branco (a planilha tem formatação até o final da folha, sem dado nenhum)
+        # 150ª rodada — pedido do usuário (verbatim): "Quero ver a linha 302
+        # Código Ergon = 515 e não achei em nosso sistema." Causa raiz: essa
+        # linha (e mais 130 outras na planilha real do cliente, levantado em
+        # 08/10/2026) tem Código ERGON e Nome Abreviado preenchidos, mas SEM
+        # Verba 07/Descrição E07 (não tem equivalente no sistema legado — ex:
+        # rubrica nova, só existe no Ergon) — a checagem de "linha em branco"
+        # olhava só pra essas duas colunas e descartava a linha inteira,
+        # junto com as linhas realmente vazias (a planilha tem formatação até
+        # o fim da folha, sem dado nenhum). Agora só é tratada como vazia se
+        # TAMBÉM não tiver Código ERGON nem Nome Abreviado — as duas colunas
+        # que de fato identificam a rubrica.
+        codigo_ergon_bruto = ws.cell(row=r, column=4).value
+        nome_abreviado_bruto = ws.cell(row=r, column=5).value
+        if (verba is None and not _texto(descricao)
+                and codigo_ergon_bruto is None and not _texto(nome_abreviado_bruto)):
+            continue  # linha em branco de verdade
 
         item = {"linha_planilha": r}
         notas = []
