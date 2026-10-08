@@ -1615,6 +1615,13 @@
     <div class="view-sub">Indicadores de convergência entre o Ergon e a ficha financeira do sistema legado — foco em quantidade e cobertura de rubricas, não em valor financeiro.</div>
     <div class="filters">
       <select id="cfd-f-mesano"><option value="">Competência (todas)</option></select>
+      <!-- 147ª rodada — pedido do usuário (verbatim): "crie um botão para
+           fazer refresh no dashboard da comparação da folha". Recarrega a
+           lista de competências (pode ter surgido uma nova carga) e os
+           dados do filtro atual, sem precisar trocar o <select> pra forçar
+           o evento "change" — ver cfdAtualizarClique(). -->
+      <button class="btn ghost small" id="cfd-refresh"
+              title="Recarrega os dados desta competência — útil depois de uma nova carga, sem precisar trocar o filtro">🔄 Atualizar</button>
       <!-- 146ª rodada — pedido do usuário (verbatim): "crie um botão para
            salvar o dashboard. Com a carga da comparação da folha as
            informações anteriores do dashboard se perdem." Só habilitado com
@@ -11775,7 +11782,41 @@ async function cfdCarregarDados(){
 
 function wireComparacaoFolhaDashboard(){
   $("cfd-f-mesano").addEventListener("change", cfdCarregarDados);
+  $("cfd-refresh").addEventListener("click", cfdAtualizarClique);
   $("cfd-snap-salvar").addEventListener("click", cfdSalvarSnapshot);
+}
+
+// 147ª rodada — pedido do usuário (verbatim): "crie um botão para fazer
+// refresh no dashboard da comparação da folha". Útil quando uma carga nova
+// entra para a MESMA competência já selecionada: trocar o <select> pro
+// mesmo valor não dispara o evento "change" (o valor não mudou), então sem
+// este botão a única forma de ver os dados atualizados seria sair e voltar
+// da aba. Recarrega a lista de competências também (pode ter surgido uma
+// competência nova desde a última vez) antes de recarregar os dados.
+//
+// Reaproveita CFD_CARREGADO (113ª rodada) pra decidir se há algo pra
+// recarregar: se o usuário ainda não escolheu nenhuma competência nesta
+// sessão de navegação (tela em "Selecione uma competência acima"), clicar
+// em Atualizar só atualiza a lista do <select> — não dispara sozinho a
+// consulta pesada de "todas as competências" (mesma cautela da 93ª rodada).
+let CFD_ATUALIZANDO = false;
+async function cfdAtualizarClique(){
+  if(CFD_ATUALIZANDO) return;
+  CFD_ATUALIZANDO = true;
+  const btn = $("cfd-refresh");
+  const textoOriginal = btn.textContent;
+  btn.disabled = true; btn.textContent = "Atualizando…";
+  try{
+    await cfdCarregarCompetencias();
+    if(CFD_CARREGADO){
+      await cfdCarregarDados();
+    }else{
+      cfdMostrarAguardandoCompetencia();
+    }
+  }finally{
+    CFD_ATUALIZANDO = false;
+    btn.disabled = false; btn.textContent = textoOriginal;
+  }
 }
 
 // ---------------------------------------------------------------------
