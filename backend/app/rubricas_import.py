@@ -156,23 +156,51 @@ def _data_com_nota(v):
     return iso, s
 
 
+# 151ª rodada — pedido do usuário (verbatim): "A situação da Rubrica deve
+# seguir pela maior data entre Levantamento, Enviada para Techne e
+# Homologada [...] o status da rubrica deve levar em consideração a maior
+# data dentre essas 4." Exemplo dado: Código Ergon 348 tem data de
+# Homologação, mas a data de Enviada à Techne é mais recente — nesse caso o
+# status correto é "Enviada à Techne", não "Homologada" (a rubrica "voltou"
+# pra Techne depois de já ter sido homologada numa tentativa anterior).
+# Ordem do funil (da mais cedo pra mais avançada) — usada só como
+# desempate quando duas datas empatam exatamente, e como fallback quando
+# nenhuma data está preenchida (cai em "Em levantamento", primeiro item).
+_STATUS_POR_CAMPO_DATA = [
+    ("data_levantamento", "Em levantamento"),
+    ("data_envio_techne", "Enviada à Techne"),
+    ("data_liberacao_testes", "Liberada para testes"),
+    ("data_inicio_homologacao", "Em homologação"),
+    ("data_homologacao", "Homologada"),
+]
+
+
 def _derivar_status(item):
     """A planilha não tem uma coluna única de status — tem uma data por etapa
     do funil (levantamento -> envio à Techne -> liberação p/ testes -> início
-    da homologação -> homologação). Deriva um status inicial a partir da data
-    mais avançada preenchida; é só o valor de partida na importação — a tela
-    permite o usuário corrigir manualmente depois (ex: uma rubrica pode
-    "voltar" para revisão mesmo já tendo uma data de homologação de uma
-    tentativa anterior que não valeu)."""
-    if item.get("data_homologacao"):
-        return "Homologada"
-    if item.get("data_inicio_homologacao"):
-        return "Em homologação"
-    if item.get("data_liberacao_testes"):
-        return "Liberada para testes"
-    if item.get("data_envio_techne"):
-        return "Enviada à Techne"
-    return "Em levantamento"
+    da homologação -> homologação). Deriva um status inicial a partir da
+    etapa cuja data é a MAIS RECENTE entre as preenchidas — não
+    necessariamente a etapa mais avançada do funil, porque na prática uma
+    rubrica pode "voltar" (ex: reenviada à Techne depois de já ter uma data
+    de homologação de uma tentativa anterior que não valeu). Em caso de
+    empate exato entre duas datas, desempata pela etapa mais avançada
+    (mesmo critério usado antes desta rodada). É só o valor de partida na
+    importação — a tela permite o usuário corrigir manualmente depois, mas
+    uma reimportação (manual ou automática) recalcula de novo a partir das
+    datas, sobrescrevendo uma correção manual que não tenha sido refletida
+    também nas datas."""
+    melhor = None  # (data, índice no funil, status)
+    for idx, (campo, status) in enumerate(_STATUS_POR_CAMPO_DATA):
+        valor = item.get(campo)
+        if not valor:
+            continue
+        try:
+            d = date.fromisoformat(valor)
+        except (TypeError, ValueError):
+            continue
+        if melhor is None or (d, idx) > (melhor[0], melhor[1]):
+            melhor = (d, idx, status)
+    return melhor[2] if melhor else "Em levantamento"
 
 
 def parse_rubricas_document(conteudo_bytes, nome_arquivo=""):
