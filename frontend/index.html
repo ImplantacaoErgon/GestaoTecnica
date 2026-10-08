@@ -1469,6 +1469,13 @@
     <div class="kpis" id="rub-kpis"></div>
     <div class="filters">
       <input type="text" id="rub-search" placeholder="Buscar por código, verba, nome…">
+      <!-- 149ª rodada — pedido do usuário (verbatim): "incluir o campo
+           Código Ergon como filtro". Diferente de rub-search (busca em
+           vários campos de uma vez, pode trazer resultado de outros campos
+           que também contenham o número digitado) — este filtra só
+           codigo_ergon, pra achar exatamente a rubrica certa quando o
+           código já é conhecido. -->
+      <input type="text" id="rub-f-codigo-ergon" placeholder="Código Ergon">
       <select id="rub-status">
         <option value="">Status (todos)</option>
         <option>Em levantamento</option>
@@ -7618,6 +7625,7 @@ function renderRubricasAutoUpdateStatus(){
 function rubFilters(){
   return {
     search: ($("rub-search").value||"").trim().toLowerCase(),
+    codigoErgon: ($("rub-f-codigo-ergon").value||"").trim().toLowerCase(),
     status: $("rub-status").value,
     grupo: $("rub-grupo").value,
   };
@@ -7634,6 +7642,7 @@ function renderRubricas(){
   const list = RUBRICAS.filter(r=>{
     if(f.status && r.status!==f.status) return false;
     if(f.grupo && r.grupo_calculo!==f.grupo) return false;
+    if(f.codigoErgon && !(r.codigo_ergon||"").toLowerCase().includes(f.codigoErgon)) return false;
     if(f.search && !([r.codigo_ergon,r.verba_legado,r.nome_abreviado,r.nome_extenso,r.descricao_legado].join(" ").toLowerCase().includes(f.search))) return false;
     return true;
   });
@@ -7669,7 +7678,7 @@ function renderRubricas(){
 }
 
 function wireRubricasFiltros(){
-  ["rub-search","rub-status","rub-grupo"].forEach(id=>{
+  ["rub-search","rub-f-codigo-ergon","rub-status","rub-grupo"].forEach(id=>{
     $(id).addEventListener("input", renderRubricas);
     $(id).addEventListener("change", renderRubricas);
   });
