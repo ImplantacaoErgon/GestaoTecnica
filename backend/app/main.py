@@ -11,7 +11,7 @@ from datetime import datetime, date, timedelta
 
 from flask import Flask, request, jsonify, send_from_directory, send_file, abort, session
 
-from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_renumeracao, cronograma_anomalias, cronograma_export, cronograma_export_xml, cronograma_comparacao, relatorio_executivo, relatorio_pdf, dashboard_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, drive_rubricas, rubricas_auto_update, comparacao_folha, comparacao_folha_import, comparacao_folha_dashboard_snapshots, google_drive, migracao_quadro_export, requisitos_ia, migracao_rejeicoes, migracao_rejeicoes_import
+from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_renumeracao, cronograma_anomalias, cronograma_export, cronograma_export_xml, cronograma_comparacao, relatorio_executivo, relatorio_pdf, dashboard_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, drive_rubricas, rubricas_auto_update, comparacao_folha, comparacao_folha_import, comparacao_folha_dashboard_snapshots, comparacao_folha_rubrica_situacao_export, google_drive, migracao_quadro_export, requisitos_ia, migracao_rejeicoes, migracao_rejeicoes_import
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 FRONTEND_DIR = os.environ.get(
@@ -3438,6 +3438,40 @@ def create_app():
             detalhes={"numero_versao": snapshot["numero_versao"], "rotulo": snapshot["rotulo"]},
         )
         return jsonify({"ok": True})
+
+    # 153ª rodada — pedido do usuário (verbatim): "coloque um botão para
+    # esse quadro novo para exportar em excel (xlsx)" (quadro "Rubricas ×
+    # Situação" da 152ª rodada). Mesmo padrão de
+    # /itens-migracao/quadro-ciclo/exportar: recalcula os mesmos dados da
+    # tela (comparacao_folha.por_rubrica_situacao(), nenhum recálculo
+    # próprio aqui) e devolve formatados por
+    # app/comparacao_folha_rubrica_situacao_export.py — planilha e tela
+    # nunca divergem entre si.
+    @app.get("/api/comparacao-folha/dashboard/rubrica-situacao/exportar")
+    def comparacao_folha_rubrica_situacao_exportar():
+        pid = request.args.get("projeto_id")
+        mesano = request.args.get("mesano") or None
+        if not pid:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        projeto = db.fetch_one(f"SELECT nome, sigla FROM projetos WHERE id = {db.q(pid)}")
+        if not projeto:
+            abort(404)
+        dados = comparacao_folha.por_rubrica_situacao(pid, mesano)
+        try:
+            xlsx_bytes = comparacao_folha_rubrica_situacao_export.gerar_planilha_bytes(dados, mesano)
+        except Exception as e:
+            print(f"[comparacao_folha_rubrica_situacao_export] erro ao gerar planilha: {e}", flush=True)
+            traceback.print_exc()
+            return jsonify({"erro": f"Falha ao gerar a planilha: {e}"}), 500
+        base = (projeto.get("sigla") or projeto.get("nome") or "projeto").strip()
+        base = "".join(c if c.isalnum() or c in "-_" else "-" for c in base).strip("-") or "projeto"
+        sufixo_mes = f"-{mesano}" if mesano else "-todas-competencias"
+        nome_arquivo = f"rubricas-situacao-{base}{sufixo_mes}-{date.today().isoformat()}.xlsx"
+        return send_file(
+            io.BytesIO(xlsx_bytes),
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True, download_name=nome_arquivo,
+        )
 
     # ------------------------------------------------------------------ marcos
     @app.get("/api/marcos")

@@ -1693,7 +1693,15 @@
     <div class="card card--zona-azul" style="margin-top:14px;">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
         <h3>📐 Rubricas × Situação</h3>
-        <span class="muted" id="cfd-rubsit-contagem" style="font-size:11.5px;"></span>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="muted" id="cfd-rubsit-contagem" style="font-size:11.5px;"></span>
+          <!-- 153ª rodada — pedido do usuário (verbatim): "coloque um botão
+               para esse quadro novo para exportar em excel (xlsx)". Mesmo
+               padrão já usado no Quadro de Carga por Ciclo (qc-exportar-excel):
+               window.open num GET que recalcula os mesmos dados da tela no
+               backend — planilha e tela nunca divergem entre si. -->
+          <button class="btn secondary small" id="cfd-rubsit-exportar" title="Exportar este quadro em Excel (.xlsx)">⬇ Exportar Excel</button>
+        </div>
       </div>
       <div class="view-sub" style="margin-top:-6px;">Quantidade de linhas comparadas por Rubrica Ergon (linha) e Situação (coluna) — totais ao final de cada linha e de cada coluna.</div>
       <div class="table-wrap"><table>
@@ -11863,6 +11871,14 @@ function wireComparacaoFolhaDashboard(){
   $("cfd-refresh").addEventListener("click", cfdAtualizarClique);
   $("cfd-snap-salvar").addEventListener("click", cfdSalvarSnapshot);
   $("cfd-snap-todas").addEventListener("change", cfdCarregarSnapshots);
+  // 153ª rodada — exporta exatamente o que está na tela no momento (mesma
+  // competência selecionada no filtro, inclusive "todas").
+  $("cfd-rubsit-exportar").addEventListener("click", ()=>{
+    const mesano = $("cfd-f-mesano").value;
+    const params = new URLSearchParams({ projeto_id: PROJETO.id });
+    if(mesano) params.set("mesano", mesano);
+    window.open(`${API}/comparacao-folha/dashboard/rubrica-situacao/exportar?${params.toString()}`, "_blank");
+  });
 }
 
 // 147ª rodada — pedido do usuário (verbatim): "crie um botão para fazer
