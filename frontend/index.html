@@ -241,6 +241,15 @@
   .cfd-rubsit-table thead th:first-child{max-width:none;white-space:nowrap;}
   .cfd-rubsit-table tbody td,.cfd-rubsit-table tfoot td{padding:5px 7px;font-size:11.5px;}
 
+  /* 155ª rodada — mesmo pedido da 154ª, agora pro quadro "Comparação por
+     Tipo de Rubrica" (par ao lado de "% por Situação"): colunas como
+     "% não prog./cadastr." também estouravam a largura por ficarem numa
+     linha só. Mesma receita: cabeçalho quebra em duas linhas, fonte/padding
+     menores. Escopado só nesta tabela. */
+  .cfd-tiporubr-table thead th{white-space:normal;word-break:break-word;line-height:1.25;font-size:9.5px;padding:6px 7px;max-width:80px;}
+  .cfd-tiporubr-table thead th:first-child{max-width:none;white-space:nowrap;}
+  .cfd-tiporubr-table tbody td{padding:5px 7px;font-size:11.5px;}
+
   /* ---- resumo frente bars ---- */
   .frente-row{display:flex;align-items:center;gap:10px;padding:7px 0;font-size:12.5px;}
   .frente-row .nome{width:150px;flex-shrink:0;color:var(--text-muted);}
@@ -1689,7 +1698,7 @@
              por_tiporubr) pros valores exatos de SITUACAO que entram nessa
              categoria. Rótulo "Sem divergência" renomeado pra "Convergente"
              nesta mesma rodada (pedido do usuário). -->
-        <div class="table-wrap"><table>
+        <div class="table-wrap"><table class="cfd-tiporubr-table">
           <thead><tr><th>Tipo de Rubrica</th><th>Total</th><th>Convergente</th><th>Não prog./cadastr.</th><th>Divergente</th><th>% convergente</th><th>% não prog./cadastr.</th><th>% divergente</th></tr></thead>
           <tbody id="cfd-tiporubr-tbody"></tbody>
         </table></div>
