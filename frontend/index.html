@@ -1681,6 +1681,27 @@
         </table></div>
       </div>
     </div>
+    <!-- 152ª rodada — pedido do usuário (verbatim): "no dashboard de
+         Comparação de folha gerar um quadro no padrão da imagem 1.
+         Bidimensional relação das rubricas por situação e a quantidade de
+         cada célula, no final totalizando tanto as colunas quanto as
+         linhas. Coloque esse quadro logo abaixo dos dois que aparecem na
+         imagem 2" — os "dois" são o par acima (% por Situação / Comparação
+         por Tipo de Rubrica). Cabeçalho e linhas são montados via JS
+         (cfdRenderRubricaSituacao) porque as colunas (Situação) são
+         dinâmicas — vêm dos dados, não são uma lista fixa no HTML. -->
+    <div class="card card--zona-azul" style="margin-top:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+        <h3>📐 Rubricas × Situação</h3>
+        <span class="muted" id="cfd-rubsit-contagem" style="font-size:11.5px;"></span>
+      </div>
+      <div class="view-sub" style="margin-top:-6px;">Quantidade de linhas comparadas por Rubrica Ergon (linha) e Situação (coluna) — totais ao final de cada linha e de cada coluna.</div>
+      <div class="table-wrap"><table>
+        <thead id="cfd-rubsit-thead"></thead>
+        <tbody id="cfd-rubsit-tbody"></tbody>
+        <tfoot id="cfd-rubsit-tfoot"></tfoot>
+      </table></div>
+    </div>
     <!-- 84ª rodada: quadro "Top divergências por Empresa × Rubrica Ergon" —
          pedido do usuário original era um quadro com TODAS as combinações
          de empresa×rubrica, e um segundo quadro ainda mais granular
@@ -11677,6 +11698,10 @@ function cfdMostrarAguardandoCompetencia(){
   $("cfd-emprub-contagem").textContent = "";
   $("cfd-emprub-tbody").innerHTML = `<tr class="empty-row"><td colspan="8">Selecione uma competência acima.</td></tr>`;
   $("cfd-empresa-tbody").innerHTML = `<tr class="empty-row"><td colspan="5">Selecione uma competência acima.</td></tr>`;
+  $("cfd-rubsit-contagem").textContent = "";
+  $("cfd-rubsit-thead").innerHTML = `<tr><th>Rubrica Ergon</th><th>Total</th></tr>`;
+  $("cfd-rubsit-tbody").innerHTML = `<tr class="empty-row"><td colspan="2">Selecione uma competência acima.</td></tr>`;
+  $("cfd-rubsit-tfoot").innerHTML = "";
   $("cfd-rubricas-sem-uso-tbody").innerHTML = `<tr class="empty-row"><td colspan="3">Selecione uma competência acima.</td></tr>`;
   $("cfd-verbas-sem-uso-tbody").innerHTML = `<tr class="empty-row"><td colspan="3">Selecione uma competência acima.</td></tr>`;
   $("cfd-rubricas-sem-param-tbody").innerHTML = `<tr class="empty-row"><td colspan="3">Selecione uma competência acima.</td></tr>`;
@@ -11694,6 +11719,36 @@ function cfdListaCoberturaHtml(lista, campoLinhas, colspan){
   return lista.map(x=>`
     <tr><td class="mono">${esc(x.codigo)}</td><td>${esc(x.nome||"—")}</td><td class="mono">${x[campoLinhas]}</td></tr>
   `).join("");
+}
+
+// 152ª rodada — quadro "Rubricas × Situação" (ver view-comparacao-folha-dashboard
+// no HTML e comparacao_folha.por_rubrica_situacao() no backend). Cabeçalho e
+// linhas são montados aqui via JS porque as colunas (Situação) são dinâmicas —
+// o conjunto de situações vem dos dados da competência, não é fixo. `d` é
+// r.por_rubrica_situacao do retorno de GET /comparacao-folha/dashboard.
+function cfdRenderRubricaSituacao(d){
+  const situacoes = d.situacoes || [];
+  const linhas = d.linhas || [];
+  if(!situacoes.length){
+    $("cfd-rubsit-thead").innerHTML = `<tr><th>Rubrica Ergon</th><th>Total</th></tr>`;
+    $("cfd-rubsit-tbody").innerHTML = `<tr class="empty-row"><td colspan="2">Nenhum dado para esta competência.</td></tr>`;
+    $("cfd-rubsit-tfoot").innerHTML = "";
+    $("cfd-rubsit-contagem").textContent = "";
+    return;
+  }
+  $("cfd-rubsit-thead").innerHTML = `<tr><th>Rubrica Ergon</th>${situacoes.map(s=>`<th>${esc(s)}</th>`).join("")}<th>Total</th></tr>`;
+  $("cfd-rubsit-tbody").innerHTML = linhas.map(l=>{
+    const rotulo = `${esc(l.rubrica_ergon)}${l.rubrica_nome_ergon ? ` - ${esc(l.rubrica_nome_ergon)}` : ""}`;
+    const celulas = l.valores.map(v=>`<td class="mono">${v ? Number(v).toLocaleString('pt-BR') : "—"}</td>`).join("");
+    return `<tr><td class="mono">${rotulo}</td>${celulas}<td class="mono"><strong>${Number(l.total||0).toLocaleString('pt-BR')}</strong></td></tr>`;
+  }).join("");
+  const totaisColuna = d.totais_situacao || [];
+  $("cfd-rubsit-tfoot").innerHTML = `<tr style="font-weight:600;background:var(--surface-2);border-top:2px solid var(--border);">
+    <td>Total</td>
+    ${totaisColuna.map(t=>`<td class="mono">${Number(t||0).toLocaleString('pt-BR')}</td>`).join("")}
+    <td class="mono">${Number(d.total_geral||0).toLocaleString('pt-BR')}</td>
+  </tr>`;
+  $("cfd-rubsit-contagem").textContent = `${linhas.length.toLocaleString('pt-BR')} rubrica(s) × ${situacoes.length} situação(ões)`;
 }
 
 async function cfdCarregarDados(){
@@ -11793,6 +11848,8 @@ async function cfdCarregarDados(){
         </div>
       </td>
     </tr>`).join("") : `<tr class="empty-row"><td colspan="5">Nenhum dado para esta competência.</td></tr>`;
+
+  cfdRenderRubricaSituacao(r.por_rubrica_situacao || {});
 
   const cob = r.cobertura_mapeamento || {};
   $("cfd-rubricas-sem-uso-tbody").innerHTML = cfdListaCoberturaHtml(cob.rubricas_parametrizadas_sem_uso, "linhas_parametrizadas", 3);

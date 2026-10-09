@@ -780,12 +780,81 @@ def dashboard(projeto_id, mesano=None):
         "por_empresa_rubrica": por_empresa_rubrica,
         "total_combinacoes_empresa_rubrica": total_combinacoes_empresa_rubrica,
         "por_empresa": por_empresa,
+        "por_rubrica_situacao": por_rubrica_situacao(projeto_id, mesano),
         "cobertura_mapeamento": {
             "rubricas_parametrizadas_sem_uso": rubricas_parametrizadas_sem_uso,
             "verbas_parametrizadas_sem_uso": verbas_parametrizadas_sem_uso,
             "rubricas_sem_parametrizacao": rubricas_sem_parametrizacao,
             "verbas_sem_parametrizacao": verbas_sem_parametrizacao,
         },
+    }
+
+
+# ---------------------------------------------------------------------
+# 152ª rodada — pedido do usuário (verbatim): "no dashboard de Comparação
+# de folha gerar um quadro no padrão da imagem 1. Bidimensional relação das
+# rubricas por situação e a quantidade de cada célula, no final totalizando
+# tanto as colunas quanto as linhas." (imagem 1: uma planilha com uma linha
+# por Rubrica Ergon, uma coluna por Situação, e a quantidade de linhas da
+# Comparação Folha em cada célula.)
+#
+# Postgres não tem PIVOT nativo, e o conjunto de situações não é uma lista
+# fixa no código — vem dos próprios dados (mesmo espírito de por_situacao,
+# acima). Por isso a função primeiro descobre quais situações existem (e já
+# aproveita pra tirar os totais de COLUNA de graça, na mesma consulta) e só
+# depois monta uma segunda consulta com um COUNT(*) FILTER por situação,
+# agrupada por rubrica_ergon — a forma padrão de fazer um "pivot" em SQL
+# por agregação condicional, sem depender da extensão tablefunc/crosstab.
+# Os aliases das colunas dinâmicas são posicionais (s0, s1, ...) pra não
+# depender de o texto da situação (tem espaço, acento etc.) virar um
+# identificador SQL válido — o nome de verdade de cada coluna é reassociado
+# em Python, pela posição, não pelo SQL.
+#
+# Diferente de por_empresa_rubrica (que corta pras N piores combinações,
+# porque é um quadro de "onde focar"), aqui a lista de rubricas NÃO é
+# cortada — o pedido explícito de totalizar linhas E colunas só fica
+# correto com o universo completo, não com um recorte.
+def por_rubrica_situacao(projeto_id, mesano=None):
+    where = _where_filtros(projeto_id=projeto_id, mesano=mesano)
+
+    situacoes = db.fetch_all(f"""
+        SELECT COALESCE(situacao, '(sem situação)') AS situacao, COUNT(*) AS total
+        FROM comparacao_folha{where}
+        GROUP BY situacao ORDER BY total DESC
+    """)
+    if not situacoes:
+        return {"situacoes": [], "totais_situacao": [], "linhas": [], "total_geral": 0}
+
+    lista_situacoes = [s["situacao"] for s in situacoes]
+    totais_situacao = [s["total"] for s in situacoes]
+    total_geral = sum(totais_situacao)
+
+    colunas_sql = ",\n          ".join(
+        f"COUNT(*) FILTER (WHERE COALESCE(situacao, '(sem situação)') = {db.q(nome)}) AS s{i}"
+        for i, nome in enumerate(lista_situacoes)
+    )
+    linhas_raw = db.fetch_all(f"""
+        SELECT
+          COALESCE(rubrica_ergon, '(sem código)') AS rubrica_ergon,
+          MAX(rubrica_nome_ergon) AS rubrica_nome_ergon,
+          COUNT(*) AS total_linha,
+          {colunas_sql}
+        FROM comparacao_folha{where}
+        GROUP BY COALESCE(rubrica_ergon, '(sem código)')
+        ORDER BY total_linha DESC
+    """)
+    linhas = [{
+        "rubrica_ergon": r["rubrica_ergon"],
+        "rubrica_nome_ergon": r.get("rubrica_nome_ergon"),
+        "total": r["total_linha"],
+        "valores": [r.get(f"s{i}") or 0 for i in range(len(lista_situacoes))],
+    } for r in linhas_raw]
+
+    return {
+        "situacoes": lista_situacoes,
+        "totais_situacao": totais_situacao,
+        "linhas": linhas,
+        "total_geral": total_geral,
     }
 
 
