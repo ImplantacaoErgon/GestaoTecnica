@@ -380,16 +380,83 @@ def _rubricas_preview_resultado(projeto_id, conteudo_bytes, nome_arquivo):
     (ou outra exceção de leitura) se a planilha não for válida — quem chama
     decide o código HTTP."""
     resultado = rubricas_import.parse_rubricas_document(conteudo_bytes, nome_arquivo or "")
-    existentes = {
-        r["linha_planilha"] for r in db.fetch_all(
-            f"SELECT linha_planilha FROM rubricas WHERE projeto_id = {db.q(projeto_id)} "
-            "AND linha_planilha IS NOT NULL"
-        )
-    }
+    existentes_rows = db.fetch_all(
+        f"SELECT linha_planilha, status, codigo_ergon, nome_abreviado FROM rubricas "
+        f"WHERE projeto_id = {db.q(projeto_id)} AND linha_planilha IS NOT NULL"
+    )
+    existentes = {r["linha_planilha"] for r in existentes_rows}
     for it in resultado["itens"]:
         it["ja_existe"] = it["linha_planilha"] in existentes
+
+    # 156ª rodada — pedido do usuário (verbatim): "caso uma linha da
+    # planilha tenha sumido considere que essa linha foi excluída, crie esse
+    # status e marque como Excluída [...] Pode ser que mais para frente ela
+    # retorne, nesse caso ela sai de Excluída para uma das situações
+    # normais." Compara o conjunto de linha_planilha desta versão da
+    # planilha com o que já está cadastrado no projeto — quem está cadastrado
+    # mas sumiu é candidato a virar "Excluída" na confirmação (ver
+    # marcar_rubricas_ausentes_como_excluidas, chamada só em
+    # importar_rubricas_confirmar/_executar_atualizacao, nunca aqui — a
+    # prévia só AVISA, não grava nada). Ignora quem já está Excluída, pra não
+    # contar/avisar sobre uma transição que não vai de fato acontecer.
+    linhas_planilha_atual = {it["linha_planilha"] for it in resultado["itens"]}
+    sumidas = [
+        r for r in existentes_rows
+        if r["linha_planilha"] not in linhas_planilha_atual and r["status"] != "Excluída"
+    ]
+    resultado["resumo"]["sumidas_serao_excluidas"] = len(sumidas)
     resultado["resumo"]["ja_existentes"] = sum(1 for it in resultado["itens"] if it["ja_existe"])
+    for r in sumidas[:30]:  # cap de avisos individuais — o total já está no resumo
+        identificacao = r.get("codigo_ergon") or r.get("nome_abreviado") or f'linha {r["linha_planilha"]}'
+        resultado["avisos"].append(
+            f'Rubrica "{identificacao}" (linha {r["linha_planilha"]} da planilha anterior) não foi encontrada '
+            "nesta versão da planilha — será marcada como Excluída ao confirmar."
+        )
+    if len(sumidas) > 30:
+        resultado["avisos"].append(f"... e mais {len(sumidas) - 30} rubrica(s) na mesma situação.")
+    resultado["linhas_planilha_atual"] = sorted(linhas_planilha_atual)
     return resultado
+
+
+def marcar_rubricas_ausentes_como_excluidas(projeto_id, linhas_planilha_atual):
+    """156ª rodada — pedido do usuário (verbatim): "quando for atualizar a
+    tabela com base na planilha, caso uma linha da planilha tenha sumido
+    considere que essa linha foi excluída, crie esse status e marque como
+    Excluída para essa situação [...] Pode ser que mais para frente ela
+    retorne, nesse caso ela sai de Excluída para uma das situações normais."
+
+    `linhas_planilha_atual`: TODAS as linha_planilha encontradas na versão
+    mais recente da planilha — não só as que o usuário manteve marcadas na
+    tela de prévia (ver confirmarImportacaoRubricas no front-end): desmarcar
+    uma linha ali só significa "não atualizar esta agora", não "esta linha
+    sumiu da planilha", então usar `itens` (a seleção) em vez do conjunto
+    completo marcaria como Excluída qualquer rubrica que o usuário só tenha
+    decidido pular nesta rodada. Toda rubrica cadastrada (linha_planilha
+    IS NOT NULL) cujo número de linha não está mais neste conjunto é que
+    efetivamente sumiu da planilha de origem, e vira Excluída.
+
+    O caminho de volta (a rubrica reaparece numa planilha futura) não
+    precisa de lógica dedicada aqui: toda linha presente é regravada via
+    upsert_rubricas, que recalcula o status a partir das datas
+    (_derivar_status, em rubricas_import.py) e sobrescreve incondicionalmente
+    — isso já tira a rubrica de Excluída sozinho, sem precisar de um caso
+    especial. Retorna quantas rubricas foram marcadas nesta chamada."""
+    linhas_sql = ", ".join(db.q(int(n)) for n in linhas_planilha_atual if n is not None)
+    if not linhas_sql:
+        return 0
+    afetadas = db.fetch_all(
+        f"SELECT id FROM rubricas WHERE projeto_id = {db.q(projeto_id)} "
+        f"AND linha_planilha IS NOT NULL AND linha_planilha NOT IN ({linhas_sql}) "
+        "AND status <> 'Excluída'"
+    )
+    if not afetadas:
+        return 0
+    db.execute(
+        f"UPDATE rubricas SET status = 'Excluída' WHERE projeto_id = {db.q(projeto_id)} "
+        f"AND linha_planilha IS NOT NULL AND linha_planilha NOT IN ({linhas_sql}) "
+        "AND status <> 'Excluída'"
+    )
+    return len(afetadas)
 
 
 def preparar_fatura(data, projeto_id):
@@ -2982,7 +3049,16 @@ def create_app():
     def importar_rubricas_confirmar():
         """Recebe a lista de itens revisados na prévia (mesmo formato de
         .../preview) e grava via upsert por linha_planilha — reimportar
-        atualiza em vez de duplicar."""
+        atualiza em vez de duplicar.
+
+        156ª rodada: também recebe `linhas_planilha_atual` — TODAS as
+        linha_planilha encontradas na planilha nesta versão (vem de
+        resultado["linhas_planilha_atual"] da prévia, repassado pelo
+        front-end sem alteração; ver _exibirPreviewRubricas/
+        confirmarImportacaoRubricas), usado para marcar como Excluída
+        quem sumiu — ver marcar_rubricas_ausentes_como_excluidas. Campo
+        opcional (ausente -> nenhuma rubrica é marcada Excluída) só por
+        compatibilidade; o front-end atual sempre manda."""
         data = request.get_json(force=True)
         projeto_id = data.get("projeto_id")
         itens = data.get("itens") or []
@@ -2992,7 +3068,9 @@ def create_app():
         if not linhas:
             return jsonify({"erro": "Nenhum item válido para importar."}), 400
         inseridos, atualizados = upsert_rubricas(projeto_id, linhas)
-        return jsonify({"inseridos": inseridos, "atualizados": atualizados})
+        linhas_planilha_atual = data.get("linhas_planilha_atual") or []
+        excluidas = marcar_rubricas_ausentes_como_excluidas(projeto_id, linhas_planilha_atual)
+        return jsonify({"inseridos": inseridos, "atualizados": atualizados, "excluidas": excluidas})
 
     @app.get("/api/rubricas/auto-update/status")
     def rubricas_auto_update_status():

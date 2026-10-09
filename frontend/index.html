@@ -5933,8 +5933,14 @@ function _vexDesenharEvolucaoMigracao(ciclos){
 // dois lugares.
 function _vexRenderFolha(){
   const el = $("vex-folha");
+  // 156ª rodada — antes só "RUBRICAS vazio" caía no empty-state; agora que a
+  // reimportação marca sozinha quem sumiu da planilha como Excluída (ver
+  // marcar_rubricas_ausentes_como_excluidas, backend), um projeto pode ter
+  // rubricas cadastradas mas TODAS excluídas — nesse caso ainda vale mostrar
+  // os tiles (com Excluídas > 0) em vez do aviso genérico de "nenhuma".
+  if(!RUBRICAS.length){ el.innerHTML = `<div class="vex-empty">Nenhuma rubrica levantada.</div>`; return; }
   const validas = RUBRICAS.filter(r=>r.status!=="Excluída");
-  if(!validas.length){ el.innerHTML = `<div class="vex-empty">Nenhuma rubrica levantada.</div>`; return; }
+  const totalExcluidas = RUBRICAS.length - validas.length;
   const porStatus = {};
   validas.forEach(r=>{ porStatus[r.status] = (porStatus[r.status]||0)+1; });
   el.innerHTML = `<div class="kpis">${[
@@ -5944,6 +5950,7 @@ function _vexRenderFolha(){
     {l:"Liberadas p/ testes", v: porStatus["Liberada para testes"]||0},
     {l:"Em homologação", v: porStatus["Em homologação"]||0},
     {l:"Homologadas", v: porStatus["Homologada"]||0},
+    {l:"Excluídas", v: totalExcluidas},
   ].map(k=>`<div class="kpi"><div class="label">${k.l}</div><div class="value">${k.v}</div></div>`).join("")}</div>`;
 }
 
@@ -7666,7 +7673,11 @@ function renderRubricasAutoUpdateStatus(){
   if(!s){ el.textContent = ""; return; }
   const quando = fmtDateTime(s.concluido_em || s.iniciado_em);
   if(s.status === "concluido"){
-    el.innerHTML = `🔄 Última atualização automática: <b>${esc(quando)}</b> — ${s.inseridos||0} nova(s), ${s.atualizados||0} atualizada(s).`;
+    // 156ª rodada — s.excluidas é NULL em execuções registradas antes desta
+    // rodada (coluna nova, sem DEFAULT — ver migration_043); só mostra o
+    // trecho quando o valor existir e for > 0.
+    const msgExcluidas = s.excluidas ? `, ${s.excluidas} marcada(s) como Excluída` : "";
+    el.innerHTML = `🔄 Última atualização automática: <b>${esc(quando)}</b> — ${s.inseridos||0} nova(s), ${s.atualizados||0} atualizada(s)${msgExcluidas}.`;
   }else if(s.status === "erro"){
     el.innerHTML = `⚠️ A última atualização automática (${esc(quando)}) falhou: ${esc(s.mensagem_erro||"erro desconhecido")}.`;
   }else{
@@ -7701,13 +7712,22 @@ function renderRubricas(){
 
   const porStatus = {};
   RUBRICAS.forEach(r=>{ porStatus[r.status] = (porStatus[r.status]||0)+1; });
+  // 156ª rodada — "Total levantadas" passa a excluir as Excluídas (mesmo
+  // critério já usado em _vexRenderFolha, Visão Executiva, desde a 137ª
+  // rodada), e ganha um card próprio "Excluídas" — antes desta rodada esse
+  // status praticamente nunca era usado (só manual), agora a reimportação
+  // marca sozinha quando uma linha some da planilha (ver
+  // marcar_rubricas_ausentes_como_excluidas, backend), então vale deixar
+  // visível quantas estão nessa situação.
+  const totalExcluidas = porStatus["Excluída"]||0;
   $("rub-kpis").innerHTML = [
-    {l:"Total levantadas", v:RUBRICAS.length},
+    {l:"Total levantadas", v:RUBRICAS.length - totalExcluidas},
     {l:"Em levantamento", v:porStatus["Em levantamento"]||0},
     {l:"Enviadas à Techne", v:porStatus["Enviada à Techne"]||0},
     {l:"Liberadas p/ testes", v:porStatus["Liberada para testes"]||0},
     {l:"Em homologação", v:porStatus["Em homologação"]||0},
     {l:"Homologadas", v:porStatus["Homologada"]||0},
+    {l:"Excluídas", v:totalExcluidas},
   ].map(k=>`<div class="kpi"><div class="label">${k.l}</div><div class="value">${k.v}</div></div>`).join("");
 
   $("rubricas-tbody").innerHTML = list.length ? list.map(r=>{
@@ -7880,6 +7900,11 @@ async function deleteRubrica(){
 
 // ---------------- Importação da planilha de Rubricas ----------------
 let rubImpItens = [], rubImpConfirmando = false;
+// 156ª rodada — TODAS as linha_planilha desta versão da planilha (não só as
+// que ficaram marcadas na prévia), devolvidas por _rubricas_preview_resultado
+// (backend) e repassadas sem alteração pra /importar/confirmar, que usa pra
+// saber quem sumiu e marcar como Excluída — ver confirmarImportacaoRubricas.
+let rubImpLinhasPlanilhaAtual = [];
 
 function wireImportRubricas(){
   $("btn-import-rubricas").addEventListener("click", openImportarRubricasModal);
@@ -7951,6 +7976,7 @@ async function abrirAtualizarRubricasDrive(){
 
 function _exibirPreviewRubricas(r){
   rubImpItens = (r.itens||[]).map(it=>({...it, _selecionado: true}));
+  rubImpLinhasPlanilhaAtual = r.linhas_planilha_atual || rubImpItens.map(it=>it.linha_planilha);
   const resumo = r.resumo || {};
   if(r.arquivo_origem){
     const mod = r.arquivo_origem.modificado_em ? fmtDateTime(r.arquivo_origem.modificado_em) : null;
@@ -7970,6 +7996,11 @@ function _exibirPreviewRubricas(r){
     {l:"Já cadastradas (serão atualizadas)", v: resumo.ja_existentes ?? 0},
     {l:"Homologadas", v: (resumo.por_status||{})["Homologada"] ?? 0},
     {l:"Em levantamento", v: (resumo.por_status||{})["Em levantamento"] ?? 0},
+    // 156ª rodada — rubricas cadastradas que não aparecem mais nesta versão
+    // da planilha: ao confirmar, viram status Excluída (ver avisos acima,
+    // com o detalhe de cada uma, e marcar_rubricas_ausentes_como_excluidas
+    // no backend).
+    {l:"Sumiram da planilha (virarão Excluída)", v: resumo.sumidas_serao_excluidas ?? 0},
   ].map(k=>`<div class="kpi"><div class="label">${k.l}</div><div class="value">${k.v}</div></div>`).join("");
   $("rubimp-check-all").checked = true;
   $("rubimp-preview-search").value = ""; $("rubimp-preview-status").value = "";
@@ -8016,9 +8047,14 @@ async function confirmarImportacaoRubricas(){
   try{
     const r = await api("/rubricas/importar/confirmar", {
       method: "POST",
-      body: JSON.stringify({ projeto_id: PROJETO.id, itens: selecionados }),
+      // linhas_planilha_atual: TODAS as linha_planilha desta versão da
+      // planilha, não só `selecionados` — desmarcar uma linha na prévia é
+      // "não atualizar agora", não "sumiu da planilha" (ver comentário em
+      // marcar_rubricas_ausentes_como_excluidas, app/main.py).
+      body: JSON.stringify({ projeto_id: PROJETO.id, itens: selecionados, linhas_planilha_atual: rubImpLinhasPlanilhaAtual }),
     });
-    toast(`Importação concluída: ${r.inseridos} nova(s), ${r.atualizados} atualizada(s).`);
+    const msgExcluidas = r.excluidas ? `, ${r.excluidas} marcada(s) como Excluída (sumiram da planilha)` : "";
+    toast(`Importação concluída: ${r.inseridos} nova(s), ${r.atualizados} atualizada(s)${msgExcluidas}.`);
     await loadRubricas(); renderRubricas();
     await loadRubricasAutoUpdateStatus(); renderRubricasAutoUpdateStatus();
     closeImportarRubricasModal();

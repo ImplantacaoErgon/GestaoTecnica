@@ -89,22 +89,33 @@ def _executar_atualizacao(projeto_id, janela):
     credencial faltando, planilha no formato errado) fica registrado na
     própria linha de execução, pra aparecer na tela -- nunca sobe e derruba
     a thread de agendamento."""
-    from .main import upsert_rubricas  # import tardio -- evita ciclo (main.py importa este módulo no topo)
+    # import tardio -- evita ciclo (main.py importa este módulo no topo)
+    from .main import marcar_rubricas_ausentes_como_excluidas, upsert_rubricas
 
     try:
         conteudo, nome_arquivo, _modificado_em = drive_rubricas.baixar_planilha_mais_recente()
         resultado = rubricas_import.parse_rubricas_document(conteudo, nome_arquivo or "")
         itens = [it for it in (resultado.get("itens") or []) if it.get("linha_planilha")]
         inseridos, atualizados = upsert_rubricas(projeto_id, itens) if itens else (0, 0)
+        # 156ª rodada -- mesmo caminho do botão manual (ver docstring do
+        # módulo): a atualização automática também usa a planilha mais
+        # recente como fonte de verdade de "o que ainda existe", então uma
+        # rubrica cadastrada cujo linha_planilha sumiu desta versão é
+        # marcada Excluída aqui também, não só quando alguém confirma pela
+        # tela. `itens` já é a planilha INTEIRA (nenhuma linha desmarcada --
+        # ver docstring acima), por isso serve direto como o conjunto
+        # "atual" pra decidir quem sumiu.
+        linhas_planilha_atual = [it["linha_planilha"] for it in itens]
+        excluidas = marcar_rubricas_ausentes_como_excluidas(projeto_id, linhas_planilha_atual) if linhas_planilha_atual else 0
         db.execute(
             "UPDATE rubricas_auto_update_execucoes SET status = 'concluido', "
             f"nome_arquivo = {db.q(nome_arquivo)}, inseridos = {db.q(inseridos)}, "
-            f"atualizados = {db.q(atualizados)}, concluido_em = now() "
+            f"atualizados = {db.q(atualizados)}, excluidas = {db.q(excluidas)}, concluido_em = now() "
             f"WHERE projeto_id = {db.q(projeto_id)} AND janela = {db.q(janela)}"
         )
         logger.info(
-            "Atualização automática de Rubricas concluída (janela %s): %s nova(s), %s atualizada(s).",
-            janela, inseridos, atualizados,
+            "Atualização automática de Rubricas concluída (janela %s): %s nova(s), %s atualizada(s), %s excluída(s).",
+            janela, inseridos, atualizados, excluidas,
         )
     except Exception as e:
         try:
