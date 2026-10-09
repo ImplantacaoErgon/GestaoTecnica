@@ -227,6 +227,20 @@
      de Cobertura, onde a proporção 1.3fr/1fr continua fazendo sentido). */
   .cfd-situacao-tiporubr-grid{grid-template-columns:0.8fr 1.5fr;}
 
+  /* 154ª rodada — pedido do usuário (verbatim): "para ficar visualmente
+     melhor pode reduzir o tamanho das colunas e os nomes das colunas pode
+     quebrar em duas linhas". O quadro "Rubricas × Situação" (152ª rodada)
+     tem uma coluna por Situação — podem ser 10+ — e o cabeçalho de tabela
+     padrão do site (thead th acima) é todo em UMA linha só
+     (white-space:nowrap), pensado pra tabelas com poucas colunas de nome
+     curto; aqui isso forçava cada coluna a ficar tão larga quanto o maior
+     rótulo ("RUBRICA SIGEP NÃO CADASTRADA" etc.), estourando a tela.
+     Escopado só nesta tabela (não mexe no thead th genérico, usado em
+     todas as outras grades do site). */
+  .cfd-rubsit-table thead th{white-space:normal;word-break:break-word;line-height:1.25;font-size:9.5px;padding:6px 7px;max-width:85px;}
+  .cfd-rubsit-table thead th:first-child{max-width:none;white-space:nowrap;}
+  .cfd-rubsit-table tbody td,.cfd-rubsit-table tfoot td{padding:5px 7px;font-size:11.5px;}
+
   /* ---- resumo frente bars ---- */
   .frente-row{display:flex;align-items:center;gap:10px;padding:7px 0;font-size:12.5px;}
   .frente-row .nome{width:150px;flex-shrink:0;color:var(--text-muted);}
@@ -1704,7 +1718,7 @@
         </div>
       </div>
       <div class="view-sub" style="margin-top:-6px;">Quantidade de linhas comparadas por Rubrica Ergon (linha) e Situação (coluna) — totais ao final de cada linha e de cada coluna.</div>
-      <div class="table-wrap"><table>
+      <div class="table-wrap"><table class="cfd-rubsit-table">
         <thead id="cfd-rubsit-thead"></thead>
         <tbody id="cfd-rubsit-tbody"></tbody>
         <tfoot id="cfd-rubsit-tfoot"></tfoot>
