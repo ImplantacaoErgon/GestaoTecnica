@@ -299,6 +299,22 @@
   tbody tr.clickable:hover{background:var(--surface-2);}
   .empty-row td{padding:40px;text-align:center;color:var(--text-faint);}
 
+  /* 158ª rodada — pedido do usuário (verbatim, sobre a tabela da aba
+     Migração de Dados): "uma linha deixa em branco e a outra cinza, pode
+     replicar isso nas demais linhas" (zebra striping). Escopado só nesta
+     tabela (não mexe em tbody tr genérico, usado em todas as outras tabelas
+     do site). rgba(127,127,127,.05) em vez de var(--surface-2) de propósito
+     — é o MESMO tom já usado como listra em #migracao-tbody? não, é o mesmo
+     padrão da listra de .grid-tabela (ver .grid-row-atividade:nth-child(even)
+     acima nesta folha de estilo) — bem mais sutil que var(--surface-2), que
+     é a cor do :hover logo acima; se a listra usasse a mesma cor do hover,
+     a linha par pareceria "sempre hover" e o efeito de passar o mouse
+     sumiria. :not(:hover) garante que o hover (regra de cima) continue
+     aparecendo por cima da listra nas linhas pares (um seletor com ID tem
+     mais especificidade que tbody tr.clickable:hover, que não tem ID —
+     sem o :not(:hover) a listra ganharia e esconderia o hover nessas linhas). */
+  #migracao-tbody tr:nth-child(even):not(:hover){background:rgba(127,127,127,.05);}
+
   .pill{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap;}
   .dot{width:6px;height:6px;border-radius:50%;display:inline-block;}
 
@@ -7116,17 +7132,30 @@ function renderItensMigracao(){
 
   const totalItens = ITENS_MIGRACAO.length;
   const concluidos = ITENS_MIGRACAO.filter(m=>m.status==="Concluído").length;
+  const bloqueados = ITENS_MIGRACAO.filter(m=>m.status==="Bloqueado").length;
   const totalEstimado = ITENS_MIGRACAO.reduce((s,m)=>s+(Number(m.qtd_registros_estimada)||0), 0);
   const totalCarregado = ITENS_MIGRACAO.reduce((s,m)=>s+(Number(m.qtd_registros_carregados)||0), 0);
   const pctGlobal = totalEstimado>0 ? Math.round(100*totalCarregado/totalEstimado*100)/100 : null;
-  $("mig-kpis").innerHTML = [
-    {l:"Itens cadastrados", v:totalItens},
-    {l:"Concluídos", v:concluidos},
-    {l:"Bloqueados", v:ITENS_MIGRACAO.filter(m=>m.status==="Bloqueado").length},
-    {l:"Registros a migrar (meta)", v:totalEstimado.toLocaleString('pt-BR')},
-    {l:"Registros carregados", v:totalCarregado.toLocaleString('pt-BR')},
-    {l:"% carregado (global)", v: pctGlobal===null ? "—" : pctGlobal.toFixed(2)+"%"},
-  ].map(k=>`<div class="kpi"><div class="label">${k.l}</div><div class="value">${k.v}</div></div>`).join("");
+  // 158ª rodada — pedido do usuário (verbatim): "os quadros com as
+  // quantidades, as da parte de cima da página, pode escolher as cores" —
+  // critério: Itens cadastrados/Registros carregados em azul (leitura
+  // neutra de volume); Concluídos em verde; Bloqueados só fica vermelho
+  // quando > 0 (0 bloqueados não é alarme, fica branco); Registros a
+  // migrar (meta) fica branco de propósito — é só a referência, não um
+  // resultado bom/ruim; % carregado (global) usa o MESMO critério de cor
+  // por faixa que a Visão Executiva já usa pra esse indicador (>=90% verde,
+  // >=50% azul, abaixo disso âmbar — ver "Migração — % carregado" em
+  // renderVisaoExecutiva), pra ler igual nos dois lugares.
+  const kpisMig = [
+    {l:"Itens cadastrados", v:totalItens, bg:"var(--accent-soft)"},
+    {l:"Concluídos", v:concluidos, bg:"var(--ok-soft)"},
+    {l:"Bloqueados", v:bloqueados, bg: bloqueados ? "var(--danger-soft)" : null},
+    {l:"Registros a migrar (meta)", v:totalEstimado.toLocaleString('pt-BR'), bg:null},
+    {l:"Registros carregados", v:totalCarregado.toLocaleString('pt-BR'), bg:"var(--accent-soft)"},
+    {l:"% carregado (global)", v: pctGlobal===null ? "—" : pctGlobal.toFixed(2)+"%",
+      bg: pctGlobal===null ? null : (pctGlobal>=90 ? "var(--ok-soft)" : pctGlobal>=50 ? "var(--accent-soft)" : "var(--warn-soft)")},
+  ];
+  $("mig-kpis").innerHTML = kpisMig.map(k=>`<div class="kpi" style="${k.bg?`background:${k.bg};`:""}"><div class="label">${k.l}</div><div class="value">${k.v}</div></div>`).join("");
 
   $("migracao-tbody").innerHTML = list.length ? list.map(m=>{
     const pct = m.qtd_registros_estimada ? Math.round(100*(m.qtd_registros_carregados||0)/m.qtd_registros_estimada*100)/100 : null;
