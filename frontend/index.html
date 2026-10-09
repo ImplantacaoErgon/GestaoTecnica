@@ -33,6 +33,14 @@
        ainda, adicionado no mesmo estilo dos demais (tom médio pro texto/
        ícone, tom bem claro pro fundo do card). */
     --pink:#a13d72; --pink-soft:#f7e8f0;
+    /* 157ª rodada — pedido do usuário pros tiles de status de Rubricas
+       (aba Rubricas e Visão Executiva): "champanhe" e "amarelo claro" são
+       dois tons PARECIDOS mas usados em tiles vizinhos (Em levantamento /
+       Liberadas p/ testes) — nenhum dos tons existentes (--warn é mais
+       laranja/âmbar) servia pros dois ao mesmo tempo sem ficar confuso com
+       o terceiro, então entram dois tokens novos, mesmo estilo dos demais. */
+    --champagne:#8a6f3c; --champagne-soft:#f3e8cf;
+    --yellow:#8a7408; --yellow-soft:#fdf3bd;
     --shadow:0 1px 2px rgba(20,30,35,.07), 0 6px 16px rgba(20,30,35,.05);
     /* 117ª rodada — Visão Executiva: paleta categórica validada (skill de
        dataviz — ver scripts/validate_palette.js), só pra séries de GRÁFICO
@@ -51,6 +59,8 @@
       --warn:#dfa657; --warn-soft:#332a15; --danger:#e2807a; --danger-soft:#361c1b;
       --ok:#63cb93; --ok-soft:#153627;
       --pink:#e08fc0; --pink-soft:#33202c;
+      --champagne:#d9c08f; --champagne-soft:#332c1c;
+      --yellow:#d9c030; --yellow-soft:#332f12;
       --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 20px rgba(0,0,0,.3);
       --series-1:#3987e5; --series-2:#d95926; --series-3:#199e70; --series-4:#c98500;
       --series-5:#d55181; --series-6:#008300; --series-7:#9085e9; --series-8:#e66767;
@@ -66,6 +76,8 @@
     --warn:#dfa657; --warn-soft:#332a15; --danger:#e2807a; --danger-soft:#361c1b;
     --ok:#63cb93; --ok-soft:#153627;
     --pink:#e08fc0; --pink-soft:#33202c;
+    --champagne:#d9c08f; --champagne-soft:#332c1c;
+    --yellow:#d9c030; --yellow-soft:#332f12;
     --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 20px rgba(0,0,0,.3);
     --series-1:#3987e5; --series-2:#d95926; --series-3:#199e70; --series-4:#c98500;
     --series-5:#d55181; --series-6:#008300; --series-7:#9085e9; --series-8:#e66767;
@@ -5951,7 +5963,7 @@ function _vexRenderFolha(){
     {l:"Em homologação", v: porStatus["Em homologação"]||0},
     {l:"Homologadas", v: porStatus["Homologada"]||0},
     {l:"Excluídas", v: totalExcluidas},
-  ].map(k=>`<div class="kpi"><div class="label">${k.l}</div><div class="value">${k.v}</div></div>`).join("")}</div>`;
+  ].map(rubKpiTile).join("")}</div>`;
 }
 
 // 118ª rodada — Comparação Folha × Ergon dentro do card de Folha de
@@ -7654,6 +7666,28 @@ const STATUS_RUBRICA_COLOR = {
   "Em homologação":"warn", "Homologada":"ok", "Excluída":"danger",
 };
 
+// 157ª rodada — pedido do usuário (verbatim, sobre um print dos tiles desta
+// aba): "Total Levantadas = branco mesmo / Em levantamento - champanhe /
+// Enviadas a Techne - Azul claro / Liberadas para Testes - Amarelo claro /
+// Em Homologação - rosa / Homologadas - Verde / Excluídas - vermelho claro".
+// Chave = o rótulo (l) exato usado nos dois lugares que mostram estes MESMOS
+// 7 tiles (aba Rubricas #rub-kpis e Visão Executiva _vexRenderFolha — ver
+// comentário da 137ª rodada sobre serem os mesmos tiles/rótulos nos dois
+// lugares de propósito). "Total levantadas" fica de fora por opção — sem
+// entrada aqui cai no fundo padrão do .kpi (var(--surface), branco/neutro).
+const RUB_KPI_TILE_BG = {
+  "Em levantamento": "var(--champagne-soft)",
+  "Enviadas à Techne": "var(--accent-soft)",
+  "Liberadas p/ testes": "var(--yellow-soft)",
+  "Em homologação": "var(--pink-soft)",
+  "Homologadas": "var(--ok-soft)",
+  "Excluídas": "var(--danger-soft)",
+};
+function rubKpiTile(k){
+  const bg = RUB_KPI_TILE_BG[k.l];
+  return `<div class="kpi" style="${bg?`background:${bg};`:""}"><div class="label">${k.l}</div><div class="value">${k.v}</div></div>`;
+}
+
 async function loadRubricas(){ RUBRICAS = await api(`/rubricas?projeto_id=${PROJETO.id}`); }
 
 // 113ª rodada — status da atualização automática das Rubricas (seg-sex,
@@ -7728,7 +7762,7 @@ function renderRubricas(){
     {l:"Em homologação", v:porStatus["Em homologação"]||0},
     {l:"Homologadas", v:porStatus["Homologada"]||0},
     {l:"Excluídas", v:totalExcluidas},
-  ].map(k=>`<div class="kpi"><div class="label">${k.l}</div><div class="value">${k.v}</div></div>`).join("");
+  ].map(rubKpiTile).join("");
 
   $("rubricas-tbody").innerHTML = list.length ? list.map(r=>{
     const nome = r.nome_abreviado || r.nome_extenso || r.descricao_legado || "—";
