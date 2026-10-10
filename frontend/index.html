@@ -323,19 +323,18 @@
      não precisa do :not(:hover) que a outra tabela precisou. */
   #cfd-rubsit-tbody tr:nth-child(even){background:rgba(127,127,127,.05);}
 
-  /* 160ª rodada — pedido do usuário (verbatim): "permita redimensionar os
-     quadros dessa aba" (aba Dashboard Comparação Folha — ver
-     view-comparacao-folha-dashboard no HTML). resize:vertical + overflow:auto
-     dá a cada quadro (.card) uma alça de redimensionar no canto inferior
-     direito (comportamento nativo do navegador, igual um <textarea>) — útil
-     pro quadro Rubricas × Situação, que pode ter centenas de linhas e deixa
-     a página inteira enorme; o usuário escolhe uma altura confortável e
-     rola só dentro do quadro. resize:both não faz sentido aqui porque os
-     quadros já ocupam 100% da largura disponível da coluna/grid — mudar a
-     largura deixaria um vão vazio do lado. min-height evita que dê pra
-     arrastar menor que o cabeçalho do quadro. Escopado só nesta aba (não
-     mexe em .card genérico, usado em todas as outras telas do site). */
-  #view-comparacao-folha-dashboard .card{resize:vertical;overflow:auto;min-height:140px;}
+  /* 160ª/161ª rodadas — pedido do usuário (verbatim, 160ª): "permita
+     redimensionar os quadros dessa aba" (aba Dashboard Comparação Folha —
+     ver view-comparacao-folha-dashboard no HTML); ajustado na 161ª rodada
+     (verbatim): "faça o redimensionamento na diagonal, é possível, não
+     apenas na altura" — resize:both (em vez de só resize:vertical) dá a
+     alça no canto inferior direito o arraste nas duas direções de uma vez
+     (comportamento nativo do navegador, igual um <textarea>), não só pra
+     baixo. min-width evita que dê pra arrastar mais estreito que o
+     cabeçalho do quadro (mesmo papel do min-height pra altura). Escopado só
+     nesta aba (não mexe em .card genérico, usado em todas as outras telas
+     do site). */
+  #view-comparacao-folha-dashboard .card{resize:both;overflow:auto;min-height:140px;min-width:280px;}
 
   .pill{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap;}
   .dot{width:6px;height:6px;border-radius:50%;display:inline-block;}
