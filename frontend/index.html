@@ -11115,21 +11115,28 @@ async function renderComparacaoFolhaPane(filtroInicial){
     cfVerificarCargaAtual();
     return;
   }
-  // 93ª rodada — pedido do usuário (verbatim): "Na comparação da folha e no
+  // 93ª rodada (pedido do usuário, verbatim: "Na comparação da folha e no
   // dashboard não carregar nada de forma automática. aguardar escolher a
-  // competência." Antes, entrar nesta aba já disparava cfCarregarResumo()
-  // (sem filtro de mês — "todas") + cfCarregarLista() na hora, o que
-  // significava agregar/paginar a tabela inteira (todas as competências
-  // já importadas, ~300 mil linhas cada) antes mesmo do usuário pedir
-  // qualquer coisa. Agora só popula o <select> de Competência (consulta
-  // enxuta, ver cfCarregarCompetencias()) e mostra um aviso no lugar dos
-  // KPIs/grade — a carga de verdade só acontece quando o <select> de
-  // Competência mudar (ver wireComparacaoFolhaPane()). Isso só roda na
-  // PRIMEIRA entrada na aba (ver CF_CARREGADO acima) — depois que o
-  // usuário já escolheu uma competência uma vez, não volta a acontecer.
+  // competência") foi SUBSTITUÍDA nesta primeira entrada pela 159ª rodada
+  // (pedido do usuário, verbatim): "Quando abrir a aba de comparação ou a
+  // aba de dashboard de comparação faça a busca automática da competência
+  // mais atual, neste momento apresente a mensagem que a busca está sendo
+  // feita." Em vez de esperar o usuário escolher, busca a lista de
+  // competências (consulta enxuta, ver cfCarregarCompetencias()) e já
+  // seleciona a mais recente (meses[0] — vem ordenado DESC do backend)
+  // sozinha, mostrando um aviso de busca em andamento enquanto isso. O
+  // usuário continua livre pra trocar de competência (ou voltar pra
+  // "todas") depois — isso só muda o que acontece ao ABRIR a aba pela
+  // primeira vez nesta sessão de navegação (ver CF_CARREGADO acima).
   $("cf-f-mesano").value = "";
-  await cfCarregarCompetencias();
-  cfMostrarAguardandoCompetencia();
+  cfMostrarBuscandoCompetenciaAtual();
+  const meses = await cfCarregarCompetencias();
+  if(meses.length){
+    $("cf-f-mesano").value = meses[0];
+    await Promise.all([cfCarregarResumo(), cfCarregarLista(false)]);
+  }else{
+    cfMostrarAguardandoCompetencia("Nenhuma competência encontrada — importe a planilha de Comparação Folha para começar.");
+  }
   cfVerificarCargaAtual();
 }
 
@@ -11139,6 +11146,11 @@ async function renderComparacaoFolhaPane(filtroInicial){
 // filtro (Situação, Tipo de Rubrica, Empresa etc.) continuam vazios até o
 // primeiro cfCarregarResumo() de verdade, disparado pela troca do
 // <select> de Competência.
+// 159ª rodada — passou a devolver `meses` (antes só populava o <select>,
+// sem retorno) pra quem chama poder saber qual é a competência mais
+// recente (meses[0] — o backend já devolve ordenado DESC, ver
+// comparacao_folha.competencias_disponiveis) sem precisar de uma segunda
+// chamada de rede. Ver renderComparacaoFolhaPane().
 async function cfCarregarCompetencias(){
   let meses = [];
   try{
@@ -11150,14 +11162,25 @@ async function cfCarregarCompetencias(){
   sel.innerHTML = `<option value="">Competência (todas)</option>` +
     meses.map(m=>`<option value="${m}">${m}</option>`).join("");
   sel.value = atual;
+  return meses;
 }
 
-function cfMostrarAguardandoCompetencia(){
-  $("cf-kpis").innerHTML = `<div class="muted" style="font-size:13px;">Selecione uma competência acima para carregar os dados.</div>`;
+// 159ª rodada — `msg` opcional (antes era um texto fixo): reaproveitada
+// tanto pro aviso "selecione uma competência" de sempre quanto pro aviso
+// "buscando a competência mais atual…" enquanto a busca automática roda
+// (ver renderComparacaoFolhaPane) e pro caso de não haver NENHUMA
+// competência importada ainda.
+function cfMostrarAguardandoCompetencia(msg){
+  const texto = msg || "Selecione uma competência acima para carregar os dados.";
+  $("cf-kpis").innerHTML = `<div class="muted" style="font-size:13px;">${esc(texto)}</div>`;
   $("cf-status").textContent = "";
   cfMontarThead();
-  $("cf-tbody").innerHTML = `<tr class="empty-row"><td colspan="${CF_COLUNAS_GRID.length}">Selecione uma competência acima para carregar a grade.</td></tr>`;
+  $("cf-tbody").innerHTML = `<tr class="empty-row"><td colspan="${CF_COLUNAS_GRID.length}">${esc(texto)}</td></tr>`;
   $("cf-carregar-mais").hidden = true;
+}
+
+function cfMostrarBuscandoCompetenciaAtual(){
+  cfMostrarAguardandoCompetencia("🔄 Buscando a competência mais atual…");
 }
 
 // 84ª rodada — drill-down do quadro "Top divergências por Empresa × Rubrica
@@ -11802,11 +11825,27 @@ async function renderComparacaoFolhaDashboard(){
     cfdCarregarCompetencias();
     return;
   }
+  // 159ª rodada — mesma mudança feita em renderComparacaoFolhaPane() (ver
+  // comentário grande lá): a 93ª rodada ("aguardar escolher a competência")
+  // é substituída nesta primeira entrada pela busca automática da
+  // competência mais recente, com aviso de busca em andamento enquanto
+  // isso. Pedido do usuário (verbatim): "Quando abrir a aba de comparação
+  // ou a aba de dashboard de comparação faça a busca automática da
+  // competência mais atual, neste momento apresente a mensagem que a busca
+  // está sendo feita."
   $("cfd-f-mesano").value = "";
-  await cfdCarregarCompetencias();
-  cfdMostrarAguardandoCompetencia();
+  cfdMostrarBuscandoCompetenciaAtual();
+  const meses = await cfdCarregarCompetencias();
+  if(meses.length){
+    $("cfd-f-mesano").value = meses[0];
+    await cfdCarregarDados();
+  }else{
+    cfdMostrarAguardandoCompetencia("Nenhuma competência encontrada — importe a planilha de Comparação Folha para começar.");
+  }
 }
 
+// 159ª rodada — passou a devolver `meses` (ver comentário análogo em
+// cfCarregarCompetencias, aba Comparação Folha).
 async function cfdCarregarCompetencias(){
   let meses = [];
   try{
@@ -11818,30 +11857,39 @@ async function cfdCarregarCompetencias(){
   sel.innerHTML = `<option value="">Competência (todas)</option>` +
     meses.map(m=>`<option value="${m}">${m}</option>`).join("");
   sel.value = atual;
+  return meses;
 }
 
-function cfdMostrarAguardandoCompetencia(){
-  const aviso = `<div class="muted" style="font-size:13px;">Selecione uma competência acima para carregar os dados.</div>`;
+// 159ª rodada — `msg` opcional (ver comentário análogo em
+// cfMostrarAguardandoCompetencia, aba Comparação Folha).
+function cfdMostrarAguardandoCompetencia(msg){
+  const texto = msg || "Selecione uma competência acima para carregar os dados.";
+  const textoCelula = msg || "Selecione uma competência acima.";
+  const aviso = `<div class="muted" style="font-size:13px;">${esc(texto)}</div>`;
   $("cfd-kpis").innerHTML = aviso;
   $("cfd-situacao").innerHTML = aviso;
-  $("cfd-tiporubr-tbody").innerHTML = `<tr class="empty-row"><td colspan="8">Selecione uma competência acima.</td></tr>`;
+  $("cfd-tiporubr-tbody").innerHTML = `<tr class="empty-row"><td colspan="8">${esc(textoCelula)}</td></tr>`;
   $("cfd-emprub-contagem").textContent = "";
-  $("cfd-emprub-tbody").innerHTML = `<tr class="empty-row"><td colspan="8">Selecione uma competência acima.</td></tr>`;
-  $("cfd-empresa-tbody").innerHTML = `<tr class="empty-row"><td colspan="5">Selecione uma competência acima.</td></tr>`;
+  $("cfd-emprub-tbody").innerHTML = `<tr class="empty-row"><td colspan="8">${esc(textoCelula)}</td></tr>`;
+  $("cfd-empresa-tbody").innerHTML = `<tr class="empty-row"><td colspan="5">${esc(textoCelula)}</td></tr>`;
   $("cfd-rubsit-contagem").textContent = "";
   $("cfd-rubsit-thead").innerHTML = `<tr><th>Rubrica Ergon</th><th>Total</th></tr>`;
-  $("cfd-rubsit-tbody").innerHTML = `<tr class="empty-row"><td colspan="2">Selecione uma competência acima.</td></tr>`;
+  $("cfd-rubsit-tbody").innerHTML = `<tr class="empty-row"><td colspan="2">${esc(textoCelula)}</td></tr>`;
   $("cfd-rubsit-tfoot").innerHTML = "";
-  $("cfd-rubricas-sem-uso-tbody").innerHTML = `<tr class="empty-row"><td colspan="3">Selecione uma competência acima.</td></tr>`;
-  $("cfd-verbas-sem-uso-tbody").innerHTML = `<tr class="empty-row"><td colspan="3">Selecione uma competência acima.</td></tr>`;
-  $("cfd-rubricas-sem-param-tbody").innerHTML = `<tr class="empty-row"><td colspan="3">Selecione uma competência acima.</td></tr>`;
-  $("cfd-verbas-sem-param-tbody").innerHTML = `<tr class="empty-row"><td colspan="3">Selecione uma competência acima.</td></tr>`;
+  $("cfd-rubricas-sem-uso-tbody").innerHTML = `<tr class="empty-row"><td colspan="3">${esc(textoCelula)}</td></tr>`;
+  $("cfd-verbas-sem-uso-tbody").innerHTML = `<tr class="empty-row"><td colspan="3">${esc(textoCelula)}</td></tr>`;
+  $("cfd-rubricas-sem-param-tbody").innerHTML = `<tr class="empty-row"><td colspan="3">${esc(textoCelula)}</td></tr>`;
+  $("cfd-verbas-sem-param-tbody").innerHTML = `<tr class="empty-row"><td colspan="3">${esc(textoCelula)}</td></tr>`;
   cfdAtualizarBotaoSalvar();
   // 148ª rodada — o painel de salvamentos agora pode mostrar "todas as
   // competências" independente do filtro principal (checkbox cfd-snap-todas)
   // — delega pra cfdCarregarSnapshots() decidir o que exibir, em vez de
   // sempre sobrescrever com "selecione uma competência" como antes.
   cfdCarregarSnapshots();
+}
+
+function cfdMostrarBuscandoCompetenciaAtual(){
+  cfdMostrarAguardandoCompetencia("🔄 Buscando a competência mais atual…");
 }
 
 function cfdListaCoberturaHtml(lista, campoLinhas, colspan){
