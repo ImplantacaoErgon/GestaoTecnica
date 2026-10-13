@@ -1479,6 +1479,7 @@
       <input type="text" id="mf-search" placeholder="Buscar por tabela, sistema de origem…">
       <select id="mf-status"><option value="">Status (todos)</option><option>Não iniciado</option><option>Em andamento</option><option>Concluído</option><option>Bloqueado</option></select>
       <button class="btn secondary small" id="btn-quadro-ciclo" style="margin-left:auto;">📊 Quadro por ciclo</button>
+      <button class="btn secondary small" id="btn-importar-ciclos-migracao">⬆️ Importar ciclos (Oracle)</button>
       <button class="btn small" id="btn-new-item-migracao">+ Novo item de migração</button>
     </div>
     <div class="table-wrap">
@@ -2480,6 +2481,11 @@
       <div class="field"><label>Tabela do sistema legado *</label><input id="mig-tabela-legado" type="text" placeholder="Ex: RH_FUNCIONARIOS"></div>
       <div class="field"><label>Tabela/entidade destino no Ergon</label><input id="mig-tabela-destino" type="text"></div>
       <div class="field"><label>Sistema de origem</label><input id="mig-sistema-origem" type="text" placeholder="Ex: Folha Anterior XYZ"></div>
+      <div class="field">
+        <label>Sigla Oracle (relatório do cliente)</label>
+        <input id="mig-sigla-oracle" type="text" placeholder="Ex: MIGRA_PESSOAS">
+        <p class="muted" style="margin-top:4px;font-size:11.5px;">Sigla do relatório de migração do Oracle do cliente (coluna SIGLA) — usada para casar este item com o CSV do botão "⬆️ Importar ciclos (Oracle)".</p>
+      </div>
       <div class="field"><label>Qtd. de registros a migrar (meta)</label><input id="mig-qtd-estimada" type="number" min="0" step="1"></div>
       <div class="field"><label>Status</label><select id="mig-status"><option>Não iniciado</option><option>Em andamento</option><option>Concluído</option><option>Bloqueado</option></select></div>
       <div class="field"><label>Responsável</label><select id="mig-responsavel"></select></div>
@@ -2676,6 +2682,42 @@
         <button class="btn secondary" id="rubimp-cancel">Cancelar</button>
         <button class="btn" id="rubimp-analisar">Analisar planilha</button>
         <button class="btn" id="rubimp-confirmar" hidden>Confirmar importação</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= MODAL: IMPORTAR CICLOS DE MIGRAÇÃO (Oracle, 163ª rodada) =================
+     O Render não alcança a rede do cliente pra rodar a query Oracle direto
+     (mesma conclusão já registrada pra Comparação de Folha) — este modal
+     importa o CSV que o script local (rodado pelo usuário, que já tem
+     acesso ao Oracle) gera com a mesma query. Ver app/ciclos_migracao_import.py. -->
+<div class="overlay" id="overlay-importar-ciclos-migracao" hidden>
+  <div class="modal wide">
+    <div class="modal-head"><h2>Importar ciclos (consulta Oracle)</h2><button class="btn ghost" id="cicimp-close">✕</button></div>
+    <div class="modal-body single-col" id="cicimp-step-upload">
+      <div class="field full">
+        <label>CSV gerado pelo script de consulta ao Oracle</label>
+        <input id="cicimp-file" type="file" accept=".csv">
+        <p class="muted" style="margin-top:8px;">Colunas esperadas: SIGLA;DATA_EXECUCAO;EXTRAIDOS;CARREGADOS. Cada linha com data de execução preenchida vira um ciclo do item de migração correspondente — casado pela "Sigla Oracle" cadastrada em cada item (editar item → campo "Sigla Oracle"). Se já existir um ciclo com a mesma data para o item, os números são atualizados — nunca duplica. Nenhum dado é gravado antes de você conferir e confirmar a lista abaixo.</p>
+      </div>
+    </div>
+    <div class="modal-body single-col" id="cicimp-step-preview" hidden>
+      <div id="cicimp-avisos"></div>
+      <div class="kpis" id="cicimp-resumo" style="margin-bottom:12px;"></div>
+      <div class="table-wrap" style="max-height:42vh;">
+        <table>
+          <thead><tr><th>Sigla</th><th>Item de migração</th><th>Data</th><th>Extraídos</th><th>Carregados</th><th>Ação</th></tr></thead>
+          <tbody id="cicimp-preview-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <span id="cicimp-foot-hint" class="muted"></span>
+      <div style="display:flex;gap:8px;">
+        <button class="btn secondary" id="cicimp-cancel">Cancelar</button>
+        <button class="btn" id="cicimp-analisar">Analisar CSV</button>
+        <button class="btn" id="cicimp-confirmar" hidden>Confirmar importação</button>
       </div>
     </div>
   </div>
@@ -3754,7 +3796,7 @@ async function afterProjetoReady(){
   aplicarMarcaNoTopo();
   fillStaticSelects();
   wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireDashboardPdf(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireGanttToolbar(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireExportarCronograma(); wireExportarCronogramaXml(); wireRemoverCronograma(); wireRemoverRequisitos(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma(); wireRenumerarCronograma();
-  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros(); wireQuadroCicloModal(); wireMigracaoRejeicoesPane(); wireRubricaModal(); wireRubricasFiltros(); wireImportRubricas(); wireComparacaoFolhaPane(); wireComparacaoFolhaDashboard(); wireVexFolhaComparacaoToggle(); wireVexMigracaoEvolucaoSelect();
+  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros(); wireQuadroCicloModal(); wireImportCiclosMigracao(); wireMigracaoRejeicoesPane(); wireRubricaModal(); wireRubricasFiltros(); wireImportRubricas(); wireComparacaoFolhaPane(); wireComparacaoFolhaDashboard(); wireVexFolhaComparacaoToggle(); wireVexMigracaoEvolucaoSelect();
   setupCsvTemplateLink();
   await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias(), loadItensMigracao(), loadRubricas(), loadRubricasAutoUpdateStatus()]);
   // Reaplica agora que REQUISITOS/ATIVIDADES já estão carregados — os selects
@@ -7195,7 +7237,7 @@ function renderItensMigracao(){
     // comentário acima, em pctGlobal, com a explicação completa do pedido.
     const pct = m.qtd_registros_extraidos ? Math.round(100*(m.qtd_registros_carregados||0)/m.qtd_registros_extraidos*100)/100 : null;
     return `<tr class="clickable" data-id="${m.id}">
-      <td>${esc(m.nome_tabela_legado)}${m.sistema_origem?`<div class="muted">${esc(m.sistema_origem)}</div>`:""}</td>
+      <td>${esc(m.nome_tabela_legado)}${m.sistema_origem?`<div class="muted">${esc(m.sistema_origem)}</div>`:""}${m.sigla_oracle?`<div class="muted" style="font-size:10.5px;">Oracle: ${esc(m.sigla_oracle)}</div>`:""}</td>
       <td>${esc(m.nome_tabela_destino||"—")}${m.atividade_nome?`<div class="muted">${m.atividade_codigo?esc(m.atividade_codigo)+" — ":""}${esc(m.atividade_nome)}</div>`:""}</td>
       <td class="mono">${m.qtd_registros_estimada!=null ? Number(m.qtd_registros_estimada).toLocaleString('pt-BR') : "—"}</td>
       <td class="mono">${Number(m.qtd_registros_carregados||0).toLocaleString('pt-BR')}</td>
@@ -7255,6 +7297,7 @@ function openItemMigracaoModal(m){
   $("mig-tabela-legado").value = m?.nome_tabela_legado || "";
   $("mig-tabela-destino").value = m?.nome_tabela_destino || "";
   $("mig-sistema-origem").value = m?.sistema_origem || "";
+  $("mig-sigla-oracle").value = m?.sigla_oracle || "";
   $("mig-qtd-estimada").value = m?.qtd_registros_estimada ?? "";
   $("mig-status").value = m?.status || "Não iniciado";
   $("mig-responsavel").value = m?.responsavel_id || "";
@@ -7276,6 +7319,7 @@ async function saveItemMigracao(){
     nome_tabela_legado: $("mig-tabela-legado").value.trim(),
     nome_tabela_destino: $("mig-tabela-destino").value.trim() || null,
     sistema_origem: $("mig-sistema-origem").value.trim() || null,
+    sigla_oracle: $("mig-sigla-oracle").value.trim() || null,
     qtd_registros_estimada: $("mig-qtd-estimada").value === "" ? null : Number($("mig-qtd-estimada").value),
     status: $("mig-status").value,
     responsavel_id: $("mig-responsavel").value || null,
@@ -8159,6 +8203,117 @@ async function confirmarImportacaoRubricas(){
   }catch(e){}
   rubImpConfirmando = false;
   $("rubimp-confirmar").disabled = false; $("rubimp-confirmar").textContent = "Confirmar importação";
+}
+
+// ================= IMPORTAR CICLOS DE MIGRAÇÃO (Oracle) — 163ª rodada =================
+// Pedido do usuário (verbatim): "Como podemos ter essa query sendo
+// executada pelo nosso sistema, acessando ao banco de dados [...] A ideia
+// é ter um botão na aba Migração de Dados / Itens e Ciclos. Ao acionar
+// essa query novos ciclos seriam criados". O Render não alcança a rede do
+// cliente pra rodar a query Oracle direto (mesma conclusão da investigação
+// de Comparação de Folha), então este botão importa o CSV que um script
+// local (rodado pelo usuário, que já tem acesso ao Oracle) gera com essa
+// mesma query — ver app/ciclos_migracao_import.py. Mesmo padrão de
+// preview/confirmar do import de Rubricas, só que sem checkbox por linha
+// (o casamento sigla→item e a ação criar/atualizar/sem_mudança já são
+// deterministicos — nada aqui depende de revisão humana linha a linha).
+let cicImpItens = [], cicImpConfirmando = false;
+
+function wireImportCiclosMigracao(){
+  $("btn-importar-ciclos-migracao").addEventListener("click", openImportarCiclosMigracaoModal);
+  $("cicimp-close").addEventListener("click", closeImportarCiclosMigracaoModal);
+  $("cicimp-cancel").addEventListener("click", closeImportarCiclosMigracaoModal);
+  $("overlay-importar-ciclos-migracao").addEventListener("click", e=>{ if(e.target.id==="overlay-importar-ciclos-migracao") closeImportarCiclosMigracaoModal(); });
+  $("cicimp-analisar").addEventListener("click", analisarCiclosMigracao);
+  $("cicimp-confirmar").addEventListener("click", confirmarImportacaoCiclosMigracao);
+}
+
+function openImportarCiclosMigracaoModal(){
+  cicImpItens = [];
+  $("cicimp-file").value = "";
+  $("cicimp-step-upload").hidden = false;
+  $("cicimp-step-preview").hidden = true;
+  $("cicimp-analisar").hidden = false;
+  $("cicimp-confirmar").hidden = true;
+  $("cicimp-foot-hint").textContent = "";
+  $("overlay-importar-ciclos-migracao").hidden = false;
+}
+function closeImportarCiclosMigracaoModal(){ $("overlay-importar-ciclos-migracao").hidden = true; }
+
+async function analisarCiclosMigracao(){
+  const file = $("cicimp-file").files[0];
+  if(!file){ toast("Selecione o arquivo CSV.", true); return; }
+  const fd = new FormData(); fd.append("projeto_id", PROJETO.id); fd.append("file", file);
+  $("cicimp-analisar").disabled = true; $("cicimp-analisar").textContent = "Analisando…";
+  try{
+    const r = await api("/itens-migracao/importar-ciclos/preview", {method:"POST", body: fd});
+    _exibirPreviewCiclosMigracao(r);
+  }catch(e){}
+  $("cicimp-analisar").disabled = false; $("cicimp-analisar").textContent = "Analisar CSV";
+}
+
+const CICIMP_ACAO_LABEL = {
+  criar: "Novo ciclo", atualizar: "Atualiza ciclo existente",
+  sem_mudanca: "Sem mudança", ignorado_rejeicoes_detalhadas: "Ignorado (tem rejeições detalhadas)",
+  nao_mapeado: "SIGLA não mapeada",
+};
+const CICIMP_ACAO_COR = {
+  criar: "ok", atualizar: "accent", sem_mudanca: "faint",
+  ignorado_rejeicoes_detalhadas: "warn", nao_mapeado: "danger",
+};
+
+function _exibirPreviewCiclosMigracao(r){
+  cicImpItens = r.itens || [];
+  const resumo = r.resumo || {};
+  let avisosHtml = "";
+  if((r.nao_mapeadas||[]).length){
+    avisosHtml = `<ul class="muted" style="margin:0 0 10px 18px;font-size:12px;">
+      <li>${r.nao_mapeadas.length} sigla(s) do CSV sem item de migração correspondente — cadastre o campo "Sigla Oracle" no item certo (editar item → Sigla Oracle): ${r.nao_mapeadas.map(s=>esc(s)).join(", ")}</li>
+    </ul>`;
+  }
+  $("cicimp-avisos").innerHTML = avisosHtml;
+  $("cicimp-resumo").innerHTML = [
+    {l:"Novos ciclos", v: resumo.criar ?? 0, bg:"var(--ok-soft)"},
+    {l:"Ciclos atualizados", v: resumo.atualizar ?? 0, bg:"var(--accent-soft)"},
+    {l:"Sem mudança", v: resumo.sem_mudanca ?? 0, bg:null},
+    {l:"Ignorados (rejeições detalhadas)", v: resumo.ignorados_rejeicoes_detalhadas ?? 0, bg: resumo.ignorados_rejeicoes_detalhadas ? "var(--warn-soft)" : null},
+    {l:"Sigla não mapeada", v: resumo.nao_mapeadas ?? 0, bg: resumo.nao_mapeadas ? "var(--danger-soft)" : null},
+  ].map(k=>`<div class="kpi" style="${k.bg?`background:${k.bg};`:""}"><div class="label">${k.l}</div><div class="value">${k.v}</div></div>`).join("");
+  $("cicimp-preview-tbody").innerHTML = cicImpItens.length ? cicImpItens.map(it=>`
+    <tr>
+      <td class="mono">${esc(it.sigla)}</td>
+      <td>${esc(it.nome_tabela_legado || "—")}</td>
+      <td>${fmtDate(it.data_execucao)}</td>
+      <td class="mono">${Number(it.extraidos||0).toLocaleString('pt-BR')}</td>
+      <td class="mono">${Number(it.carregados||0).toLocaleString('pt-BR')}</td>
+      <td>${pill(CICIMP_ACAO_LABEL[it.acao]||it.acao, CICIMP_ACAO_COR[it.acao]||"faint")}</td>
+    </tr>`).join("") : `<tr class="empty-row"><td colspan="6">Nenhuma linha com execução encontrada no CSV.</td></tr>`;
+  $("cicimp-step-upload").hidden = true;
+  $("cicimp-step-preview").hidden = false;
+  $("cicimp-analisar").hidden = true;
+  const aplicaveis = cicImpItens.filter(it=>it.item_id && (it.acao==="criar" || it.acao==="atualizar")).length;
+  $("cicimp-confirmar").hidden = !aplicaveis;
+  $("cicimp-foot-hint").textContent = `${cicImpItens.length} linha(s) no CSV com execução — ${aplicaveis} serão criada(s)/atualizada(s) ao confirmar.`;
+}
+
+async function confirmarImportacaoCiclosMigracao(){
+  if(cicImpConfirmando) return;
+  const aplicaveis = cicImpItens.filter(it=>it.item_id);
+  if(!aplicaveis.length){ toast("Nenhuma linha mapeada para importar.", true); return; }
+  cicImpConfirmando = true;
+  $("cicimp-confirmar").disabled = true; $("cicimp-confirmar").textContent = "Importando…";
+  try{
+    const r = await api("/itens-migracao/importar-ciclos/confirmar", {
+      method: "POST",
+      body: JSON.stringify({ projeto_id: PROJETO.id, itens: aplicaveis }),
+    });
+    const msgIgnorados = r.ignorados_rejeicoes_detalhadas ? `, ${r.ignorados_rejeicoes_detalhadas} ignorado(s) (já têm rejeições detalhadas)` : "";
+    toast(`Importação concluída: ${r.criados} novo(s), ${r.atualizados} atualizado(s), ${r.sem_mudanca} sem mudança${msgIgnorados}.`);
+    await loadItensMigracao(); renderItensMigracao();
+    closeImportarCiclosMigracaoModal();
+  }catch(e){}
+  cicImpConfirmando = false;
+  $("cicimp-confirmar").disabled = false; $("cicimp-confirmar").textContent = "Confirmar importação";
 }
 
 // ================= MODAL ATIVIDADE =================

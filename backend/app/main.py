@@ -11,7 +11,7 @@ from datetime import datetime, date, timedelta
 
 from flask import Flask, request, jsonify, send_from_directory, send_file, abort, session
 
-from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_renumeracao, cronograma_anomalias, cronograma_export, cronograma_export_xml, cronograma_comparacao, relatorio_executivo, relatorio_pdf, dashboard_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, drive_rubricas, rubricas_auto_update, comparacao_folha, comparacao_folha_import, comparacao_folha_dashboard_snapshots, comparacao_folha_rubrica_situacao_export, google_drive, migracao_quadro_export, requisitos_ia, migracao_rejeicoes, migracao_rejeicoes_import
+from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_renumeracao, cronograma_anomalias, cronograma_export, cronograma_export_xml, cronograma_comparacao, relatorio_executivo, relatorio_pdf, dashboard_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, drive_rubricas, rubricas_auto_update, comparacao_folha, comparacao_folha_import, comparacao_folha_dashboard_snapshots, comparacao_folha_rubrica_situacao_export, google_drive, migracao_quadro_export, requisitos_ia, migracao_rejeicoes, migracao_rejeicoes_import, ciclos_migracao_import
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 FRONTEND_DIR = os.environ.get(
@@ -222,6 +222,10 @@ CICLO_FIELDS = ["item_migracao_id", "atividade_id", "numero_ciclo", "data_execuc
 ITEM_MIGRACAO_FIELDS = [
     "projeto_id", "atividade_id", "nome_tabela_legado", "nome_tabela_destino",
     "sistema_origem", "qtd_registros_estimada", "status", "responsavel_id", "observacoes",
+    # 163ª rodada: SIGLA do relatório de migração do Oracle do cliente, pra
+    # casar com o CSV importado em /api/itens-migracao/importar-ciclos/* --
+    # ver app/ciclos_migracao_import.py e migração 044.
+    "sigla_oracle",
 ]
 # valor_liquido NÃO entra aqui — é coluna GENERATED (valor_total - impostos), o
 # próprio Postgres calcula, nunca é inserida/atualizada diretamente. nome/cargo
@@ -2805,6 +2809,60 @@ def create_app():
     @app.delete("/api/itens-migracao/<id>")
     def delete_item_migracao(id):
         return delete_row("itens_migracao", id)
+
+    # ------------------------------------------- migração: importar ciclos
+    # 163ª rodada -- pedido do usuário (verbatim): "Tenho esse sql que fiz,
+    # ele gera uma planilha [...] Como podemos ter essa query sendo
+    # executada pelo nosso sistema, acessando ao banco de dados [...] A
+    # ideia é ter um botão na aba Migração de Dados / Itens e Ciclos. Ao
+    # acionar essa query novos ciclos seriam criados". O Render não alcança
+    # a rede do cliente pra rodar a query Oracle direto (mesma conclusão já
+    # registrada na investigação de Comparação de Folha -- ver doc do
+    # projeto "oracle-conexao-direta-comparacao-folha.md"), então o botão
+    # aqui importa o CSV que um script local (rodado pelo usuário, que já
+    # tem acesso ao Oracle) gera com essa mesma query -- ver
+    # app/ciclos_migracao_import.py pro formato esperado e a lógica de
+    # casamento SIGLA -> item (campo itens_migracao.sigla_oracle, migração
+    # 044). Preview/confirmar segue o mesmo padrão de duas etapas já usado
+    # em /api/rubricas/importar/* (preview nunca grava nada).
+    @app.post("/api/itens-migracao/importar-ciclos/preview")
+    def importar_ciclos_migracao_preview():
+        projeto_id = request.form.get("projeto_id")
+        file = request.files.get("file")
+        if not (projeto_id and file):
+            return jsonify({"erro": "projeto_id e file são obrigatórios"}), 400
+        try:
+            itens_csv = ciclos_migracao_import.parse_ciclos_csv(file.read(), file.filename)
+        except ciclos_migracao_import.CiclosMigracaoImportError as e:
+            return jsonify({"erro": str(e)}), 400
+        except Exception as e:
+            return jsonify({"erro": f"Falha ao ler o arquivo: {e}"}), 400
+        itens, nao_mapeadas = ciclos_migracao_import.montar_preview(projeto_id, itens_csv)
+        resumo = {
+            "criar": sum(1 for i in itens if i["acao"] == "criar"),
+            "atualizar": sum(1 for i in itens if i["acao"] == "atualizar"),
+            "sem_mudanca": sum(1 for i in itens if i["acao"] == "sem_mudanca"),
+            "ignorados_rejeicoes_detalhadas": sum(1 for i in itens if i["acao"] == "ignorado_rejeicoes_detalhadas"),
+            "nao_mapeadas": len(nao_mapeadas),
+        }
+        return jsonify({"itens": itens, "nao_mapeadas": nao_mapeadas, "resumo": resumo})
+
+    @app.post("/api/itens-migracao/importar-ciclos/confirmar")
+    def importar_ciclos_migracao_confirmar():
+        """Recebe a lista de itens da prévia (possivelmente já revisada na
+        tela) e grava via upsert por (item, data_execucao) -- ver
+        aplicar_importacao. Reimportar o mesmo CSV depois não duplica nada:
+        ou não muda (mesmos números) ou atualiza o ciclo daquela data."""
+        data = request.get_json(force=True)
+        projeto_id = data.get("projeto_id")
+        itens = data.get("itens") or []
+        if not projeto_id or not itens:
+            return jsonify({"erro": "projeto_id e itens são obrigatórios"}), 400
+        itens_validos = [it for it in itens if it.get("item_id") and it.get("data_execucao")]
+        if not itens_validos:
+            return jsonify({"erro": "Nenhum item válido para importar (nenhuma SIGLA mapeada?)."}), 400
+        resultado = ciclos_migracao_import.aplicar_importacao(projeto_id, itens_validos)
+        return jsonify(resultado)
 
     # -------------------------------------------------- migração: rejeitados
     # 116ª rodada (pedido verbatim do usuário): carga, análise e histórico
