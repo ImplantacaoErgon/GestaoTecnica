@@ -2623,6 +2623,9 @@ def create_app():
         sql = f"""
             SELECT im.*, res.nome AS responsavel_nome,
                    a.codigo_wbs AS atividade_codigo, a.nome AS atividade_nome,
+                   COALESCE((SELECT c.qtd_registros_extraidos FROM ciclos_migracao c
+                             WHERE c.item_migracao_id = im.id
+                             ORDER BY c.numero_ciclo DESC LIMIT 1), 0) AS qtd_registros_extraidos,
                    COALESCE((SELECT c.qtd_registros_carregados FROM ciclos_migracao c
                              WHERE c.item_migracao_id = im.id
                              ORDER BY c.numero_ciclo DESC LIMIT 1), 0) AS qtd_registros_carregados,
@@ -2658,6 +2661,9 @@ def create_app():
               count(*) FILTER (WHERE im.status = 'Bloqueado') AS itens_bloqueados,
               count(*) FILTER (WHERE im.status = 'Não iniciado') AS itens_nao_iniciados,
               COALESCE(sum(im.qtd_registros_estimada), 0) AS total_estimado,
+              COALESCE(sum((SELECT c.qtd_registros_extraidos FROM ciclos_migracao c
+                            WHERE c.item_migracao_id = im.id
+                            ORDER BY c.numero_ciclo DESC LIMIT 1)), 0) AS total_extraido,
               COALESCE(sum((SELECT c.qtd_registros_carregados FROM ciclos_migracao c
                             WHERE c.item_migracao_id = im.id
                             ORDER BY c.numero_ciclo DESC LIMIT 1)), 0) AS total_carregado
@@ -2666,7 +2672,8 @@ def create_app():
         """)
         return jsonify(row or {
             "total_itens": 0, "itens_concluidos": 0, "itens_em_andamento": 0,
-            "itens_bloqueados": 0, "itens_nao_iniciados": 0, "total_estimado": 0, "total_carregado": 0,
+            "itens_bloqueados": 0, "itens_nao_iniciados": 0, "total_estimado": 0,
+            "total_extraido": 0, "total_carregado": 0,
         })
 
     def _montar_quadro_ciclo(pid, numero_ciclo_arg):

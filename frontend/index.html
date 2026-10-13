@@ -5819,9 +5819,11 @@ function _vexRenderFrentes(rows){
 function _vexRenderMigracao(){
   const el = $("vex-migracao");
   if(!ITENS_MIGRACAO.length){ el.innerHTML = `<div class="vex-empty">Nenhum item de migração cadastrado.</div>`; return; }
-  const totalEstimado = ITENS_MIGRACAO.reduce((s,m)=>s+(Number(m.qtd_registros_estimada)||0),0);
+  // 162ª rodada: % usa extraídos (dos ciclos), não a meta — ver comentário
+  // em renderItensMigracao/pctGlobal com a explicação completa do pedido.
+  const totalExtraido = ITENS_MIGRACAO.reduce((s,m)=>s+(Number(m.qtd_registros_extraidos)||0),0);
   const totalCarregado = ITENS_MIGRACAO.reduce((s,m)=>s+(Number(m.qtd_registros_carregados)||0),0);
-  const pct = totalEstimado>0 ? Math.round(100*totalCarregado/totalEstimado) : 0;
+  const pct = totalExtraido>0 ? Math.round(100*totalCarregado/totalExtraido) : 0;
   const porStatus = {};
   ITENS_MIGRACAO.forEach(m=>{ porStatus[m.status] = (porStatus[m.status]||0)+1; });
   const total = ITENS_MIGRACAO.length;
@@ -5834,7 +5836,7 @@ function _vexRenderMigracao(){
   el.innerHTML = `
     <div class="vex-meter" style="margin-bottom:12px;">
       <div class="track"><div class="fill" style="width:${pct}%;"></div></div>
-      <div class="labelrow"><span>${pct}% dos registros carregados</span><span>${totalCarregado.toLocaleString('pt-BR')} / ${totalEstimado.toLocaleString('pt-BR')}</span></div>
+      <div class="labelrow"><span>${pct}% dos registros carregados</span><span>${totalCarregado.toLocaleString('pt-BR')} / ${totalExtraido.toLocaleString('pt-BR')}</span></div>
     </div>
     <div class="vex-stacked-bar">${segs.map(s=>`<div class="seg" style="width:${Math.round(100*s.v/total)}%;background:${COLOR_VAR[s.cor]||COLOR_VAR.faint};border-right:2px solid var(--surface);" title="${s.k}: ${s.v}"></div>`).join("")}</div>
     <div class="vex-legend" style="margin-top:8px;">${segs.map(s=>`<span class="item"><span class="swatch" style="background:${COLOR_VAR[s.cor]};"></span>${s.k} (${s.v})</span>`).join("")}</div>
@@ -6444,9 +6446,11 @@ async function renderVisaoExecutiva(){
 
   // KPIs cruzados: uma leitura por módulo, pra quem não conhece o projeto
   // entender o estado geral sem precisar abrir cada tela.
-  const totalEstimadoMig = ITENS_MIGRACAO.reduce((s,m)=>s+(Number(m.qtd_registros_estimada)||0),0);
+  // 162ª rodada: % usa extraídos (dos ciclos), não a meta — ver comentário
+  // em renderItensMigracao/pctGlobal com a explicação completa do pedido.
+  const totalExtraidoMig = ITENS_MIGRACAO.reduce((s,m)=>s+(Number(m.qtd_registros_extraidos)||0),0);
   const totalCarregadoMig = ITENS_MIGRACAO.reduce((s,m)=>s+(Number(m.qtd_registros_carregados)||0),0);
-  const pctMig = totalEstimadoMig>0 ? Math.round(100*totalCarregadoMig/totalEstimadoMig) : null;
+  const pctMig = totalExtraidoMig>0 ? Math.round(100*totalCarregadoMig/totalExtraidoMig) : null;
   const validasRub = RUBRICAS.filter(r=>r.status!=="Excluída");
   const pctRub = validasRub.length ? Math.round(100*validasRub.filter(r=>r.status==="Homologada").length/validasRub.length) : null;
   const somaLiquidoFat = FATURAS.reduce((s,f)=>s+Number(f.valor_liquido||0),0);
@@ -7155,8 +7159,16 @@ function renderItensMigracao(){
   const concluidos = ITENS_MIGRACAO.filter(m=>m.status==="Concluído").length;
   const bloqueados = ITENS_MIGRACAO.filter(m=>m.status==="Bloqueado").length;
   const totalEstimado = ITENS_MIGRACAO.reduce((s,m)=>s+(Number(m.qtd_registros_estimada)||0), 0);
+  const totalExtraido = ITENS_MIGRACAO.reduce((s,m)=>s+(Number(m.qtd_registros_extraidos)||0), 0);
   const totalCarregado = ITENS_MIGRACAO.reduce((s,m)=>s+(Number(m.qtd_registros_carregados)||0), 0);
-  const pctGlobal = totalEstimado>0 ? Math.round(100*totalCarregado/totalEstimado*100)/100 : null;
+  // 162ª rodada — pedido do usuário (verbatim): "nessa planilha não use o
+  // campo meta para apurar os %, use os dados dos ciclos [...] O campo Meta
+  // está abaixo dos extraídos nos ciclos por isso o % de carregados passa
+  // de 100%". Meta (qtd_registros_estimada) é só um alvo definido à mão e
+  // pode ficar menor do que o que já foi de fato extraído num ciclo — usar
+  // extraídos (qtd_registros_extraidos, do último ciclo de cada item) como
+  // denominador é o que o "Quadro por Ciclo" já faz, e nunca passa de 100%.
+  const pctGlobal = totalExtraido>0 ? Math.round(100*totalCarregado/totalExtraido*100)/100 : null;
   // 158ª rodada — pedido do usuário (verbatim): "os quadros com as
   // quantidades, as da parte de cima da página, pode escolher as cores" —
   // critério: Itens cadastrados/Registros carregados em azul (leitura
@@ -7179,7 +7191,9 @@ function renderItensMigracao(){
   $("mig-kpis").innerHTML = kpisMig.map(k=>`<div class="kpi" style="${k.bg?`background:${k.bg};`:""}"><div class="label">${k.l}</div><div class="value">${k.v}</div></div>`).join("");
 
   $("migracao-tbody").innerHTML = list.length ? list.map(m=>{
-    const pct = m.qtd_registros_estimada ? Math.round(100*(m.qtd_registros_carregados||0)/m.qtd_registros_estimada*100)/100 : null;
+    // 162ª rodada: % carregados usa extraídos (do ciclo), não a meta — ver
+    // comentário acima, em pctGlobal, com a explicação completa do pedido.
+    const pct = m.qtd_registros_extraidos ? Math.round(100*(m.qtd_registros_carregados||0)/m.qtd_registros_extraidos*100)/100 : null;
     return `<tr class="clickable" data-id="${m.id}">
       <td>${esc(m.nome_tabela_legado)}${m.sistema_origem?`<div class="muted">${esc(m.sistema_origem)}</div>`:""}</td>
       <td>${esc(m.nome_tabela_destino||"—")}${m.atividade_nome?`<div class="muted">${m.atividade_codigo?esc(m.atividade_codigo)+" — ":""}${esc(m.atividade_nome)}</div>`:""}</td>

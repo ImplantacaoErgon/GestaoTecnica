@@ -334,13 +334,22 @@ def _frentes_com_cor(projeto_id):
 
 def _pct_migracao_carregado(migracao_de_dados):
     """Mesmo cálculo do tile cruzado "Migração — % carregado" de
-    renderVisaoExecutiva() — soma de meta (qtd_registros_estimada) × soma do
-    carregado no ÚLTIMO ciclo de cada item (mesmos números já usados na
-    tabela comparativa, nenhuma consulta nova)."""
+    renderVisaoExecutiva() — soma do EXTRAÍDO × soma do carregado, ambos no
+    ÚLTIMO ciclo de cada item (mesmos números já usados na tabela
+    comparativa, nenhuma consulta nova).
+
+    162ª rodada — pedido do usuário (verbatim): "nessa planilha não use o
+    campo meta para apurar os %, use os dados dos ciclos [...] O campo Meta
+    está abaixo dos extraídos nos ciclos por isso o % de carregados passa
+    de 100%". Meta (qtd_registros_estimada / it["meta"]) é só um alvo
+    definido à mão e pode ficar menor do que o que já foi de fato extraído
+    num ciclo — por isso deixou de ser o denominador; extraído
+    (it["ultimo_ciclo"]["extraido"], já calculado em relatorio_executivo.py)
+    nunca deixa o % passar de 100%."""
     itens = (migracao_de_dados or {}).get("itens") or []
-    total_estimado = sum(it.get("meta") or 0 for it in itens)
+    total_extraido = sum((it.get("ultimo_ciclo") or {}).get("extraido") or 0 for it in itens)
     total_carregado = sum((it.get("ultimo_ciclo") or {}).get("carregado") or 0 for it in itens)
-    return round(100 * total_carregado / total_estimado) if total_estimado else None
+    return round(100 * total_carregado / total_extraido) if total_extraido else None
 
 
 def _pct_rubricas_homologadas(folha_de_pagamento):
