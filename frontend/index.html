@@ -162,6 +162,17 @@
   .kpi .value{font-size:24px;font-weight:700;margin-top:4px;font-family:'IBM Plex Mono';}
   .kpi .value.danger{color:var(--danger);}
   .kpi .value.ok{color:var(--ok);}
+  /* 168ª rodada — pedido do usuário (verbatim, sobre os tiles de Rubricas):
+     "esses quadros podem se transformar em links de filtro [...] clico em
+     Enviadas à Techne, automaticamente a relação filtra essa situação" —
+     usado só pelos tiles que de fato viram filtro (ver rubKpiTile/
+     renderRubricas); os de outras telas (ex: Visão Executiva) continuam
+     sem isso, sem tabela nenhuma pra filtrar ali embaixo. */
+  .kpi-clickable{cursor:pointer;transition:transform .08s ease,box-shadow .08s ease;}
+  .kpi-clickable:hover{box-shadow:0 0 0 2px var(--accent) inset;}
+  .kpi-clickable:active{transform:scale(.98);}
+  .kpi-clickable.kpi-active{box-shadow:0 0 0 2px var(--accent) inset;}
+  .kpi-clickable.kpi-active .label{color:var(--accent);}
 
   .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow);margin-bottom:16px;}
   .card h3{font-size:13px;font-weight:700;margin:0 0 12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;}
@@ -3848,7 +3859,7 @@ async function afterProjetoReady(){
   aplicarMarcaNoTopo();
   fillStaticSelects();
   wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireDashboardPdf(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireGanttToolbar(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireExportarCronograma(); wireExportarCronogramaXml(); wireRemoverCronograma(); wireRemoverRequisitos(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma(); wireRenumerarCronograma();
-  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros(); wireQuadroCicloModal(); wireImportCiclosMigracao(); wireMigracaoRejeicoesPane(); wireRubricaModal(); wireRubricasFiltros(); wireRubAnaliseDatas(); wireImportRubricas(); wireComparacaoFolhaPane(); wireComparacaoFolhaDashboard(); wireVexFolhaComparacaoToggle(); wireVexMigracaoEvolucaoSelect();
+  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros(); wireQuadroCicloModal(); wireImportCiclosMigracao(); wireMigracaoRejeicoesPane(); wireRubricaModal(); wireRubricasFiltros(); wireRubAnaliseDatas(); wireRubKpisFiltro(); wireImportRubricas(); wireComparacaoFolhaPane(); wireComparacaoFolhaDashboard(); wireVexFolhaComparacaoToggle(); wireVexMigracaoEvolucaoSelect();
   setupCsvTemplateLink();
   await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias(), loadItensMigracao(), loadRubricas(), loadRubricasAutoUpdateStatus()]);
   // Reaplica agora que REQUISITOS/ATIVIDADES já estão carregados — os selects
@@ -7860,9 +7871,46 @@ const RUB_KPI_TILE_BG = {
   "Homologadas": "var(--ok-soft)",
   "Excluídas": "var(--danger-soft)",
 };
-function rubKpiTile(k){
+// 168ª rodada — pedido do usuário (verbatim, apontando pro print dos tiles
+// da aba Rubricas): "esses quadros podem se transformar em links de filtro,
+// exemplo, clico em Enviadas à Techne, automaticamente a relação filtra
+// essa situação e apresenta as linhas dessa situação". `k.filtro` (string,
+// o status exato do <select id="rub-status">) torna o tile clicável. Tiles
+// sem `filtro` — "Total levantadas" em renderRubricas (não corresponde a
+// um único status) e todos os de _vexRenderFolha, Visão Executiva (não há
+// tabela pra filtrar ali embaixo) — continuam exatamente como antes, sem
+// nenhuma interação.
+function rubKpiTile(k, statusAtivo){
   const bg = RUB_KPI_TILE_BG[k.l];
-  return `<div class="kpi" style="${bg?`background:${bg};`:""}"><div class="label">${k.l}</div><div class="value">${k.v}</div></div>`;
+  const clicavel = k.filtro !== undefined;
+  const ativo = clicavel && k.filtro === (statusAtivo || "");
+  const attrs = clicavel
+    ? ` data-rub-filtro="${esc(k.filtro)}" role="button" tabindex="0" title="Filtrar a lista por esta situação"`
+    : "";
+  return `<div class="kpi${clicavel?" kpi-clickable":""}${ativo?" kpi-active":""}" style="${bg?`background:${bg};`:""}"${attrs}><div class="label">${k.l}</div><div class="value">${k.v}</div></div>`;
+}
+
+// Wire comum pros tiles clicáveis de #rub-kpis — delegação simples (os
+// tiles são recriados a cada renderRubricas(), então o listener vai no
+// container, que é fixo no HTML, não nos .kpi individuais).
+function wireRubKpisFiltro(){
+  const el = $("rub-kpis");
+  if(!el || el.dataset.filtroWired) return;
+  el.dataset.filtroWired = "1";
+  el.addEventListener("click", (ev)=>{
+    const tile = ev.target.closest("[data-rub-filtro]");
+    if(!tile) return;
+    $("rub-status").value = tile.dataset.rubFiltro;
+    renderRubricas();
+  });
+  el.addEventListener("keydown", (ev)=>{
+    if(ev.key !== "Enter" && ev.key !== " ") return;
+    const tile = ev.target.closest("[data-rub-filtro]");
+    if(!tile) return;
+    ev.preventDefault();
+    $("rub-status").value = tile.dataset.rubFiltro;
+    renderRubricas();
+  });
 }
 
 async function loadRubricas(){ RUBRICAS = await api(`/rubricas?projeto_id=${PROJETO.id}`); }
@@ -7937,15 +7985,27 @@ function renderRubricas(){
   // vindo só da aba principal, sem somar a outra aba (pedido do usuário).
   const totalExcluidasPlanilha = porStatus["Excluída"]||0;
   const totalExcluidas = totalExcluidasPlanilha + (PROJETO.rubricas_aba_excluidas_qtd||0);
+  // 168ª rodada — `filtro` torna o tile clicável (ver rubKpiTile/
+  // wireRubKpisFiltro), um por situação real do funil, igual ao pedido do
+  // usuário (verbatim: "clico em Enviadas à Techne, [...] filtra essa
+  // situação"). "Total levantadas" fica de fora de propósito — não é uma
+  // situação, é "tudo menos Excluída", e o <select id="rub-status"> não tem
+  // essa opção (só "todos" ou uma situação exata), então não existe um
+  // único filtro que reproduza esse número. "Excluídas" filtra por status
+  // Excluída normalmente, mas o valor do tile (totalExcluidas) soma a aba
+  // separada da planilha (167ª rodada), que nunca virou linha em
+  // `rubricas` — então a lista filtrada mostra só a parte que de fato tem
+  // linha no sistema (totalExcluidasPlanilha), não o total do tile. É
+  // esperado, não bug (ver aviso do tile já existente).
   $("rub-kpis").innerHTML = [
     {l:"Total levantadas", v:RUBRICAS.length - totalExcluidasPlanilha},
-    {l:"Em levantamento", v:porStatus["Em levantamento"]||0},
-    {l:"Enviadas à Techne", v:porStatus["Enviada à Techne"]||0},
-    {l:"Liberadas p/ testes", v:porStatus["Liberada para testes"]||0},
-    {l:"Em homologação", v:porStatus["Em homologação"]||0},
-    {l:"Homologadas", v:porStatus["Homologada"]||0},
-    {l:"Excluídas", v:totalExcluidas},
-  ].map(rubKpiTile).join("");
+    {l:"Em levantamento", v:porStatus["Em levantamento"]||0, filtro:"Em levantamento"},
+    {l:"Enviadas à Techne", v:porStatus["Enviada à Techne"]||0, filtro:"Enviada à Techne"},
+    {l:"Liberadas p/ testes", v:porStatus["Liberada para testes"]||0, filtro:"Liberada para testes"},
+    {l:"Em homologação", v:porStatus["Em homologação"]||0, filtro:"Em homologação"},
+    {l:"Homologadas", v:porStatus["Homologada"]||0, filtro:"Homologada"},
+    {l:"Excluídas", v:totalExcluidas, filtro:"Excluída"},
+  ].map(k=>rubKpiTile(k, f.status)).join("");
 
   $("rubricas-tbody").innerHTML = list.length ? list.map(r=>{
     const nome = r.nome_abreviado || r.nome_extenso || r.descricao_legado || "—";
