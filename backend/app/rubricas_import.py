@@ -175,6 +175,25 @@ _STATUS_POR_CAMPO_DATA = [
 ]
 
 
+def _linha_tachada(ws, r):
+    """167ª rodada — pedido do usuário (verbatim): "Se uma linha estiver
+    'tachada' pode considerar excluída". O cliente usa formatação de
+    tachado (strikethrough) na aba "Levantamento Rubricas" pra indicar,
+    visualmente, que uma rubrica não vale mais — sem apagar a linha nem
+    preencher nenhuma data/observação que o sistema já leia. Checa as
+    colunas que de fato identificam a rubrica (Verba, Descrição, Código
+    ERGON, Nome Abreviado — as mesmas quatro usadas pra decidir se a linha
+    está em branco, acima) e considera a linha tachada se QUALQUER uma
+    delas, com valor preenchido, estiver com tachado. `data_only=True` no
+    load do workbook não impede o acesso a `cell.font` — só afeta se uma
+    fórmula devolve o valor calculado ou o texto da fórmula."""
+    for col in (2, 3, 4, 5):
+        cel = ws.cell(row=r, column=col)
+        if cel.value is not None and cel.font and cel.font.strike:
+            return True
+    return False
+
+
 def _derivar_status(item):
     """A planilha não tem uma coluna única de status — tem uma data por etapa
     do funil (levantamento -> envio à Techne -> liberação p/ testes -> início
@@ -305,7 +324,15 @@ def parse_rubricas_document(conteudo_bytes, nome_arquivo=""):
                 incidencias[chave] = v
         item["incidencias"] = incidencias
 
-        item["status"] = _derivar_status(item)
+        if _linha_tachada(ws, r):
+            item["status"] = "Excluída"
+            identificacao = item.get("codigo_ergon") or item.get("nome_abreviado") or f"linha {r}"
+            avisos.append(
+                f'Linha {r} ("{identificacao}") está tachada (riscada) na planilha — marcada como '
+                "Excluída."
+            )
+        else:
+            item["status"] = _derivar_status(item)
         item["notas_importacao"] = "; ".join(notas) or None
 
         if not item.get("nome_abreviado") and not item.get("descricao_legado"):
