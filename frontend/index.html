@@ -5773,13 +5773,27 @@ function _vexCurvaSCalcular(){
   const janela = meses.length>18 ? meses.slice(meses.length-18) : meses;
 
   const total = ATIVIDADES.length;
+  const hojeMes = hojeISO.slice(0,7);
+  // 166ª rodada — pedido do usuário (verbatim): "Ele está em 69% de
+  // previsão de conclusão, mas a linha está quase acima dos 75%" — causa:
+  // o corte do mês ATUAL sempre usava fim de mês (mes+"-31"), mesmo com
+  // "hoje" ainda no meio do mês — então o ponto bem embaixo da linha
+  // tracejada "hoje" projetava até o fim do mês corrente (que ainda não
+  // aconteceu), ficando mais alto que o KPI "Aderência ao prazo"/"% deveria
+  // estar concluído hoje" (pctDeveria em calcularKpisCronograma(), que
+  // corta em hojeISO exato — mesmo dado, cálculo diferente). Corrigido
+  // usando hojeISO como corte justamente no mês de hoje — os dois números
+  // batem exatamente agora. Meses FUTUROS continuam cortando no fim do mês
+  // (é a projeção do plano, intencional — é o que faz a linha continuar
+  // subindo até 100% lá na frente).
+  const corteDoMes = mes => mes===hojeMes ? hojeISO : mes+"-31";
   const planejado = janela.map(mes=>{
-    const corte = mes+"-31";
+    const corte = corteDoMes(mes);
     const n = ATIVIDADES.filter(a=>a.dtfim_prev && a.dtfim_prev<=corte).length;
     return total ? Math.round(100*n/total) : 0;
   });
   const realizado = janela.map(mes=>{
-    const corte = mes+"-31";
+    const corte = corteDoMes(mes);
     const n = ATIVIDADES.filter(a=>STATUS_FAMILIA_CONCLUIDA.includes(a.status) && a.dtfim_real && a.dtfim_real<=corte).length;
     return total ? Math.round(100*n/total) : 0;
   });
@@ -5794,7 +5808,7 @@ function _vexCurvaSCalcular(){
   // que o % de Concluídas visto em outras telas. Contado aqui pra avisar
   // isso diretamente no gráfico, em vez de deixar a diferença sem explicação.
   const concluidasSemData = ATIVIDADES.filter(a=>STATUS_FAMILIA_CONCLUIDA.includes(a.status) && !a.dtfim_real).length;
-  return {meses:janela, planejado, realizado, hojeMes: hojeISO.slice(0,7), concluidasSemData};
+  return {meses:janela, planejado, realizado, hojeMes, concluidasSemData};
 }
 
 // SVG desenhado à mão (sem lib de gráficos no projeto) — padrão de "emphasis":
