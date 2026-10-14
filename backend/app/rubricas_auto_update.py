@@ -90,7 +90,11 @@ def _executar_atualizacao(projeto_id, janela):
     própria linha de execução, pra aparecer na tela -- nunca sobe e derruba
     a thread de agendamento."""
     # import tardio -- evita ciclo (main.py importa este módulo no topo)
-    from .main import marcar_rubricas_ausentes_como_excluidas, upsert_rubricas
+    from .main import (
+        atualizar_contagem_aba_excluidas_rubricas,
+        marcar_rubricas_ausentes_como_excluidas,
+        upsert_rubricas,
+    )
 
     try:
         conteudo, nome_arquivo, _modificado_em = drive_rubricas.baixar_planilha_mais_recente()
@@ -107,6 +111,10 @@ def _executar_atualizacao(projeto_id, janela):
         # "atual" pra decidir quem sumiu.
         linhas_planilha_atual = [it["linha_planilha"] for it in itens]
         excluidas = marcar_rubricas_ausentes_como_excluidas(projeto_id, linhas_planilha_atual) if linhas_planilha_atual else 0
+        # 167ª rodada -- mesmo caminho do botão manual (ver docstring do
+        # módulo): a atualização automática também recalcula a contagem da
+        # aba "Excluídas" da planilha a cada rodada.
+        atualizar_contagem_aba_excluidas_rubricas(projeto_id, resultado.get("aba_excluidas_qtd"))
         db.execute(
             "UPDATE rubricas_auto_update_execucoes SET status = 'concluido', "
             f"nome_arquivo = {db.q(nome_arquivo)}, inseridos = {db.q(inseridos)}, "

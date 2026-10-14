@@ -6099,7 +6099,10 @@ function _vexRenderFolha(){
   // os tiles (com Excluídas > 0) em vez do aviso genérico de "nenhuma".
   if(!RUBRICAS.length){ el.innerHTML = `<div class="vex-empty">Nenhuma rubrica levantada.</div>`; return; }
   const validas = RUBRICAS.filter(r=>r.status!=="Excluída");
-  const totalExcluidas = RUBRICAS.length - validas.length;
+  // 167ª rodada — mesmo critério de renderRubricas: soma a contagem da aba
+  // "Excluídas" da planilha (PROJETO.rubricas_aba_excluidas_qtd) à contagem
+  // de quem está Excluída na aba principal.
+  const totalExcluidas = (RUBRICAS.length - validas.length) + (PROJETO.rubricas_aba_excluidas_qtd||0);
   const porStatus = {};
   validas.forEach(r=>{ porStatus[r.status] = (porStatus[r.status]||0)+1; });
   el.innerHTML = `<div class="kpis">${[
@@ -7927,9 +7930,15 @@ function renderRubricas(){
   // marca sozinha quando uma linha some da planilha (ver
   // marcar_rubricas_ausentes_como_excluidas, backend), então vale deixar
   // visível quantas estão nessa situação.
-  const totalExcluidas = porStatus["Excluída"]||0;
+  // 167ª rodada — "Excluídas" passa a somar quem está Excluída na aba
+  // principal (por tachado ou por ter sumido) COM a contagem da aba
+  // "Excluídas" da própria planilha (PROJETO.rubricas_aba_excluidas_qtd,
+  // ver rubricas_import.contar_aba_excluidas) — "Total levantadas" continua
+  // vindo só da aba principal, sem somar a outra aba (pedido do usuário).
+  const totalExcluidasPlanilha = porStatus["Excluída"]||0;
+  const totalExcluidas = totalExcluidasPlanilha + (PROJETO.rubricas_aba_excluidas_qtd||0);
   $("rub-kpis").innerHTML = [
-    {l:"Total levantadas", v:RUBRICAS.length - totalExcluidas},
+    {l:"Total levantadas", v:RUBRICAS.length - totalExcluidasPlanilha},
     {l:"Em levantamento", v:porStatus["Em levantamento"]||0},
     {l:"Enviadas à Techne", v:porStatus["Enviada à Techne"]||0},
     {l:"Liberadas p/ testes", v:porStatus["Liberada para testes"]||0},
@@ -8228,6 +8237,11 @@ let rubImpItens = [], rubImpConfirmando = false;
 // (backend) e repassadas sem alteração pra /importar/confirmar, que usa pra
 // saber quem sumiu e marcar como Excluída — ver confirmarImportacaoRubricas.
 let rubImpLinhasPlanilhaAtual = [];
+// 167ª rodada — contagem da aba "Excluídas" da planilha desta prévia (ver
+// rubricas_import.contar_aba_excluidas) — repassada pra confirmar sem
+// alteração (ver confirmarImportacaoRubricas). null quando a planilha não
+// tinha essa aba (nesse caso o backend mantém o último valor conhecido).
+let rubImpAbaExcluidasQtd = null;
 
 function wireImportRubricas(){
   $("btn-import-rubricas").addEventListener("click", openImportarRubricasModal);
@@ -8300,6 +8314,7 @@ async function abrirAtualizarRubricasDrive(){
 function _exibirPreviewRubricas(r){
   rubImpItens = (r.itens||[]).map(it=>({...it, _selecionado: true}));
   rubImpLinhasPlanilhaAtual = r.linhas_planilha_atual || rubImpItens.map(it=>it.linha_planilha);
+  rubImpAbaExcluidasQtd = r.aba_excluidas_qtd ?? null;
   const resumo = r.resumo || {};
   if(r.arquivo_origem){
     const mod = r.arquivo_origem.modificado_em ? fmtDateTime(r.arquivo_origem.modificado_em) : null;
@@ -8324,6 +8339,11 @@ function _exibirPreviewRubricas(r){
     // com o detalhe de cada uma, e marcar_rubricas_ausentes_como_excluidas
     // no backend).
     {l:"Sumiram da planilha (virarão Excluída)", v: resumo.sumidas_serao_excluidas ?? 0},
+    // 167ª rodada — tachadas na própria aba principal (status já vem
+    // "Excluída" no item, ver _linha_tachada no backend) + o que tem na aba
+    // "Excluídas" da planilha (não aparece em `itens` — só uma contagem).
+    {l:"Tachadas na planilha (status Excluída)", v: rubImpItens.filter(it=>it.status==="Excluída").length},
+    {l:"Na aba \"Excluídas\" da planilha", v: rubImpAbaExcluidasQtd ?? "—"},
   ].map(k=>`<div class="kpi"><div class="label">${k.l}</div><div class="value">${k.v}</div></div>`).join("");
   $("rubimp-check-all").checked = true;
   $("rubimp-preview-search").value = ""; $("rubimp-preview-status").value = "";
@@ -8374,10 +8394,21 @@ async function confirmarImportacaoRubricas(){
       // planilha, não só `selecionados` — desmarcar uma linha na prévia é
       // "não atualizar agora", não "sumiu da planilha" (ver comentário em
       // marcar_rubricas_ausentes_como_excluidas, app/main.py).
-      body: JSON.stringify({ projeto_id: PROJETO.id, itens: selecionados, linhas_planilha_atual: rubImpLinhasPlanilhaAtual }),
+      // aba_excluidas_qtd (167ª rodada): contagem da aba "Excluídas" desta
+      // mesma planilha — ver rubricas_import.contar_aba_excluidas.
+      body: JSON.stringify({
+        projeto_id: PROJETO.id, itens: selecionados,
+        linhas_planilha_atual: rubImpLinhasPlanilhaAtual,
+        aba_excluidas_qtd: rubImpAbaExcluidasQtd,
+      }),
     });
     const msgExcluidas = r.excluidas ? `, ${r.excluidas} marcada(s) como Excluída (sumiram da planilha)` : "";
     toast(`Importação concluída: ${r.inseridos} nova(s), ${r.atualizados} atualizada(s)${msgExcluidas}.`);
+    // 167ª rodada — atualiza o valor em memória sem precisar recarregar o
+    // projeto inteiro (r.aba_excluidas_qtd vem null quando a planilha não
+    // tinha a aba "Excluídas" — nesse caso o backend manteve o valor
+    // anterior, então também não muda nada aqui).
+    if(r.aba_excluidas_qtd != null) PROJETO.rubricas_aba_excluidas_qtd = r.aba_excluidas_qtd;
     await loadRubricas(); renderRubricas();
     await loadRubricasAutoUpdateStatus(); renderRubricasAutoUpdateStatus();
     closeImportarRubricasModal();

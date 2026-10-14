@@ -463,6 +463,23 @@ def marcar_rubricas_ausentes_como_excluidas(projeto_id, linhas_planilha_atual):
     return len(afetadas)
 
 
+def atualizar_contagem_aba_excluidas_rubricas(projeto_id, quantidade):
+    """167ª rodada — grava em `projetos` a contagem da aba "Excluídas" da
+    planilha (ver rubricas_import.contar_aba_excluidas), somada ao total de
+    "Excluídas" mostrado na tela (ver resumo_rubricas abaixo e
+    renderRubricas/_vexRenderFolha no front-end — essas duas leem
+    PROJETO.rubricas_aba_excluidas_qtd direto, sem round-trip extra).
+    `quantidade` None (planilha desta importação não tinha a aba "Excluídas"
+    — ver aviso correspondente) não sobrescreve nada: fica o último valor
+    conhecido, em vez de zerar por engano uma planilha resalva sem essa aba."""
+    if quantidade is None:
+        return
+    db.execute(
+        f"UPDATE projetos SET rubricas_aba_excluidas_qtd = {db.q(quantidade)}, "
+        f"rubricas_aba_excluidas_atualizado_em = now() WHERE id = {db.q(projeto_id)}"
+    )
+
+
 def preparar_fatura(data, projeto_id):
     """Valida e normaliza (in place) os dados de uma fatura antes de
     inserir/atualizar — usada por create_fatura/update_fatura. Levanta
@@ -3026,6 +3043,12 @@ def create_app():
         pid = request.args.get("projeto_id")
         if not pid:
             return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        # 167ª rodada — "excluidas" passa a somar quem está Excluída na aba
+        # principal (por tachado ou por ter sumido — ver _linha_tachada e
+        # marcar_rubricas_ausentes_como_excluidas) COM a contagem da aba
+        # "Excluídas" da planilha (ver contar_aba_excluidas,
+        # atualizar_contagem_aba_excluidas_rubricas) — "total" continua
+        # vindo só da aba principal (`rubricas`), nunca soma a outra aba.
         row = db.fetch_one(f"""
             SELECT
               count(*) AS total,
@@ -3034,13 +3057,17 @@ def create_app():
               count(*) FILTER (WHERE status = 'Liberada para testes') AS liberadas_testes,
               count(*) FILTER (WHERE status = 'Em homologação') AS em_homologacao,
               count(*) FILTER (WHERE status = 'Homologada') AS homologadas,
-              count(*) FILTER (WHERE status = 'Excluída') AS excluidas
+              count(*) FILTER (WHERE status = 'Excluída') AS excluidas_planilha,
+              (SELECT COALESCE(rubricas_aba_excluidas_qtd, 0) FROM projetos WHERE id = {db.q(pid)}) AS excluidas_aba
             FROM rubricas WHERE projeto_id = {db.q(pid)}
         """)
-        return jsonify(row or {
-            "total": 0, "em_levantamento": 0, "enviadas_techne": 0, "liberadas_testes": 0,
-            "em_homologacao": 0, "homologadas": 0, "excluidas": 0,
-        })
+        if not row:
+            return jsonify({
+                "total": 0, "em_levantamento": 0, "enviadas_techne": 0, "liberadas_testes": 0,
+                "em_homologacao": 0, "homologadas": 0, "excluidas": 0,
+            })
+        row["excluidas"] = (row.get("excluidas_planilha") or 0) + (row.get("excluidas_aba") or 0)
+        return jsonify(row)
 
     @app.get("/api/rubricas/<id>")
     def get_rubrica(id):
@@ -3123,7 +3150,14 @@ def create_app():
         confirmarImportacaoRubricas), usado para marcar como Excluída
         quem sumiu — ver marcar_rubricas_ausentes_como_excluidas. Campo
         opcional (ausente -> nenhuma rubrica é marcada Excluída) só por
-        compatibilidade; o front-end atual sempre manda."""
+        compatibilidade; o front-end atual sempre manda.
+
+        167ª rodada: também recebe `aba_excluidas_qtd` — a contagem da aba
+        "Excluídas" da planilha (vem de resultado["aba_excluidas_qtd"] da
+        prévia, repassado sem alteração; ver rubricas_import.
+        contar_aba_excluidas). None/ausente (planilha sem essa aba) não
+        altera o valor já gravado — ver
+        atualizar_contagem_aba_excluidas_rubricas."""
         data = request.get_json(force=True)
         projeto_id = data.get("projeto_id")
         itens = data.get("itens") or []
@@ -3135,7 +3169,12 @@ def create_app():
         inseridos, atualizados = upsert_rubricas(projeto_id, linhas)
         linhas_planilha_atual = data.get("linhas_planilha_atual") or []
         excluidas = marcar_rubricas_ausentes_como_excluidas(projeto_id, linhas_planilha_atual)
-        return jsonify({"inseridos": inseridos, "atualizados": atualizados, "excluidas": excluidas})
+        aba_excluidas_qtd = data.get("aba_excluidas_qtd")
+        atualizar_contagem_aba_excluidas_rubricas(projeto_id, aba_excluidas_qtd)
+        return jsonify({
+            "inseridos": inseridos, "atualizados": atualizados, "excluidas": excluidas,
+            "aba_excluidas_qtd": aba_excluidas_qtd,
+        })
 
     @app.get("/api/rubricas/auto-update/status")
     def rubricas_auto_update_status():

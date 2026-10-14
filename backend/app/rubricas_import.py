@@ -40,6 +40,15 @@ ABA_ESPERADA = "Levantamento Rubricas"
 LINHA_CABECALHO = 2
 LINHA_PRIMEIRA_DADOS = 3
 
+# 167ª rodada — a aba "Excluídas" da planilha real do cliente tem exatamente
+# as mesmas colunas da aba principal (mesmo cabeçalho: Verba 07 na coluna B,
+# Código ERGON na D, Nome Abreviado na E etc.), só que SEM a linha de nota
+# solta no topo — o cabeçalho fica na linha 1 e os dados começam na 2 (uma
+# linha mais cedo que na aba principal). Usada só pra CONTAR (ver
+# contar_aba_excluidas) — nenhuma rubrica é criada a partir dela.
+ABA_EXCLUIDAS = "Excluídas"
+LINHA_PRIMEIRA_DADOS_EXCLUIDAS = 2
+
 # índice de coluna (0-based, como as colunas do Excel enumeradas a partir de A=0)
 # -> nome do campo em `rubricas`. Levantado direto do cabeçalho real da planilha
 # do cliente (linha 2) — se o cliente reorganizar colunas, isso quebra e o
@@ -192,6 +201,55 @@ def _linha_tachada(ws, r):
         if cel.value is not None and cel.font and cel.font.strike:
             return True
     return False
+
+
+def _linha_tem_dado(ws, r):
+    """Mesma regra de "linha em branco de verdade" usada no loop principal
+    de parse_rubricas_document (pelo menos um entre Verba, Descrição, Código
+    ERGON ou Nome Abreviado preenchido) — reaproveitada por
+    contar_aba_excluidas (167ª rodada), que não tem o resto do contexto do
+    loop principal (datas, empresas, incidências) porque só conta, não vira
+    `rubricas`."""
+    verba = ws.cell(row=r, column=2).value
+    descricao = ws.cell(row=r, column=3).value
+    codigo_ergon = ws.cell(row=r, column=4).value
+    nome_abreviado = ws.cell(row=r, column=5).value
+    return not (verba is None and not _texto(descricao)
+                and codigo_ergon is None and not _texto(nome_abreviado))
+
+
+def contar_aba_excluidas(wb):
+    """167ª rodada — pedido do usuário (verbatim): "A ideia seria ter o
+    número de Rubricas por linha que tenha pelo menos os campos Código Ergon
+    ou Codigo ou Legado e nome apenas da aba principal. [...] Caso consiga
+    usar essa aba EXCLUÍDAS ai sim pode ajustar esse número." E, depois de
+    eu ter testado e confirmado (sem regressão): "a ideia é apenas contar os
+    registros da aba de excluídas e atualizar o totalizador que tem na
+    página somados às linhas tachadas da aba principal. O Total de rubricas
+    deve ser sempre considerado apenas da aba principal."
+
+    Ou seja: NÃO gera `rubricas` — é só uma contagem, somada ao total de
+    "Excluídas" mostrado na tela (linhas com status Excluída na aba
+    principal, por tachado ou por terem sumido — ver _linha_tachada e
+    marcar_rubricas_ausentes_como_excluidas — MAIS esta contagem). O "Total
+    de rubricas" continua vindo só da aba principal, sem nunca somar isto.
+
+    Retorna (quantidade, aviso). `aviso` só vem preenchido quando a aba não
+    existe nesta planilha — nesse caso `quantidade` é None, pra quem chamar
+    (app/main.py) saber que deve MANTER o último valor conhecido em vez de
+    zerar (a planilha pode ter sido resalva/reexportada sem essa aba, o que
+    não quer dizer que a contagem real tenha zerado)."""
+    if ABA_EXCLUIDAS not in wb.sheetnames:
+        return None, (
+            f'Esta planilha não tem uma aba "{ABA_EXCLUIDAS}" — a contagem de Excluídas vindas '
+            "dessa aba não foi atualizada (ficou o último valor conhecido)."
+        )
+    ws = wb[ABA_EXCLUIDAS]
+    qtd = sum(
+        1 for r in range(LINHA_PRIMEIRA_DADOS_EXCLUIDAS, ws.max_row + 1)
+        if _linha_tem_dado(ws, r)
+    )
+    return qtd, None
 
 
 def _derivar_status(item):
@@ -350,4 +408,13 @@ def parse_rubricas_document(conteudo_bytes, nome_arquivo=""):
     for it in itens:
         resumo["por_status"][it["status"]] = resumo["por_status"].get(it["status"], 0) + 1
 
-    return {"itens": itens, "avisos": avisos, "resumo": resumo}
+    # 167ª rodada — ver contar_aba_excluidas: só conta, não gera `rubricas`.
+    aba_excluidas_qtd, aviso_aba_excluidas = contar_aba_excluidas(wb)
+    if aviso_aba_excluidas:
+        avisos.append(aviso_aba_excluidas)
+    resumo["aba_excluidas_qtd"] = aba_excluidas_qtd
+
+    return {
+        "itens": itens, "avisos": avisos, "resumo": resumo,
+        "aba_excluidas_qtd": aba_excluidas_qtd,
+    }
