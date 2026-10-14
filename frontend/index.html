@@ -1484,7 +1484,7 @@
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Tabela do legado</th><th>Destino/Sistema</th><th>Meta</th><th>Carregado</th><th>% Carregados</th><th>Rejeitado</th><th>% Rejeitados</th><th>Ciclos</th><th>Status</th><th>Responsável</th></tr></thead>
+        <thead><tr><th>Tabela do legado</th><th>Destino/Sistema</th><th>Extraídos</th><th>Carregado</th><th>% Carregados</th><th>Rejeitado</th><th>% Rejeitados</th><th>Ciclos</th><th>Status</th><th>Responsável</th></tr></thead>
         <tbody id="migracao-tbody"></tbody>
       </table>
     </div>
@@ -7239,7 +7239,7 @@ function renderItensMigracao(){
     return `<tr class="clickable" data-id="${m.id}">
       <td>${esc(m.nome_tabela_legado)}${m.sistema_origem?`<div class="muted">${esc(m.sistema_origem)}</div>`:""}${m.sigla_oracle?`<div class="muted" style="font-size:10.5px;">Oracle: ${esc(m.sigla_oracle)}</div>`:""}</td>
       <td>${esc(m.nome_tabela_destino||"—")}${m.atividade_nome?`<div class="muted">${m.atividade_codigo?esc(m.atividade_codigo)+" — ":""}${esc(m.atividade_nome)}</div>`:""}</td>
-      <td class="mono">${m.qtd_registros_estimada!=null ? Number(m.qtd_registros_estimada).toLocaleString('pt-BR') : "—"}</td>
+      <td class="mono">${Number(m.qtd_registros_extraidos||0).toLocaleString('pt-BR')}</td>
       <td class="mono">${Number(m.qtd_registros_carregados||0).toLocaleString('pt-BR')}</td>
       <td>${pct===null ? "—" : pct.toFixed(2)+"%"}</td>
       <td class="mono">${Number(m.qtd_rejeicoes||0).toLocaleString('pt-BR')}</td>
