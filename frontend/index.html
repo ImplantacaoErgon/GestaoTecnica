@@ -1561,6 +1561,7 @@
       <select id="rub-grupo"><option value="">Grupo de cálculo (todos)</option></select>
       <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn secondary small" id="btn-atualizar-rubricas-drive" title="Busca automaticamente, no Google Drive, a versão mais recente da planilha de Levantamento de Rubricas">🔄 Atualizar Rubricas</button>
+        <button class="btn secondary small" id="btn-rub-analise-datas" title="Mostra, para cada situação do funil, quantas rubricas têm aquela data preenchida x quantas realmente permanecem nela x quantas foram sobrepostas por uma data mais recente em outra etapa">📊 Análise de datas × situação</button>
         <button class="btn secondary small" id="btn-import-rubricas">⬆ Importar planilha</button>
         <button class="btn small" id="btn-new-rubrica">+ Nova rubrica</button>
       </div>
@@ -2576,6 +2577,57 @@
       </div>
     </div>
     <div class="modal-foot"><span></span><button class="btn secondary" id="mrj-detalhe-fechar">Fechar</button></div>
+  </div>
+</div>
+
+<!-- ================= MODAL: ANÁLISE DE DATAS × SITUAÇÃO DAS RUBRICAS (165ª rodada) =================
+     Pedido do usuário (verbatim): "a gerente de projeto usa a planilha em
+     excel e os números obtidos por ela divergem do nosso sistema [...] Veja
+     uma forma de demonstrar as situações das rubricas. Exemplo, x estão com
+     data de homologação, mas desse x n estão com datas mais altas em outras
+     situações. Faça isso para as demais situações." O sistema sempre deriva
+     o status pela data MAIS RECENTE entre as 5 etapas preenchidas (ver
+     _derivar_status em backend/app/rubricas_import.py) -- quem conta só
+     "tem a data de Homologação preenchida" numa planilha, sem considerar
+     que outra etapa pode ter uma data ainda mais recente, chega a um número
+     diferente do sistema. Este modal decompõe, pra cada etapa do funil:
+     quantas rubricas têm a data desta etapa preenchida, quantas realmente
+     permanecem nela (é a data mais recente entre as preenchidas) e quantas
+     foram "sobrepostas" por uma data mais recente de outra etapa -- com
+     detalhe de quais rubricas, pra conferência linha a linha com a
+     planilha da gerente. Calculado 100% no navegador a partir de RUBRICAS
+     (já carregado pela tela) -- ver rubDerivarStatus(), que espelha
+     _derivar_status do backend; nenhuma chamada nova ao servidor. -->
+<div class="overlay" id="overlay-rub-analise-datas" hidden>
+  <div class="modal" style="max-width:1040px;">
+    <div class="modal-head"><h2>📊 Análise de datas × situação</h2><button class="btn ghost" id="rad-close">✕</button></div>
+    <div class="modal-body single-col">
+      <p class="muted" style="margin-bottom:10px;">Para cada etapa do funil: quantas rubricas têm a data desta etapa preenchida, quantas realmente permanecem nela (essa é a data mais recente entre as preenchidas) e quantas foram "sobrepostas" por uma data mais recente de outra etapa — clique em "ver quais" para listar. Rubricas com status "Excluída" não entram nesta análise.</p>
+      <div class="kpis" id="rad-kpis" style="margin-bottom:12px;"></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Situação</th><th>Têm a data desta etapa</th><th>Permanecem nesta situação</th><th>Foram sobrepostas</th><th>Sobrepostas para</th><th>Status atual no sistema</th><th></th></tr></thead>
+          <tbody id="rad-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="modal-foot"><span></span><button class="btn secondary" id="rad-fechar">Fechar</button></div>
+  </div>
+</div>
+
+<!-- ================= MODAL: DETALHE — RUBRICAS SOBREPOSTAS (165ª rodada) ================= -->
+<div class="overlay" id="overlay-rad-detalhe" hidden>
+  <div class="modal" style="max-width:880px;">
+    <div class="modal-head"><h2 id="rad-detalhe-titulo">Rubricas sobrepostas</h2><button class="btn ghost" id="rad-detalhe-close">✕</button></div>
+    <div class="modal-body single-col">
+      <div class="table-wrap" style="max-height:440px;">
+        <table>
+          <thead><tr><th>Código ERGON</th><th>Verba</th><th>Nome</th><th>Data desta etapa</th><th>Situação pela data mais recente</th><th>Status atual no sistema</th></tr></thead>
+          <tbody id="rad-detalhe-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="modal-foot"><span></span><button class="btn secondary" id="rad-detalhe-fechar">Fechar</button></div>
   </div>
 </div>
 
@@ -3796,7 +3848,7 @@ async function afterProjetoReady(){
   aplicarMarcaNoTopo();
   fillStaticSelects();
   wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireDashboardPdf(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireGanttToolbar(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireExportarCronograma(); wireExportarCronogramaXml(); wireRemoverCronograma(); wireRemoverRequisitos(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma(); wireRenumerarCronograma();
-  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros(); wireQuadroCicloModal(); wireImportCiclosMigracao(); wireMigracaoRejeicoesPane(); wireRubricaModal(); wireRubricasFiltros(); wireImportRubricas(); wireComparacaoFolhaPane(); wireComparacaoFolhaDashboard(); wireVexFolhaComparacaoToggle(); wireVexMigracaoEvolucaoSelect();
+  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros(); wireQuadroCicloModal(); wireImportCiclosMigracao(); wireMigracaoRejeicoesPane(); wireRubricaModal(); wireRubricasFiltros(); wireRubAnaliseDatas(); wireImportRubricas(); wireComparacaoFolhaPane(); wireComparacaoFolhaDashboard(); wireVexFolhaComparacaoToggle(); wireVexMigracaoEvolucaoSelect();
   setupCsvTemplateLink();
   await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias(), loadItensMigracao(), loadRubricas(), loadRubricasAutoUpdateStatus()]);
   // Reaplica agora que REQUISITOS/ATIVIDADES já estão carregados — os selects
@@ -7897,6 +7949,121 @@ function wireRubricasFiltros(){
     $(id).addEventListener("change", renderRubricas);
   });
 }
+
+// ================= ANÁLISE DE DATAS × SITUAÇÃO DAS RUBRICAS — 165ª rodada =================
+// Pedido do usuário (verbatim): "a gerente de projeto usa a planilha em
+// excel e os números obtidos por ela divergem do nosso sistema [...] Veja
+// uma forma de demonstrar as situações das rubricas. Exemplo, x estão com
+// data de homologação, mas desse x n estão com datas mais altas em outras
+// situações. Faça isso para as demais situações." Ver comentário completo
+// no HTML do modal (#overlay-rub-analise-datas).
+//
+// RUB_FUNIL_CAMPOS e rubDerivarStatus() espelham, de propósito, EXATAMENTE
+// _STATUS_POR_CAMPO_DATA/_derivar_status em backend/app/rubricas_import.py
+// (mesma ordem de etapas, mesmo critério de desempate em empate exato de
+// data) — se aquela regra mudar no backend algum dia, esta cópia precisa
+// mudar junto, senão a "demonstração" passa a mentir sobre o que o sistema
+// realmente faz. Datas aqui já chegam como string ISO "AAAA-MM-DD" (é o
+// formato que a API devolve) — comparação de string "a > b" já ordena
+// cronologicamente corretamente nesse formato, sem precisar de Date().
+const RUB_FUNIL_CAMPOS = [
+  ["data_levantamento", "Em levantamento"],
+  ["data_envio_techne", "Enviada à Techne"],
+  ["data_liberacao_testes", "Liberada para testes"],
+  ["data_inicio_homologacao", "Em homologação"],
+  ["data_homologacao", "Homologada"],
+];
+
+function rubDerivarStatus(r){
+  let melhor = null; // [data, idx, status]
+  RUB_FUNIL_CAMPOS.forEach(([campo, status], idx)=>{
+    const d = r[campo];
+    if(!d) return;
+    if(!melhor || d > melhor[0] || (d === melhor[0] && idx > melhor[1])) melhor = [d, idx, status];
+  });
+  return melhor ? melhor[2] : "Em levantamento";
+}
+
+function analisarDatasRubricas(){
+  const itens = RUBRICAS.filter(r=>r.status !== "Excluída");
+  let semNenhumaData = 0;
+  itens.forEach(r=>{ if(!RUB_FUNIL_CAMPOS.some(([campo])=>r[campo])) semNenhumaData++; });
+  const porStatus = RUB_FUNIL_CAMPOS.map(([campo, status])=>{
+    let comData = 0, permanecem = 0;
+    const sobrepostasPor = {};
+    const listaSobrepostas = [];
+    itens.forEach(r=>{
+      if(!r[campo]) return;
+      comData++;
+      const derivado = rubDerivarStatus(r);
+      if(derivado === status){ permanecem++; }
+      else{
+        sobrepostasPor[derivado] = (sobrepostasPor[derivado]||0) + 1;
+        listaSobrepostas.push({ ...r, _data_etapa: r[campo], _status_derivado: derivado });
+      }
+    });
+    return {
+      status, campo, comData, permanecem, sobrepostas: comData - permanecem,
+      sobrepostasPor, listaSobrepostas,
+      statusAtualSistema: itens.filter(r=>r.status===status).length,
+    };
+  });
+  return { porStatus, semNenhumaData, total: itens.length };
+}
+
+let radUltimaAnalise = null;
+
+function wireRubAnaliseDatas(){
+  $("btn-rub-analise-datas").addEventListener("click", openRubAnaliseDatasModal);
+  $("rad-close").addEventListener("click", closeRubAnaliseDatasModal);
+  $("rad-fechar").addEventListener("click", closeRubAnaliseDatasModal);
+  $("overlay-rub-analise-datas").addEventListener("click", e=>{ if(e.target.id==="overlay-rub-analise-datas") closeRubAnaliseDatasModal(); });
+  $("rad-detalhe-close").addEventListener("click", closeRadDetalheModal);
+  $("rad-detalhe-fechar").addEventListener("click", closeRadDetalheModal);
+  $("overlay-rad-detalhe").addEventListener("click", e=>{ if(e.target.id==="overlay-rad-detalhe") closeRadDetalheModal(); });
+}
+
+function openRubAnaliseDatasModal(){
+  radUltimaAnalise = analisarDatasRubricas();
+  const a = radUltimaAnalise;
+  $("rad-kpis").innerHTML = [
+    {l:"Rubricas analisadas (sem Excluída)", v: a.total},
+    {l:"Sem nenhuma data preenchida (caem em Em levantamento)", v: a.semNenhumaData},
+  ].map(k=>`<div class="kpi"><div class="label">${k.l}</div><div class="value">${k.v}</div></div>`).join("");
+  $("rad-tbody").innerHTML = a.porStatus.map((p, idx)=>{
+    const sobrepostasParaTxt = Object.entries(p.sobrepostasPor)
+      .map(([st, n])=>`${esc(st)}: ${n}`).join(", ") || "—";
+    return `<tr>
+      <td>${pill(p.status, STATUS_RUBRICA_COLOR[p.status]||"faint")}</td>
+      <td class="mono">${p.comData}</td>
+      <td class="mono">${p.permanecem}</td>
+      <td class="mono">${p.sobrepostas}</td>
+      <td style="font-size:12px;">${sobrepostasParaTxt}</td>
+      <td class="mono">${p.statusAtualSistema}</td>
+      <td>${p.sobrepostas ? `<button class="btn ghost small" data-idx="${idx}">ver quais</button>` : ""}</td>
+    </tr>`;
+  }).join("");
+  $("rad-tbody").querySelectorAll("button[data-idx]").forEach(btn=>{
+    btn.addEventListener("click", ()=>abrirRadDetalhe(a.porStatus[Number(btn.dataset.idx)]));
+  });
+  $("overlay-rub-analise-datas").hidden = false;
+}
+function closeRubAnaliseDatasModal(){ $("overlay-rub-analise-datas").hidden = true; }
+
+function abrirRadDetalhe(p){
+  $("rad-detalhe-titulo").textContent = `Sobrepostas — tinham data de "${p.status}", mas outra etapa tem data mais recente`;
+  $("rad-detalhe-tbody").innerHTML = p.listaSobrepostas.length ? p.listaSobrepostas.map(r=>`
+    <tr>
+      <td class="mono">${esc(r.codigo_ergon||"—")}</td>
+      <td class="mono">${esc(r.verba_legado||"—")}</td>
+      <td>${esc(r.nome_abreviado || r.descricao_legado || "—")}</td>
+      <td>${fmtDate(r._data_etapa)}</td>
+      <td>${pill(r._status_derivado, STATUS_RUBRICA_COLOR[r._status_derivado]||"faint")}</td>
+      <td>${pill(r.status, STATUS_RUBRICA_COLOR[r.status]||"faint")}</td>
+    </tr>`).join("") : `<tr class="empty-row"><td colspan="6">Nenhuma.</td></tr>`;
+  $("overlay-rad-detalhe").hidden = false;
+}
+function closeRadDetalheModal(){ $("overlay-rad-detalhe").hidden = true; }
 
 function wireRubricaModal(){
   $("btn-new-rubrica").addEventListener("click", ()=>openRubricaModal(null));
