@@ -1353,6 +1353,32 @@ def create_app():
         row.pop("senha_hash", None)
         return jsonify(row)
 
+    @app.post("/api/usuarios/<id>/resetar-senha")
+    def resetar_senha_usuario(id):
+        """169ª rodada — pedido do usuário (verbatim): "crie um botão para
+        resetar a senha, por padrão quando for resetar colocar a senha
+        '12345678'" (tela Configurações > Usuários). Sem perfil de
+        administrador nesta rodada (ver auth.py) — qualquer usuário logado
+        pode acionar, igual já acontece com o resto da edição desta tela;
+        fica registrado na auditoria como evento sensível (tipo_evento
+        'senha_redefinida', já previsto no schema — ver migration_021 —
+        mas nunca usado até aqui: esqueci_a_senha/trocar_senha não
+        registram auditoria hoje)."""
+        usuario = auth.buscar_usuario_publico(id)
+        if not usuario:
+            abort(404)
+        try:
+            auth.resetar_senha_padrao(id)
+        except auth.AuthError as e:
+            return jsonify({"erro": str(e)}), 400
+        auditoria.registrar_evento_manual(
+            "senha_redefinida",
+            f'Resetou a senha de "{usuario["nome"]}" ({usuario["email"]}) para a senha padrão',
+            entidade="usuarios", entidade_id=str(id), entidade_rotulo=usuario.get("nome"),
+            sensivel=True,
+        )
+        return jsonify({"ok": True, "senha_padrao": auth.SENHA_PADRAO_RESET})
+
     # ------------------------------------------------------------ projetos
     @app.get("/api/projetos")
     def list_projetos():

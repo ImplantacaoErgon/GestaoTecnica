@@ -35,6 +35,12 @@ from . import db
 EMAIL_REGEX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 SENHA_MIN_LEN = 6
 
+# 169ª rodada — pedido do usuário (verbatim): "crie um botão para resetar a
+# senha, por padrão quando for resetar colocar a senha '12345678'" — usado
+# por resetar_senha_padrao (tela Configurações > Usuários), diferente de
+# gerar_senha_temporaria (aleatória, usada só por "Esqueci a senha").
+SENHA_PADRAO_RESET = "12345678"
+
 USUARIO_CADASTRO_CAMPOS_OBRIGATORIOS = [
     "email", "nome", "telefone", "empresa", "cargo", "senha",
 ]
@@ -160,6 +166,23 @@ def trocar_senha(usuario_id, senha_atual, senha_nova):
     senha_nova = validar_senha(senha_nova)
     db.execute(
         f"UPDATE usuarios SET senha_hash = {db.q(hash_senha(senha_nova))} WHERE id = {db.q(usuario_id)}"
+    )
+
+
+def resetar_senha_padrao(usuario_id, senha_padrao=SENHA_PADRAO_RESET):
+    """169ª rodada — pedido do usuário (verbatim): "crie um botão para
+    resetar a senha, por padrão quando for resetar colocar a senha
+    '12345678'". Uso administrativo pela tela Configurações > Usuários —
+    diferente de trocar_senha (exige a senha atual, usada pelo próprio
+    usuário logado) e de esqueci_a_senha (gera senha aleatória e manda por
+    e-mail): aqui é sempre a mesma senha fixa, pra quem administra poder
+    destravar o acesso de alguém sem depender de SMTP configurado. Levanta
+    AuthError se o usuário não existir."""
+    usuario = db.fetch_one(f"SELECT id FROM usuarios WHERE id = {db.q(usuario_id)}")
+    if not usuario:
+        raise AuthError("Usuário não encontrado.")
+    db.execute(
+        f"UPDATE usuarios SET senha_hash = {db.q(hash_senha(senha_padrao))} WHERE id = {db.q(usuario_id)}"
     )
 
 

@@ -2114,7 +2114,14 @@
     <div class="modal-head"><h2 id="cfg-modal-title">Novo</h2><button class="btn ghost" id="cfg-close">✕</button></div>
     <div class="modal-body" id="cfg-fields"></div>
     <div class="modal-foot">
-      <button class="btn danger" id="cfg-delete" style="visibility:hidden;">Excluir</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn danger" id="cfg-delete" style="visibility:hidden;">Excluir</button>
+        <!-- 169ª rodada — pedido do usuário (verbatim): "crie um botão para
+             resetar a senha, por padrão quando for resetar colocar a senha
+             '12345678'" — só aparece editando um usuário (ver
+             openConfigModal/wireConfiguracoes). -->
+        <button class="btn secondary" id="cfg-resetar-senha" style="visibility:hidden;" title="Define a senha deste usuário como 12345678">🔑 Resetar senha</button>
+      </div>
       <div style="display:flex;gap:8px;"><button class="btn secondary" id="cfg-cancel">Cancelar</button><button class="btn" id="cfg-save">Salvar</button></div>
     </div>
   </div>
@@ -11160,6 +11167,7 @@ function wireConfiguracoes(){
   $("overlay-config").addEventListener("click", e=>{ if(e.target.id==="overlay-config") closeConfigModal(); });
   $("cfg-save").addEventListener("click", saveConfigItem);
   $("cfg-delete").addEventListener("click", ()=>excluirConfigItem(CONFIG_ENTIDADES[cfgAbaAtual], cfgEditandoId));
+  $("cfg-resetar-senha").addEventListener("click", resetarSenhaUsuario);
   $("doc-voltar").addEventListener("click", fecharDocumentoDetalhe);
   $("doc-imprimir").addEventListener("click", ()=> window.print());
   $("cfg-calendario-duplicar").addEventListener("click", abrirDuplicarCalendarioModal);
@@ -12962,8 +12970,27 @@ function openConfigModal(row){
   cfgEditandoId = row ? row.id : null;
   $("cfg-modal-title").textContent = row ? `Editar ${def.tituloSingular.toLowerCase()}` : `Novo(a) ${def.tituloSingular.toLowerCase()}`;
   $("cfg-delete").style.visibility = (row && !def.semExcluir) ? "visible" : "hidden";
+  // 169ª rodada — só a aba "usuarios", só editando um usuário já existente.
+  $("cfg-resetar-senha").style.visibility = (row && cfgAbaAtual === "usuarios") ? "visible" : "hidden";
   $("cfg-fields").innerHTML = def.campos.map(c => cfgFieldHtml(c, row ? row[c.chave] : undefined)).join("");
   $("overlay-config").hidden = false;
+}
+
+// 169ª rodada — pedido do usuário (verbatim): "crie um botão para resetar a
+// senha, por padrão quando for resetar colocar a senha '12345678'".
+async function resetarSenhaUsuario(){
+  if(!cfgEditandoId) return;
+  const usuario = byId(USUARIOS, cfgEditandoId);
+  askConfirm(
+    `Resetar a senha de "${usuario ? usuario.nome : "este usuário"}" para a senha padrão (12345678)? `
+    + "Avise a pessoa pra trocar depois de entrar.",
+    async ()=>{
+      try{
+        const r = await api(`/usuarios/${cfgEditandoId}/resetar-senha`, {method:"POST"});
+        toast(`Senha resetada para "${r.senha_padrao || "12345678"}".`);
+      }catch(e){}
+    }
+  );
 }
 function closeConfigModal(){ $("overlay-config").hidden = true; cfgEditandoId = null; }
 
