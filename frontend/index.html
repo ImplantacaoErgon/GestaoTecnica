@@ -1614,6 +1614,18 @@
     <div class="filters">
       <input type="text" id="rubemp-search" placeholder="Buscar por empresa, verba, nome, código Ergon…">
       <select id="rubemp-f-empresa"><option value="">Empresa (todas)</option></select>
+      <!-- 169ª rodada (continuação) — pedido do usuário (verbatim):
+           "disponibiliza os campos verba legado, rubrica Ergon e os campos
+           de nome para fazer filtros mais específicos". Além da busca geral
+           (rubemp-search, que já olha todos os campos de uma vez) e do
+           filtro por empresa, estes 4 campos filtram cada coluna
+           separadamente — mesmo padrão de rub-f-codigo-ergon na aba
+           Rubricas: includes() por campo, combinável entre si e com os
+           demais filtros. -->
+      <input type="text" id="rubemp-f-verba" placeholder="Verba Legado">
+      <input type="text" id="rubemp-f-codigo-ergon" placeholder="Rubrica ERGON">
+      <input type="text" id="rubemp-f-nome" placeholder="Nome (legado)">
+      <input type="text" id="rubemp-f-nome-rubrica" placeholder="Nome da rubrica">
     </div>
     <div class="table-wrap">
       <table>
@@ -8144,6 +8156,13 @@ function rubEmpFilters(){
   return {
     search: ($("rubemp-search").value||"").trim().toLowerCase(),
     empresa: $("rubemp-f-empresa").value,
+    // 169ª rodada (continuação) — filtros específicos por coluna, pedido do
+    // usuário (verbatim): "disponibiliza os campos verba legado, rubrica
+    // Ergon e os campos de nome para fazer filtros mais específicos".
+    verba: ($("rubemp-f-verba").value||"").trim().toLowerCase(),
+    codigoErgon: ($("rubemp-f-codigo-ergon").value||"").trim().toLowerCase(),
+    nome: ($("rubemp-f-nome").value||"").trim().toLowerCase(),
+    nomeRubrica: ($("rubemp-f-nome-rubrica").value||"").trim().toLowerCase(),
   };
 }
 
@@ -8156,6 +8175,10 @@ function renderRubricasPorEmpresa(){
   const f = rubEmpFilters();
   const linhas = todas.filter(l=>{
     if(f.empresa && l.empresa!==f.empresa) return false;
+    if(f.verba && !(l.verba||"").toLowerCase().includes(f.verba)) return false;
+    if(f.codigoErgon && !(l.codigoErgon||"").toLowerCase().includes(f.codigoErgon)) return false;
+    if(f.nome && !(l.nome||"").toLowerCase().includes(f.nome)) return false;
+    if(f.nomeRubrica && !(l.nomeRubrica||"").toLowerCase().includes(f.nomeRubrica)) return false;
     if(f.search && !([l.empresa,l.verba,l.nome,l.codigoErgon,l.nomeRubrica].join(" ").toLowerCase().includes(f.search))) return false;
     return true;
   }).sort((a,b)=> a.empresa.localeCompare(b.empresa,'pt-BR') || (a.verba||"").localeCompare(b.verba||"", undefined, {numeric:true}));
@@ -8171,7 +8194,7 @@ function renderRubricasPorEmpresa(){
 }
 
 function wireRubricasPorEmpresaFiltros(){
-  ["rubemp-search","rubemp-f-empresa"].forEach(id=>{
+  ["rubemp-search","rubemp-f-empresa","rubemp-f-verba","rubemp-f-codigo-ergon","rubemp-f-nome","rubemp-f-nome-rubrica"].forEach(id=>{
     $(id).addEventListener("input", renderRubricasPorEmpresa);
     $(id).addEventListener("change", renderRubricasPorEmpresa);
   });
