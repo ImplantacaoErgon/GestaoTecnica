@@ -1617,15 +1617,19 @@
       <!-- 169ª rodada (continuação) — pedido do usuário (verbatim):
            "disponibiliza os campos verba legado, rubrica Ergon e os campos
            de nome para fazer filtros mais específicos". Além da busca geral
-           (rubemp-search, que já olha todos os campos de uma vez) e do
+           (rubemp-search, que continua "contém" em todos os campos) e do
            filtro por empresa, estes 4 campos filtram cada coluna
-           separadamente — mesmo padrão de rub-f-codigo-ergon na aba
-           Rubricas: includes() por campo, combinável entre si e com os
-           demais filtros. -->
-      <input type="text" id="rubemp-f-verba" placeholder="Verba Legado">
-      <input type="text" id="rubemp-f-codigo-ergon" placeholder="Rubrica ERGON">
-      <input type="text" id="rubemp-f-nome" placeholder="Nome (legado)">
-      <input type="text" id="rubemp-f-nome-rubrica" placeholder="Nome da rubrica">
+           separadamente, combináveis entre si e com os demais filtros.
+           Comparação por IGUALDADE EXATA (case-insensitive), não "contém"
+           — pedido explícito do usuário numa correção seguinte (verbatim):
+           "Na pesquisa específica obedecer aos parâmetros, no exemplo
+           escolhi a rubricas ergon = 1, apesar de outras possuírem o
+           número 1 quero apenas a exata". Ver filtro em
+           renderRubricasPorEmpresa() mais abaixo. -->
+      <input type="text" id="rubemp-f-verba" placeholder="Verba Legado" title="Valor exato (não é &quot;contém&quot;)">
+      <input type="text" id="rubemp-f-codigo-ergon" placeholder="Rubrica ERGON" title="Valor exato (não é &quot;contém&quot;)">
+      <input type="text" id="rubemp-f-nome" placeholder="Nome (legado)" title="Valor exato (não é &quot;contém&quot;)">
+      <input type="text" id="rubemp-f-nome-rubrica" placeholder="Nome da rubrica" title="Valor exato (não é &quot;contém&quot;)">
     </div>
     <div class="table-wrap">
       <table>
@@ -8175,10 +8179,16 @@ function renderRubricasPorEmpresa(){
   const f = rubEmpFilters();
   const linhas = todas.filter(l=>{
     if(f.empresa && l.empresa!==f.empresa) return false;
-    if(f.verba && !(l.verba||"").toLowerCase().includes(f.verba)) return false;
-    if(f.codigoErgon && !(l.codigoErgon||"").toLowerCase().includes(f.codigoErgon)) return false;
-    if(f.nome && !(l.nome||"").toLowerCase().includes(f.nome)) return false;
-    if(f.nomeRubrica && !(l.nomeRubrica||"").toLowerCase().includes(f.nomeRubrica)) return false;
+    // 169ª rodada (continuação) — pedido do usuário (verbatim): "Na
+    // pesquisa específica obedecer aos parâmetros, no exemplo escolhi a
+    // rubricas ergon = 1, apesar de outras possuírem o número 1 quero
+    // apenas a exata". Os 4 campos específicos (diferente da busca geral
+    // rubemp-search, que continua "contém") agora comparam por igualdade
+    // exata (case-insensitive) — "1" não traz mais "491"/"511"/"31" etc.
+    if(f.verba && (l.verba||"").toLowerCase()!==f.verba) return false;
+    if(f.codigoErgon && (l.codigoErgon||"").toLowerCase()!==f.codigoErgon) return false;
+    if(f.nome && (l.nome||"").toLowerCase()!==f.nome) return false;
+    if(f.nomeRubrica && (l.nomeRubrica||"").toLowerCase()!==f.nomeRubrica) return false;
     if(f.search && !([l.empresa,l.verba,l.nome,l.codigoErgon,l.nomeRubrica].join(" ").toLowerCase().includes(f.search))) return false;
     return true;
   }).sort((a,b)=> a.empresa.localeCompare(b.empresa,'pt-BR') || (a.verba||"").localeCompare(b.verba||"", undefined, {numeric:true}));
