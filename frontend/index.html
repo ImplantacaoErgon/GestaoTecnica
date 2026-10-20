@@ -945,9 +945,13 @@
         </div>
       </div>
       <div class="tab-group" data-group>
-        <button type="button" class="tab-group-trigger" data-views="rubricas,comparacao-folha,comparacao-folha-dashboard">💰 Folha de Pagamento <span class="caret">▾</span></button>
+        <button type="button" class="tab-group-trigger" data-views="rubricas,rubricas-empresa,comparacao-folha,comparacao-folha-dashboard">💰 Folha de Pagamento <span class="caret">▾</span></button>
         <div class="tab-group-menu">
           <button data-view="rubricas">🧾 Rubricas</button>
+          <!-- 169ª rodada — pedido do usuário (verbatim): "preciso criar uma
+               nova aba, abaixo de Rubricas [...] Empresa, Verba Legado,
+               nome, rubrica Ergon e nome da rubrica". -->
+          <button data-view="rubricas-empresa">🏢 Rubricas por Empresa</button>
           <button data-view="comparacao-folha">⚖️ Comparação Folha</button>
           <!-- 65ª rodada: aba dedicada de convergência — ver view-comparacao-folha-dashboard -->
           <button data-view="comparacao-folha-dashboard">📊 Dashboard Comparação</button>
@@ -1582,6 +1586,39 @@
       <table>
         <thead><tr><th>Código ERGON</th><th>Verba legado</th><th>Nome</th><th>Grupo de cálculo</th><th>Tipo</th><th>Empresas</th><th>Status</th><th>Analista</th></tr></thead>
         <tbody id="rubricas-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ RUBRICAS POR EMPRESA (169ª rodada) ============
+       Pedido do usuário (verbatim): "preciso criar uma nova aba, abaixo de
+       Rubricas. Essa aba deverá constar a Empresa, Verba Legado, nome,
+       rubrica Ergon e nome da rubrica [...] localizar as colunas que estão
+       sob o nome 'EMPRESAS QUE TERÃO A RUBRICA' [...] Abaixo das empresas é
+       possível localizar as verbas legado associadas às empresas [...] Não
+       haverá estatística nem nada nessa aba por enquanto."
+
+       Mesma fonte de dados da aba Rubricas (RUBRICAS, já carregado por
+       loadRubricas() — nenhum endpoint novo) — cada rubrica já guarda, por
+       empresa, se ela se aplica (colunas AO-AY da planilha, "E01".."E16") e
+       o texto cru da verba/nome legado específico daquela empresa (colunas
+       AZ-BJ, "COD E01".."COD E24") em r.empresas[sigla] = {aplica, codigo}
+       — ver COLUNAS/EMPRESA_FLAG_COL/EMPRESA_CODIGO_COL em
+       backend/app/rubricas_import.py. Essa aba só ACHATA isso numa linha
+       por (rubrica, empresa): não cria dado novo, não grava nada — é só
+       leitura do que a importação de Rubricas já trouxe. Ver
+       renderRubricasPorEmpresa()/rubEmpAchatarLinhas() mais abaixo. -->
+  <section class="view" id="view-rubricas-empresa">
+    <h2 class="view-title">🏢 Rubricas por Empresa</h2>
+    <div class="view-sub">Verba legado e nome associados a cada rubrica, por empresa/autarquia — uma linha por empresa em que a rubrica se aplica. Mesmos dados já trazidos pela importação da aba Rubricas, só organizados por empresa.</div>
+    <div class="filters">
+      <input type="text" id="rubemp-search" placeholder="Buscar por empresa, verba, nome, código Ergon…">
+      <select id="rubemp-f-empresa"><option value="">Empresa (todas)</option></select>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Empresa</th><th>Verba Legado</th><th>Nome</th><th>Rubrica ERGON</th><th>Nome da rubrica</th></tr></thead>
+        <tbody id="rubemp-tbody"></tbody>
       </table>
     </div>
   </section>
@@ -3658,7 +3695,7 @@ async function recarregarDadosDoProjeto(){
   fillStaticSelects();
   await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias(), loadItensMigracao(), loadRubricas(), loadRubricasAutoUpdateStatus()]);
   fillStaticSelects();
-  renderDashboard(); renderVisaoExecutiva(); renderCronograma(); renderRequisitos(); renderRiscosMarcos(); renderConfigTable(); renderAnalisarRequisitos(); renderFaturas(); renderPendencias(); renderItensMigracao(); renderRubricas(); renderRubricasAutoUpdateStatus();
+  renderDashboard(); renderVisaoExecutiva(); renderCronograma(); renderRequisitos(); renderRiscosMarcos(); renderConfigTable(); renderAnalisarRequisitos(); renderFaturas(); renderPendencias(); renderItensMigracao(); renderRubricas(); renderRubricasPorEmpresa(); renderRubricasAutoUpdateStatus();
   // 113ª rodada — Comparação Folha/Dashboard NÃO entram nos Promise.all de
   // carga acima de propósito (ver 93ª rodada: carregar isso sem o usuário
   // pedir significaria agregar/paginar ~300 mil linhas à toa). Mas agora
@@ -3866,14 +3903,14 @@ async function afterProjetoReady(){
   aplicarMarcaNoTopo();
   fillStaticSelects();
   wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireDashboardPdf(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireGanttToolbar(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireExportarCronograma(); wireExportarCronogramaXml(); wireRemoverCronograma(); wireRemoverRequisitos(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma(); wireRenumerarCronograma();
-  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros(); wireQuadroCicloModal(); wireImportCiclosMigracao(); wireMigracaoRejeicoesPane(); wireRubricaModal(); wireRubricasFiltros(); wireRubAnaliseDatas(); wireRubKpisFiltro(); wireImportRubricas(); wireComparacaoFolhaPane(); wireComparacaoFolhaDashboard(); wireVexFolhaComparacaoToggle(); wireVexMigracaoEvolucaoSelect();
+  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros(); wireQuadroCicloModal(); wireImportCiclosMigracao(); wireMigracaoRejeicoesPane(); wireRubricaModal(); wireRubricasFiltros(); wireRubAnaliseDatas(); wireRubKpisFiltro(); wireRubricasPorEmpresaFiltros(); wireImportRubricas(); wireComparacaoFolhaPane(); wireComparacaoFolhaDashboard(); wireVexFolhaComparacaoToggle(); wireVexMigracaoEvolucaoSelect();
   setupCsvTemplateLink();
   await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias(), loadItensMigracao(), loadRubricas(), loadRubricasAutoUpdateStatus()]);
   // Reaplica agora que REQUISITOS/ATIVIDADES já estão carregados — os selects
   // "Item do TR" (atividade) e "Atividade (entregável)" (fatura) dependem
   // deles e a primeira chamada acima rodou antes desse load.
   fillStaticSelects();
-  renderDashboard(); renderVisaoExecutiva(); renderCronograma(); renderRequisitos(); renderRiscosMarcos(); renderConfigTable(); renderAnalisarRequisitos(); renderFaturas(); renderPendencias(); renderItensMigracao(); renderRubricas(); renderRubricasAutoUpdateStatus();
+  renderDashboard(); renderVisaoExecutiva(); renderCronograma(); renderRequisitos(); renderRiscosMarcos(); renderConfigTable(); renderAnalisarRequisitos(); renderFaturas(); renderPendencias(); renderItensMigracao(); renderRubricas(); renderRubricasPorEmpresa(); renderRubricasAutoUpdateStatus();
   $("tabs").style.display = "flex";
 }
 
@@ -8037,6 +8074,106 @@ function wireRubricasFiltros(){
   ["rub-search","rub-f-codigo-ergon","rub-status","rub-grupo"].forEach(id=>{
     $(id).addEventListener("input", renderRubricas);
     $(id).addEventListener("change", renderRubricas);
+  });
+}
+
+// ================= RUBRICAS POR EMPRESA — 169ª rodada =================
+// Pedido do usuário (verbatim): "preciso criar uma nova aba, abaixo de
+// Rubricas. Essa aba deverá constar a Empresa, Verba Legado, nome, rubrica
+// Ergon e nome da rubrica [...] localizar as colunas que estão sob o nome
+// 'EMPRESAS QUE TERÃO A RUBRICA' [...] Abaixo das empresas é possível
+// localizar as verbas legado associadas às empresas [...] Não haverá
+// estatística nem nada nessa aba por enquanto." Ver comentário completo no
+// HTML (#view-rubricas-empresa): nenhum endpoint/tabela nova — é tudo
+// derivado de r.empresas (já vem em cada RUBRICAS[i], ver COLUNAS/
+// EMPRESA_FLAG_COL/EMPRESA_CODIGO_COL em backend/app/rubricas_import.py).
+//
+// O texto cru de r.empresas[sigla].codigo (as colunas "COD E01".."COD E24",
+// logo depois das colunas "E01".."E16" de EMPRESAS QUE TERÃO A RUBRICA) foi
+// digitado à mão ao longo de anos e aparece em pelo menos 3 formatos
+// diferentes — às vezes mais de uma verba por empresa na mesma célula,
+// separadas por quebra de linha, quando a mesma regra já trocou de código
+// legado nessa empresa:
+//   "84 - IF/PMAQ LEI 18.082/2014 / TIPO: P"            (padrão)
+//   "54 - COMPLEM. DE GRATIFICACAO"                      (sem "/ TIPO: X")
+//   "0090\tGRAT. EXERCICIO PROFISSAO"                    (separado por tab)
+//   "71        SUBST PRESID E MEMBR CAC        TIP: P"  (espaços múltiplos)
+// Validado contra a planilha real do cliente (167 rodada 169, 1577 células
+// preenchidas -> 1732 linhas depois de quebrar as multi-linha): só 2 não
+// batem em nenhum padrão (uma observação em texto livre, sem verba — cai
+// no fallback abaixo, mostrando o texto inteiro como "nome" e verba em
+// branco, em vez de travar ou descartar a linha).
+function rubEmpParseCodigo(textoCru){
+  if(!textoCru) return [];
+  return textoCru.split("\n").map(linha=>linha.trim()).filter(Boolean).map(linha=>{
+    // tira o sufixo "[/ ]TIPO: X" ou "TIP: X" (1 letra, P ou D) do fim —
+    // mesmo P/D que a rubrica já tem no campo "Tipo" da aba Rubricas,
+    // redundante aqui e não foi pedido como coluna desta aba nova.
+    const semTipo = linha.replace(/[\s/]*TIPO?:?\s*[A-Za-z]\s*$/i, "").trim();
+    // número no início (a verba legado DAQUELA empresa — mantida como
+    // texto, não convertida pra int, porque zero à esquerda é formatação
+    // de verdade em algumas empresas, ex. "0424") + separador (hífen, tab
+    // ou 2+ espaços) + o nome.
+    const m = semTipo.match(/^(\d+)(?:\s*-\s*|\t+\s*|\s{2,})(.+)$/);
+    if(m) return {verba: m[1], nome: m[2].trim()};
+    return {verba: "", nome: semTipo}; // não bateu em nenhum padrão — mostra o texto inteiro, não descarta
+  });
+}
+
+// Achata RUBRICAS (uma linha por rubrica) numa linha por (rubrica, empresa,
+// verba legado daquela empresa) — só entram empresas com
+// r.empresas[sigla].codigo preenchido (a verba/nome legado de fato); a
+// flag "aplica" (colunas E01..E16, "SIM"/"-") sem código não gera linha
+// aqui, porque não há Verba Legado/Nome pra mostrar nessa empresa ainda.
+function rubEmpAchatarLinhas(){
+  const linhas = [];
+  RUBRICAS.forEach(r=>{
+    const nomeRubrica = r.nome_abreviado || r.nome_extenso || r.descricao_legado || "—";
+    Object.entries(r.empresas||{}).forEach(([empresa, info])=>{
+      const codigo = info && info.codigo;
+      if(!codigo) return;
+      rubEmpParseCodigo(codigo).forEach(({verba, nome})=>{
+        linhas.push({ empresa, verba, nome, codigoErgon: r.codigo_ergon || "", nomeRubrica });
+      });
+    });
+  });
+  return linhas;
+}
+
+function rubEmpFilters(){
+  return {
+    search: ($("rubemp-search").value||"").trim().toLowerCase(),
+    empresa: $("rubemp-f-empresa").value,
+  };
+}
+
+function renderRubricasPorEmpresa(){
+  const todas = rubEmpAchatarLinhas();
+  const empresaAtual = $("rubemp-f-empresa").value;
+  const empresas = Array.from(new Set(todas.map(l=>l.empresa))).sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  $("rubemp-f-empresa").innerHTML = `<option value="">Empresa (todas)</option>` + empresas.map(e=>`<option ${e===empresaAtual?"selected":""}>${esc(e)}</option>`).join("");
+
+  const f = rubEmpFilters();
+  const linhas = todas.filter(l=>{
+    if(f.empresa && l.empresa!==f.empresa) return false;
+    if(f.search && !([l.empresa,l.verba,l.nome,l.codigoErgon,l.nomeRubrica].join(" ").toLowerCase().includes(f.search))) return false;
+    return true;
+  }).sort((a,b)=> a.empresa.localeCompare(b.empresa,'pt-BR') || (a.verba||"").localeCompare(b.verba||"", undefined, {numeric:true}));
+
+  $("rubemp-tbody").innerHTML = linhas.length ? linhas.map(l=>`
+    <tr>
+      <td class="mono">${esc(l.empresa)}</td>
+      <td class="mono">${esc(l.verba||"—")}</td>
+      <td>${esc(l.nome||"—")}</td>
+      <td class="mono">${esc(l.codigoErgon||"—")}</td>
+      <td>${esc(l.nomeRubrica)}</td>
+    </tr>`).join("") : `<tr class="empty-row"><td colspan="5">Nenhum registro encontrado.</td></tr>`;
+}
+
+function wireRubricasPorEmpresaFiltros(){
+  ["rubemp-search","rubemp-f-empresa"].forEach(id=>{
+    $(id).addEventListener("input", renderRubricasPorEmpresa);
+    $(id).addEventListener("change", renderRubricasPorEmpresa);
   });
 }
 
