@@ -162,6 +162,11 @@
   .kpi .value{font-size:24px;font-weight:700;margin-top:4px;font-family:'IBM Plex Mono';}
   .kpi .value.danger{color:var(--danger);}
   .kpi .value.ok{color:var(--ok);}
+  /* 169ª rodada — pedido do usuário (verbatim, sobre os tiles de Rubricas):
+     "coloque os percentuais dentro dos quadros" — percentual de cada
+     situação sobre o Total levantadas, exibido junto do número (ver
+     rubKpiTile/renderRubricas/_vexRenderFolha). */
+  .kpi .value .pct{font-size:13px;font-weight:600;color:var(--text-faint);margin-left:6px;font-family:Arial,sans-serif;}
   /* 168ª rodada — pedido do usuário (verbatim, sobre os tiles de Rubricas):
      "esses quadros podem se transformar em links de filtro [...] clico em
      Enviadas à Techne, automaticamente a relação filtra essa situação" —
@@ -6176,13 +6181,18 @@ function _vexRenderFolha(){
   const totalExcluidas = (RUBRICAS.length - validas.length) + (PROJETO.rubricas_aba_excluidas_qtd||0);
   const porStatus = {};
   validas.forEach(r=>{ porStatus[r.status] = (porStatus[r.status]||0)+1; });
+  // 169ª rodada — mesmo percentual de renderRubricas (ver comentário lá),
+  // pelos MESMOS tiles/rótulos usados nos dois lugares de propósito —
+  // ver comentário da 137ª rodada sobre isso.
+  const totalLevantadas = validas.length;
+  const pctVex = v => totalLevantadas>0 ? Math.round(v/totalLevantadas*100) : 0;
   el.innerHTML = `<div class="kpis">${[
-    {l:"Total levantadas", v: validas.length},
-    {l:"Em levantamento", v: porStatus["Em levantamento"]||0},
-    {l:"Enviadas à Techne", v: porStatus["Enviada à Techne"]||0},
-    {l:"Liberadas p/ testes", v: porStatus["Liberada para testes"]||0},
-    {l:"Em homologação", v: porStatus["Em homologação"]||0},
-    {l:"Homologadas", v: porStatus["Homologada"]||0},
+    {l:"Total levantadas", v: totalLevantadas},
+    {l:"Em levantamento", v: porStatus["Em levantamento"]||0, pct: pctVex(porStatus["Em levantamento"]||0)},
+    {l:"Enviadas à Techne", v: porStatus["Enviada à Techne"]||0, pct: pctVex(porStatus["Enviada à Techne"]||0)},
+    {l:"Liberadas p/ testes", v: porStatus["Liberada para testes"]||0, pct: pctVex(porStatus["Liberada para testes"]||0)},
+    {l:"Em homologação", v: porStatus["Em homologação"]||0, pct: pctVex(porStatus["Em homologação"]||0)},
+    {l:"Homologadas", v: porStatus["Homologada"]||0, pct: pctVex(porStatus["Homologada"]||0)},
     {l:"Excluídas", v: totalExcluidas},
   ].map(rubKpiTile).join("")}</div>`;
 }
@@ -7947,7 +7957,15 @@ function rubKpiTile(k, statusAtivo){
   const attrs = clicavel
     ? ` data-rub-filtro="${esc(k.filtro)}" role="button" tabindex="0" title="Filtrar a lista por esta situação"`
     : "";
-  return `<div class="kpi${clicavel?" kpi-clickable":""}${ativo?" kpi-active":""}" style="${bg?`background:${bg};`:""}"${attrs}><div class="label">${k.l}</div><div class="value">${k.v}</div></div>`;
+  // 169ª rodada — pedido do usuário (verbatim): "coloque os percentuais
+  // dentro dos quadros, pode ignorar o quadro de Excluídas pois ele tem
+  // outro objetivo". `k.pct` (0-100, já arredondado) é opcional — quem
+  // monta o array decide quais tiles ganham percentual (ver
+  // renderRubricas/_vexRenderFolha); "Total levantadas" e "Excluídas"
+  // continuam sem, por não fazer sentido (o primeiro É o 100% base, o
+  // segundo soma uma aba separada da planilha — ver comentário mais abaixo).
+  const pctHtml = k.pct!=null ? `<span class="pct">(${k.pct}%)</span>` : "";
+  return `<div class="kpi${clicavel?" kpi-clickable":""}${ativo?" kpi-active":""}" style="${bg?`background:${bg};`:""}"${attrs}><div class="label">${k.l}</div><div class="value">${k.v}${pctHtml}</div></div>`;
 }
 
 // Wire comum pros tiles clicáveis de #rub-kpis — delegação simples (os
@@ -8057,13 +8075,22 @@ function renderRubricas(){
   // `rubricas` — então a lista filtrada mostra só a parte que de fato tem
   // linha no sistema (totalExcluidasPlanilha), não o total do tile. É
   // esperado, não bug (ver aviso do tile já existente).
+  const totalLevantadas = RUBRICAS.length - totalExcluidasPlanilha;
+  // 169ª rodada — pedido do usuário (verbatim): "coloque os percentuais
+  // dentro dos quadros, pode ignorar o quadro de Excluídas pois ele tem
+  // outro objetivo". Percentual de cada situação sobre totalLevantadas
+  // (o mesmo total do tile "Total levantadas", que por isso também fica
+  // sem percentual — seria sempre 100%); arredondado, sem casa decimal,
+  // igual ao padrão já usado nos outros percentuais do sistema (ex:
+  // _vexRenderFolha). Divisão protegida pra projeto zerado não quebrar.
+  const pctRub = v => totalLevantadas>0 ? Math.round(v/totalLevantadas*100) : 0;
   $("rub-kpis").innerHTML = [
-    {l:"Total levantadas", v:RUBRICAS.length - totalExcluidasPlanilha},
-    {l:"Em levantamento", v:porStatus["Em levantamento"]||0, filtro:"Em levantamento"},
-    {l:"Enviadas à Techne", v:porStatus["Enviada à Techne"]||0, filtro:"Enviada à Techne"},
-    {l:"Liberadas p/ testes", v:porStatus["Liberada para testes"]||0, filtro:"Liberada para testes"},
-    {l:"Em homologação", v:porStatus["Em homologação"]||0, filtro:"Em homologação"},
-    {l:"Homologadas", v:porStatus["Homologada"]||0, filtro:"Homologada"},
+    {l:"Total levantadas", v:totalLevantadas},
+    {l:"Em levantamento", v:porStatus["Em levantamento"]||0, filtro:"Em levantamento", pct:pctRub(porStatus["Em levantamento"]||0)},
+    {l:"Enviadas à Techne", v:porStatus["Enviada à Techne"]||0, filtro:"Enviada à Techne", pct:pctRub(porStatus["Enviada à Techne"]||0)},
+    {l:"Liberadas p/ testes", v:porStatus["Liberada para testes"]||0, filtro:"Liberada para testes", pct:pctRub(porStatus["Liberada para testes"]||0)},
+    {l:"Em homologação", v:porStatus["Em homologação"]||0, filtro:"Em homologação", pct:pctRub(porStatus["Em homologação"]||0)},
+    {l:"Homologadas", v:porStatus["Homologada"]||0, filtro:"Homologada", pct:pctRub(porStatus["Homologada"]||0)},
     {l:"Excluídas", v:totalExcluidas, filtro:"Excluída"},
   ].map(k=>rubKpiTile(k, f.status)).join("");
 
