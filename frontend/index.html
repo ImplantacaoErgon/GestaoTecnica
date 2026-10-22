@@ -1869,7 +1869,7 @@
       </div>
       <div class="view-sub" style="margin-top:-6px;">Combinações com Vantagem primeiro, depois Desconto (dentro de cada grupo, as com mais linhas divergentes primeiro) — onde focar o esforço de correção. Clique numa linha para ver o detalhe (por situação) na aba Comparação Folha.</div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Empresa</th><th title="Tipo de Rubrica">T.R.</th><th>Rubrica Ergon</th><th>Total</th><th>Convergente</th><th>Divergente</th><th>% Converge</th><th>%Diverge</th></tr></thead>
+        <thead><tr><th>Empresa</th><th title="Tipo de Rubrica">T.R.</th><th>Rubrica Ergon</th><th>Situação</th><th>Total</th><th>Convergente</th><th>Divergente</th><th>% Converge</th><th>%Diverge</th></tr></thead>
         <tbody id="cfd-emprub-tbody"></tbody>
       </table></div>
     </div>
@@ -12537,7 +12537,7 @@ function cfdMostrarAguardandoCompetencia(msg){
   $("cfd-situacao").innerHTML = aviso;
   $("cfd-tiporubr-tbody").innerHTML = `<tr class="empty-row"><td colspan="8">${esc(textoCelula)}</td></tr>`;
   $("cfd-emprub-contagem").textContent = "";
-  $("cfd-emprub-tbody").innerHTML = `<tr class="empty-row"><td colspan="8">${esc(textoCelula)}</td></tr>`;
+  $("cfd-emprub-tbody").innerHTML = `<tr class="empty-row"><td colspan="9">${esc(textoCelula)}</td></tr>`;
   $("cfd-empresa-tbody").innerHTML = `<tr class="empty-row"><td colspan="5">${esc(textoCelula)}</td></tr>`;
   $("cfd-rubsit-contagem").textContent = "";
   $("cfd-rubsit-thead").innerHTML = `<tr><th>Rubrica Ergon</th><th>Total</th></tr>`;
@@ -12598,20 +12598,24 @@ function cfdRenderRubricaSituacao(d){
 
 // 169ª rodada (continuação) — pedido do usuário (print do quadro "Top
 // divergências por Empresa × Rubrica Ergon", verbatim): "nesse quadro ao
-// lado do nome da rubrica inclua a situação da rubrica". A "situação" não
-// existe na tabela comparacao_folha (que só tem empresa/rubrica/verba do
-// lado legado+Ergon já comparados) — vem de RUBRICAS, já carregado global
-// (loadRubricas(), mesma fonte usada na aba Rubricas e em Rubricas por
-// Empresa). Cruza por código Ergon (numérico, tolerante a zero à esquerda)
-// E por empresa (convertendo "07"/"7" pro formato "E07" usado em
-// r.empresas, mesma lógica de EMPRESA_FLAG_COL/EMPRESA_CODIGO_COL no
-// backend) — a mesma regra pode estar em situação diferente por empresa
-// (ver comentário de rubricas_import.py sobre isso), por isso não basta
-// olhar só o código Ergon. Quando x.empresa é "(nulo)"/não dá pra converter
-// pra Exx, cai sem filtro de empresa (mostra as situações encontradas em
-// qualquer empresa pra aquele código). Pode haver mais de uma situação
-// batendo (linhas diferentes da planilha pro mesmo código+empresa) — nesse
-// caso mostra todas, separadas por "/".
+// lado do nome da rubrica inclua a situação da rubrica" — e, logo em
+// seguida, autocorreção (verbatim): "erro meu, essa situação pode ser
+// colocar numa coluna nova" — por isso a situação vira uma coluna própria
+// ("Situação", entre "Rubrica Ergon" e "Total"), não um badge dentro da
+// célula do nome. A "situação" não existe na tabela comparacao_folha (que
+// só tem empresa/rubrica/verba do lado legado+Ergon já comparados) — vem
+// de RUBRICAS, já carregado global (loadRubricas(), mesma fonte usada na
+// aba Rubricas e em Rubricas por Empresa). Cruza por código Ergon
+// (numérico, tolerante a zero à esquerda) E por empresa (convertendo
+// "07"/"7" pro formato "E07" usado em r.empresas, mesma lógica de
+// EMPRESA_FLAG_COL/EMPRESA_CODIGO_COL no backend) — a mesma regra pode
+// estar em situação diferente por empresa (ver comentário de
+// rubricas_import.py sobre isso), por isso não basta olhar só o código
+// Ergon. Quando x.empresa é "(nulo)"/não dá pra converter pra Exx, cai sem
+// filtro de empresa (mostra as situações encontradas em qualquer empresa
+// pra aquele código). Pode haver mais de uma situação batendo (linhas
+// diferentes da planilha pro mesmo código+empresa) — nesse caso mostra
+// todos os pills lado a lado na mesma célula.
 function _cfdSiglaEmpresa(empresaRaw){
   const digitos = (empresaRaw||"").replace(/\D/g, "");
   if(!digitos) return null;
@@ -12716,22 +12720,27 @@ async function cfdCarregarDados(){
     ? `Mostrando ${porEmpresaRubrica.length} de ${totalCombosDivergentes.toLocaleString('pt-BR')} combinação(ões) com divergência`
     : "";
   $("cfd-emprub-tbody").innerHTML = porEmpresaRubrica.length ? porEmpresaRubrica.map(x=>{
+    // 169ª rodada (continuação) — correção do usuário (verbatim): "erro
+    // meu, essa situação pode ser colocar numa coluna nova" — passou de
+    // badge dentro da célula "Rubrica Ergon" (tentativa anterior, mesma
+    // rodada) pra uma coluna própria "Situação".
     const situacoes = cfdSituacoesRubrica(x.empresa, x.rubrica_ergon);
     const situacaoHtml = situacoes.length
-      ? ` ${situacoes.map(s=>pill(s, STATUS_RUBRICA_COLOR[s]||"faint")).join(" ")}`
-      : "";
+      ? situacoes.map(s=>pill(s, STATUS_RUBRICA_COLOR[s]||"faint")).join(" ")
+      : `<span class="muted">—</span>`;
     return `
     <tr style="cursor:pointer;" title="Ver detalhe na Comparação Folha" onclick="cfdAbrirDetalheEmpresaRubrica(${attrArgs(x.empresa, x.rubrica_ergon)})">
       <td>${esc(x.empresa)}</td>
       <td title="${esc(x.tiporubr||"")}">${_cfdTipoRubricaAbrev(x.tiporubr)}</td>
-      <td class="mono" title="${esc(x.rubrica_nome_ergon||"")}">${esc(x.rubrica_ergon)}${x.rubrica_nome_ergon?` — ${esc(x.rubrica_nome_ergon)}`:""}${situacaoHtml}</td>
+      <td class="mono" title="${esc(x.rubrica_nome_ergon||"")}">${esc(x.rubrica_ergon)}${x.rubrica_nome_ergon?` — ${esc(x.rubrica_nome_ergon)}`:""}</td>
+      <td>${situacaoHtml}</td>
       <td class="mono">${Number(x.total_linhas||0).toLocaleString('pt-BR')}</td>
       <td class="mono">${Number(x.total_sem_divergencia||0).toLocaleString('pt-BR')}</td>
       <td class="mono">${Number(x.total_divergente||0).toLocaleString('pt-BR')}</td>
       <td>${x.pct_sem_divergencia==null ? "—" : x.pct_sem_divergencia+"%"}</td>
       <td>${x.pct_divergente==null ? "—" : x.pct_divergente+"%"}</td>
     </tr>`;
-  }).join("") : `<tr class="empty-row"><td colspan="8">Nenhuma divergência encontrada. 🎉</td></tr>`;
+  }).join("") : `<tr class="empty-row"><td colspan="9">Nenhuma divergência encontrada. 🎉</td></tr>`;
 
   const porEmpresa = r.por_empresa || [];
   $("cfd-empresa-tbody").innerHTML = porEmpresa.length ? porEmpresa.map(e=>`
