@@ -681,10 +681,16 @@ def dashboard(projeto_id, mesano=None):
     # em linhas diferentes) quebre a combinação em duas linhas separadas no
     # quadro. O CASE de prioridade usa UPPER() pra não depender de como o
     # arquivo de origem grava o valor (maiúsculo/minúsculo).
+    # 169ª rodada (continuação) — pedido do usuário (verbatim, sobre o
+    # quadro "Top divergências por Empresa × Rubrica Ergon"): "No campo
+    # Empresa de (sem empresa) para (nulo)". Escopado só nesta query (o
+    # quadro "Rubricas Ergon × Verbas Consist, por empresa" logo abaixo,
+    # que usa a mesma expressão numa query separada, não foi mencionado
+    # pelo usuário e continua com "(sem empresa)").
     por_empresa_rubrica = db.fetch_all(f"""
         WITH combinacoes AS (
           SELECT
-            COALESCE(empresa_consist, '(sem empresa)') AS empresa,
+            COALESCE(empresa_consist, '(nulo)') AS empresa,
             rubrica_ergon,
             MAX(rubrica_nome_ergon) AS rubrica_nome_ergon,
             COALESCE(MAX(tiporubr), '(sem tipo)') AS tiporubr,
