@@ -655,6 +655,21 @@
   .modal-tabs button.active{color:var(--accent-strong);border-bottom-color:var(--accent);}
   .modal-body{padding:18px 20px;display:grid;grid-template-columns:1fr 1fr;gap:12px 14px;max-height:60vh;overflow:auto;}
   .modal-body.single-col{display:block;}
+  /* 169ª rodada — pedido do usuário (verbatim, sobre o modal "Detalhe da
+     comparação" da aba Comparação Folha): "aumente essa página e permita
+     eu redimensionar diagonalmente essa página e garanta que todos os
+     dados estejam nessa página". Maior por padrão (os ~48 campos de
+     abrirDetalheComparacaoFolha cabem sem precisar de scroll na maioria
+     das telas) e com resize:both — alça nativa do navegador no canto
+     inferior direito, arrasta nas duas direções ao mesmo tempo
+     ("diagonalmente"). Escopado só a #overlay-cf-detalhe (não mexe no
+     .modal/.modal-body genérico usado pelos outros modais do sistema).
+     display:flex + min-height:0 no corpo é o que permite o corpo ter seu
+     próprio scroll quando o usuário encolhe o modal abaixo do que os
+     dados precisam, em vez do modal inteiro vazar da tela. */
+  #overlay-cf-detalhe .modal{width:min(95vw,1400px);max-width:none;height:min(90vh,900px);max-height:90vh;min-width:420px;min-height:300px;resize:both;overflow:hidden;display:flex;flex-direction:column;}
+  #overlay-cf-detalhe .modal-head{flex:0 0 auto;}
+  #overlay-cf-detalhe .modal-body{flex:1 1 auto;min-height:0;max-height:none;overflow:auto;}
   .modal-body .full{grid-column:1 / -1;}
   .field label{display:block;font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.03em;}
   .field input, .field select, .field textarea{width:100%;background:var(--surface-2);border:1px solid var(--border);border-radius:7px;padding:7px 9px;font-size:13px;color:var(--text);font-family:inherit;}
@@ -11710,6 +11725,24 @@ const CF_TAMANHO_PAGINA = 50;
 // a listagem já trouxe o registro inteiro, só a tabela não mostra tudo.
 let CF_ITENS_MAP = {};
 
+// 169ª rodada — pedido do usuário (verbatim): "nesta aba informei dois
+// parâmetros e aguardei, mas parece que os detalhes não respeitaram os
+// parâmetros". Causa: cfCarregarLista()/cfCarregarResumo() não tinham
+// proteção contra resposta fora de ordem — toda troca de filtro, e também
+// o recarregamento automático de cfRenderCargaBanner() quando uma carga
+// termina em segundo plano, dispara um novo fetch sem esperar o anterior
+// nem cancelá-lo; se a resposta de uma consulta MAIS ANTIGA (ex: sem
+// filtro, geralmente mais rápida por não ter WHERE) chegasse DEPOIS da
+// resposta de uma consulta mais nova e filtrada, a mais antiga vencia a
+// corrida e sobrescrevia a tela — exatamente o sintoma do print (filtros
+// preenchidos, mas lista e total mostrando as 269.756 linhas sem filtro).
+// Cada função guarda um número de sequência própria e só aplica a
+// resposta se ela ainda for a ÚLTIMA requisição disparada; qualquer
+// resposta que chega atrasada (de uma requisição já superada por uma mais
+// nova) é descartada em silêncio.
+let CF_LISTA_REQ_SEQ = 0;
+let CF_RESUMO_REQ_SEQ = 0;
+
 function cfFiltrosAtuais(){
   return {
     mesano: $("cf-f-mesano").value || null,
@@ -12029,9 +12062,11 @@ function cfRenderCargaBanner(carga){
 
 async function cfCarregarResumo(){
   CF_CARREGADO = true; // 93ª rodada — ver comentário na declaração de CF_CARREGADO
+  const meuSeq = ++CF_RESUMO_REQ_SEQ; // 169ª rodada — ver comentário em CF_RESUMO_REQ_SEQ
   let r;
   try{ r = await api(`/comparacao-folha/resumo?${cfQueryString()}`); }
   catch(e){ return; }
+  if(meuSeq !== CF_RESUMO_REQ_SEQ) return; // resposta de uma consulta já superada — descarta
   // 89ª rodada: "Diferença (Consist − Ergon)" virou dois KPIs (Vantagem e
   // Desconto) — misturados numa soma só, um desconto "sobrando" no Consist
   // e uma vantagem "faltando" no Consist empurram o total pro mesmo lado,
@@ -12177,10 +12212,12 @@ function cfPopularSelect(id, placeholder, opcoes){
 }
 
 async function cfCarregarLista(acumular){
+  const meuSeq = ++CF_LISTA_REQ_SEQ; // 169ª rodada — ver comentário em CF_LISTA_REQ_SEQ
   let r;
   $("cf-status").textContent = "Carregando…";
   try{ r = await api(`/comparacao-folha?${cfQueryString({pagina:CF_PAGINA, tamanho_pagina:CF_TAMANHO_PAGINA})}`); }
-  catch(e){ $("cf-status").textContent = ""; return; }
+  catch(e){ if(meuSeq === CF_LISTA_REQ_SEQ) $("cf-status").textContent = ""; return; }
+  if(meuSeq !== CF_LISTA_REQ_SEQ) return; // resposta de uma consulta já superada — descarta, não pisa na mais nova
   CF_TOTAL = r.total;
   if(!acumular) CF_ITENS_MAP = {};
   r.itens.forEach(it=>{ CF_ITENS_MAP[it.id] = it; });
