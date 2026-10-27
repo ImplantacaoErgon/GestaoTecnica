@@ -16,6 +16,8 @@ JavaScript (as demais telas carregam tudo e filtram no cliente; aqui, com
 Confirmado com o usuário (AskUserQuestion, 55ª rodada): a tela é só consulta
 (sem edição manual por linha) — "filtros fortes e exportação" pra começar.
 """
+import re
+
 from . import db
 
 # 100ª rodada — bug real encontrado pelo usuário: o carve-out "Não
@@ -787,6 +789,7 @@ def dashboard(projeto_id, mesano=None):
         "total_combinacoes_empresa_rubrica": total_combinacoes_empresa_rubrica,
         "por_empresa": por_empresa,
         "por_rubrica_situacao": por_rubrica_situacao(projeto_id, mesano),
+        "por_status_rubrica_situacao": por_status_rubrica_x_situacao(projeto_id, mesano),
         "cobertura_mapeamento": {
             "rubricas_parametrizadas_sem_uso": rubricas_parametrizadas_sem_uso,
             "verbas_parametrizadas_sem_uso": verbas_parametrizadas_sem_uso,
@@ -855,6 +858,144 @@ def por_rubrica_situacao(projeto_id, mesano=None):
         "total": r["total_linha"],
         "valores": [r.get(f"s{i}") or 0 for i in range(len(lista_situacoes))],
     } for r in linhas_raw]
+
+    return {
+        "situacoes": lista_situacoes,
+        "totais_situacao": totais_situacao,
+        "linhas": linhas,
+        "total_geral": total_geral,
+    }
+
+
+# 169ª rodada — pedido do usuário (verbatim, sobre o Dashboard de Comparação
+# Folha): "crie um quadro logo abaixo desses dois [% de comparação por
+# Situação / Comparação por Tipo de Rubrica] que apresenta a quantidade de
+# linhas por situação da rubrica (Em levantamento, enviada a Techne, etc) X
+# A situação da linha no Comparação (não divergente, consist a maior, etc)."
+# Outro pivot bidimensional, mesmo "sem PIVOT nativo" de por_rubrica_situacao
+# (152ª rodada) acima — mas aqui o eixo das LINHAS não é uma coluna direta de
+# comparacao_folha: é o STATUS do funil de levantamento da rubrica
+# (rubricas.status), que só existe na tabela `rubricas`, ligada por código
+# (rubrica_ergon = codigo_ergon), igual ao resto do arquivo.
+#
+# Pra não reintroduzir a classe de bug das rodadas 100ª/104ª/105ª (ver
+# comentário de _codigo_igual_sql no topo do arquivo) — correlated
+# EXISTS/subquery por LINHA contra as ~300 mil linhas de comparacao_folha —
+# este cruzamento é feito em DUAS consultas pequenas e independentes, e o
+# "join" de verdade acontece em Python:
+#   1) uma única GROUP BY (rubrica_ergon, situacao) em comparacao_folha —
+#      agregação simples, sargable, sem subquery por linha;
+#   2) uma leitura direta de `rubricas` (codigo_ergon, status) do projeto —
+#      tabela pequena (parametrização, não tem ~300 mil linhas).
+# O cruzamento rubrica_ergon -> status usa a MESMA normalização de zero à
+# esquerda de normaliza_codigo_rubrica() (ver migration_036), reimplementada
+# aqui em Python só pra decidir em qual linha do quadro cada contagem de
+# comparacao_folha cai — não precisa de função SQL nem de índice porque não
+# filtra nem ordena o banco por ela, só reagrupa resultados já pequenos.
+#
+# Ambiguidade (mesmo espírito de _RUBRICA_EM_LEVANTAMENTO_SQL, 95ª rodada):
+# codigo_ergon não é chave única em `rubricas` (mesma rubrica pode aparecer
+# em várias empresas com status diferentes) — em vez de escolher um valor
+# arbitrariamente, essas combinações caem numa linha própria e explícita
+# "(múltiplas situações)". Código sem NENHUMA rubrica cadastrada correspondente
+# (ou linha de Comparação Folha sem rubrica_ergon) cai em
+# "(sem rubrica cadastrada)". As duas linhas de status "reais" (6 valores do
+# enum de rubricas.status) são ordenadas pela ordem natural do funil
+# (Em levantamento -> ... -> Homologada/Excluída), igual à ordem usada nos
+# tiles de KPI da aba Rubricas — as duas linhas de ambiguidade/sem-cadastro
+# ficam sempre ao final, fora dessa ordem.
+_ORDEM_STATUS_RUBRICA = (
+    "Em levantamento", "Enviada à Techne", "Liberada para testes",
+    "Em homologação", "Homologada", "Excluída",
+)
+_STATUS_RUBRICA_MULTIPLAS = "(múltiplas situações)"
+_STATUS_RUBRICA_SEM_CADASTRO = "(sem rubrica cadastrada)"
+
+
+def _normaliza_codigo_rubrica_py(codigo):
+    """Réplica em Python de normaliza_codigo_rubrica() (migration_036) —
+    usada só pra cruzar em memória, nunca pra montar SQL. Mesma regra: só
+    remove zero à esquerda se o código for puramente numérico; mantém "0"
+    se sobrar vazio; qualquer outro formato passa direto."""
+    if codigo is None:
+        return None
+    texto = str(codigo).strip()
+    if re.fullmatch(r"[0-9]+", texto):
+        sem_zeros = texto.lstrip("0")
+        return sem_zeros or "0"
+    return texto
+
+
+def por_status_rubrica_x_situacao(projeto_id, mesano=None):
+    where = _where_filtros(projeto_id=projeto_id, mesano=mesano)
+
+    # 1) agregação única e barata em comparacao_folha — sem subquery por linha.
+    linhas_raw = db.fetch_all(f"""
+        SELECT
+          rubrica_ergon,
+          COALESCE(situacao, '(sem situação)') AS situacao,
+          COUNT(*) AS total
+        FROM comparacao_folha{where}
+        GROUP BY rubrica_ergon, COALESCE(situacao, '(sem situação)')
+    """)
+    if not linhas_raw:
+        return {"situacoes": [], "totais_situacao": [], "linhas": [], "total_geral": 0}
+
+    # 2) leitura direta da tabela pequena de parametrização — monta o mapa
+    # codigo normalizado -> conjunto de status (pra detectar ambiguidade).
+    rubricas_rows = db.fetch_all(f"""
+        SELECT codigo_ergon, status
+        FROM rubricas
+        WHERE projeto_id = {db.q(projeto_id)} AND codigo_ergon IS NOT NULL
+    """)
+    status_por_codigo = {}
+    for r in rubricas_rows:
+        chave = _normaliza_codigo_rubrica_py(r["codigo_ergon"])
+        if chave is None:
+            continue
+        status_por_codigo.setdefault(chave, set()).add(r["status"])
+
+    def _resolve_status_rubrica(rubrica_ergon):
+        chave = _normaliza_codigo_rubrica_py(rubrica_ergon)
+        statuses = status_por_codigo.get(chave) if chave is not None else None
+        if not statuses:
+            return _STATUS_RUBRICA_SEM_CADASTRO
+        if len(statuses) > 1:
+            return _STATUS_RUBRICA_MULTIPLAS
+        return next(iter(statuses))
+
+    # Ordem e totais das colunas (situação) — mesma lógica de por_rubrica_situacao.
+    situacao_totais = {}
+    for row in linhas_raw:
+        situacao_totais[row["situacao"]] = situacao_totais.get(row["situacao"], 0) + row["total"]
+    lista_situacoes = sorted(situacao_totais.keys(), key=lambda s: situacao_totais[s], reverse=True)
+    totais_situacao = [situacao_totais[s] for s in lista_situacoes]
+    total_geral = sum(totais_situacao)
+
+    # Cruzamento em Python: status_rubrica x situacao -> total.
+    pivot = {}
+    for row in linhas_raw:
+        status_rubrica = _resolve_status_rubrica(row["rubrica_ergon"])
+        linha_pivot = pivot.setdefault(status_rubrica, {})
+        linha_pivot[row["situacao"]] = linha_pivot.get(row["situacao"], 0) + row["total"]
+
+    ordem_linhas = [s for s in _ORDEM_STATUS_RUBRICA if s in pivot]
+    ordem_linhas += [s for s in sorted(pivot.keys()) if s not in _ORDEM_STATUS_RUBRICA
+                     and s not in (_STATUS_RUBRICA_MULTIPLAS, _STATUS_RUBRICA_SEM_CADASTRO)]
+    if _STATUS_RUBRICA_MULTIPLAS in pivot:
+        ordem_linhas.append(_STATUS_RUBRICA_MULTIPLAS)
+    if _STATUS_RUBRICA_SEM_CADASTRO in pivot:
+        ordem_linhas.append(_STATUS_RUBRICA_SEM_CADASTRO)
+
+    linhas = []
+    for status_rubrica in ordem_linhas:
+        valores_dict = pivot[status_rubrica]
+        valores = [valores_dict.get(s, 0) for s in lista_situacoes]
+        linhas.append({
+            "status_rubrica": status_rubrica,
+            "total": sum(valores),
+            "valores": valores,
+        })
 
     return {
         "situacoes": lista_situacoes,
