@@ -1213,10 +1213,26 @@ def _criar_carga_comparacao_folha(projeto_id, nome_arquivo, usuario_atual):
     except db.DbError as e:
         if "idx_cargas_comparacao_folha_ativa" not in str(e) and "duplicate key" not in str(e):
             raise
-        carga_bloqueando = db.fetch_one(
-            f"SELECT id, pid, instancia_id FROM cargas_comparacao_folha "
-            f"WHERE projeto_id = {db.q(projeto_id)} AND status = 'em_andamento'"
-        )
+        try:
+            carga_bloqueando = db.fetch_one(
+                f"SELECT id, pid, instancia_id FROM cargas_comparacao_folha "
+                f"WHERE projeto_id = {db.q(projeto_id)} AND status = 'em_andamento'"
+            )
+        except db.DbError:
+            # 169ª rodada — mesmo motivo já documentado na 145ª rodada
+            # (_ao_iniciar_processo_carga_comparacao_folha): o deploy do
+            # código novo pode rodar ANTES da migration_047 (coluna
+            # instancia_id) ter sido aplicada no banco — "column
+            # instancia_id does not exist" visto na prática. Cai pra uma
+            # consulta sem essa coluna em vez de quebrar o endpoint inteiro
+            # com um erro de SQL cru; _carga_esta_orfa() já trata a
+            # ausência do campo como "não é órfã" (mantém o comportamento
+            # antigo, baseado só em PID), então isso só desliga a detecção
+            # de órfã até a migração ser aplicada — não quebra nada.
+            carga_bloqueando = db.fetch_one(
+                f"SELECT id, pid FROM cargas_comparacao_folha "
+                f"WHERE projeto_id = {db.q(projeto_id)} AND status = 'em_andamento'"
+            )
         if not carga_bloqueando or not _carga_esta_orfa(carga_bloqueando):
             raise
         _marcar_carga_comparacao_folha_erro(
@@ -3633,8 +3649,17 @@ def create_app():
         nunca atualizar o status da carga. Agora verifica isso PRIMEIRO —
         se a carga for órfã, marca como cancelada na hora (sem tentar
         os.kill, que seria inútil e corre o risco remoto de atingir um
-        PID reaproveitado por coincidência em um boot novo)."""
-        carga = db.fetch_one(f"SELECT status, pid, instancia_id FROM cargas_comparacao_folha WHERE id = {db.q(carga_id)}")
+        PID reaproveitado por coincidência em um boot novo).
+
+        Visto na prática logo depois de publicar esta rodada: se o deploy
+        do código novo roda antes da migration_047 ser aplicada no banco,
+        "column instancia_id does not exist" — mesma classe de problema já
+        documentada na 145ª rodada. Por isso o fallback abaixo, igual ao
+        de _criar_carga_comparacao_folha."""
+        try:
+            carga = db.fetch_one(f"SELECT status, pid, instancia_id FROM cargas_comparacao_folha WHERE id = {db.q(carga_id)}")
+        except db.DbError:
+            carga = db.fetch_one(f"SELECT status, pid FROM cargas_comparacao_folha WHERE id = {db.q(carga_id)}")
         if not carga or carga["status"] != "em_andamento":
             return jsonify({"erro": "Essa carga não está mais em andamento — nada para cancelar."}), 404
 
