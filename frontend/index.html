@@ -12003,12 +12003,37 @@ function cfRenderCargaBanner(carga){
     // do resto da aba), reforçando o que o ícone/cor do texto já mostra em
     // vez de competir com eles.
     el.style.background = "var(--accent-soft)";
+    // 169ª rodada — pedido do usuário (verbatim): "nessa carga tem como ter
+    // um contador de completude? que seja linhas carregadas / linhas
+    // totais, ou % de carga?" — linhas_processadas/total_linhas_estimado
+    // (ver migration_046 e comparacao_folha_import._estimar_total_linhas)
+    // só existem a partir desta rodada e só são preenchidos depois da
+    // primeira atualização de progresso — cargas antigas, ou os primeiros
+    // instantes de uma carga nova, ainda não têm esses campos, por isso os
+    // três estados abaixo: com total (barra + %), só contagem (sem total
+    // conhecido — ex: .xlsx sem a tag <dimension>) e nenhum dado ainda.
+    let progressoHtml = "";
+    if(carga.linhas_processadas != null){
+      const processadas = Number(carga.linhas_processadas);
+      if(carga.total_linhas_estimado){
+        const total = Number(carga.total_linhas_estimado);
+        const pct = total > 0 ? Math.min(100, Math.round(100 * processadas / total)) : 0;
+        progressoHtml = `
+          <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+            <span class="bar-track" style="flex:1;max-width:260px;"><div style="width:${pct}%;background:var(--accent);"></div></span>
+            <span class="mono" style="font-size:11.5px;">${processadas.toLocaleString('pt-BR')} de ${total.toLocaleString('pt-BR')} (${pct}%)</span>
+          </div>`;
+      } else {
+        progressoHtml = `<div class="mono" style="font-size:11.5px;margin-top:6px;">${processadas.toLocaleString('pt-BR')} linha(s) carregada(s) — total ainda não disponível pra esse formato de arquivo.</div>`;
+      }
+    }
     el.innerHTML = `
       <div style="display:flex;align-items:center;gap:12px;">
         <div style="width:16px;height:16px;border-radius:50%;border:2px solid var(--border);border-top-color:var(--accent);animation:spin .8s linear infinite;flex:0 0 auto;"></div>
         <div style="flex:1;min-width:0;">
           <div style="font-weight:600;">Carga em andamento — "${esc(carga.nome_arquivo||"arquivo")}"</div>
           <div class="muted" style="font-size:12px;">Iniciada às ${hora(carga.criado_em)}${quem}. Pode continuar usando o sistema normalmente e até fechar esta aba — a importação segue no servidor; esta mensagem se atualiza sozinha.</div>
+          ${progressoHtml}
         </div>
         <button class="btn secondary small" id="cf-carga-btn-cancelar" onclick="cfCancelarCarga('${carga.id}')" style="flex:0 0 auto;">Cancelar</button>
       </div>`;

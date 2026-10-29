@@ -463,12 +463,57 @@ def _detectar_mesano_alvo(ws, indice_para_coluna, linhas_amostra=200):
     )
 
 
-def _linhas_copy(ws, indice_para_coluna, projeto_id, mesano_alvo, contadores):
+def _estimar_total_linhas(conteudo_bytes, ws):
+    """Estimativa RÁPIDA (não exata) do total de linhas de dados do arquivo —
+    usada só pra alimentar o contador de progresso do banner de carga (169ª
+    rodada, pedido do usuário: "tem como ter um contador de completude? que
+    seja linhas carregadas / linhas totais, ou % de carga?"), NUNCA pra
+    decidir nada sobre a importação em si (substituição de mês, validação
+    etc.). Deliberadamente não faz uma segunda passada de verdade pelo
+    arquivo inteiro pra contar — contradiria o design single-pass já
+    documentado no topo deste arquivo (pensado pra não repetir o custo de
+    ler um arquivo de ~130MB/~300 mil linhas duas vezes):
+
+      - CSV (_CsvComoAba): conta bytes "\\n" direto nos bytes brutos — não
+        decodifica nem faz parsing de CSV de verdade, então é da ordem de
+        milissegundos mesmo pra ~130MB (operação em C dentro do próprio
+        `bytes.count`). Pode vir levemente impreciso se algum campo tiver
+        quebra de linha dentro de aspas (não visto nos arquivos reais até
+        aqui) — aceitável pra uma ESTIMATIVA de progresso.
+      - .xlsx/.xlsm: usa ws.max_row, que o openpyxl já lê da tag XML
+        <dimension> ao ABRIR a planilha (sem nenhum custo extra de parsing
+        aqui) — mas essa tag nem sempre vem preenchida (ver comentário de
+        _abrir_primeira_aba_com_dados sobre arquivos write_only usados só
+        pra massa de teste), então pode vir None; nesse caso devolve None e
+        o front-end mostra só a contagem corrida, sem "de quanto"/%.
+
+    Em qualquer caminho, subtrai 1 pela linha de cabeçalho; nunca devolve
+    negativo."""
+    if isinstance(ws, _CsvComoAba):
+        total = conteudo_bytes.count(b"\n")
+        if conteudo_bytes and not conteudo_bytes.endswith((b"\n", b"\r")):
+            total += 1  # última linha sem quebra no final não entraria na contagem acima
+        return max(total - 1, 0)
+    max_row = getattr(ws, "max_row", None)
+    if not max_row:
+        return None
+    return max(max_row - 1, 0)
+
+
+def _linhas_copy(ws, indice_para_coluna, projeto_id, mesano_alvo, contadores,
+                  ao_progredir=None, intervalo_progresso=5000):
     """Generator: uma linha de texto (formato COPY) por linha de dados da
     planilha, na ordem de COLUNA_ORDEM (ver importar_comparacao_folha).
     Atualiza `contadores` (dict mutável) IN-PLACE conforme processa — é lido
     de volta pelo chamador só depois que o generator terminar de ser
-    consumido por db.execute_stream."""
+    consumido por db.execute_stream.
+
+    169ª rodada — `ao_progredir(processadas)`, se informado, é chamado a
+    cada `intervalo_progresso` linhas (nunca a cada linha: cada chamada
+    grava no banco através de uma conexão própria — ver
+    app/main.py:_ao_progredir_carga_comparacao_folha — custaria caro demais
+    abrir um processo `psql` novo 300 mil vezes). Só alimenta o contador do
+    banner de carga em andamento, nunca decide nada sobre a importação."""
     coluna_ordem = contadores["_coluna_ordem"]
     idx_mesano = next((i for i, col in indice_para_coluna.items() if col == "mesano"), None)
     idx_situacao = next((i for i, col in indice_para_coluna.items() if col == "situacao"), None)
@@ -501,9 +546,13 @@ def _linhas_copy(ws, indice_para_coluna, projeto_id, mesano_alvo, contadores):
         campos = [_copy_escape(str(projeto_id))] + [_copy_escape(valores.get(col)) for col in coluna_ordem]
         yield "\t".join(campos) + "\n"
 
+        if ao_progredir and contadores["total"] % intervalo_progresso == 0:
+            ao_progredir(contadores["total"])
+
 
 def importar_comparacao_folha(projeto_id, conteudo_bytes, timeout=3600,
-                               ao_iniciar_processo=None, foi_cancelado=None):
+                               ao_iniciar_processo=None, foi_cancelado=None,
+                               ao_progredir=None):
     """Ponto de entrada único (sem prévia — ver comentário no topo do
     arquivo): lê a planilha, detecta a competência (MESANO), substitui as
     linhas daquela competência (delete + copy, uma transação só) e devolve
@@ -531,10 +580,22 @@ def importar_comparacao_folha(projeto_id, conteudo_bytes, timeout=3600,
     timeout do worker do gunicorn (que só cobre o ciclo requisição/resposta,
     já encerrado quando a thread começa), então dá pra dar uma margem bem
     mais generosa sem nenhum efeito colateral pro usuário (que já nem fica
-    esperando a aba aberta)."""
+    esperando a aba aberta).
+
+    169ª rodada — `ao_progredir(processadas, total_estimado)`, se informado,
+    é chamado uma vez logo no início (processadas=0, já com o
+    total_estimado calculado — ver _estimar_total_linhas) e depois
+    periodicamente durante o COPY (repassado pra _linhas_copy, que decide o
+    intervalo — ver lá). Alimenta o contador de progresso do banner de
+    carga em andamento (app/main.py:_ao_progredir_carga_comparacao_folha);
+    nunca decide nada sobre a importação em si."""
     ws = _abrir_primeira_aba_com_dados(conteudo_bytes)
     indice_para_coluna = _mapear_cabecalho(ws)
     mesano_alvo = _detectar_mesano_alvo(ws, indice_para_coluna)
+
+    total_estimado = _estimar_total_linhas(conteudo_bytes, ws)
+    if ao_progredir:
+        ao_progredir(0, total_estimado)
 
     coluna_ordem = [c for c in COLUNAS.values() if c in set(indice_para_coluna.values())]
     contadores = {"total": 0, "por_situacao": {}, "mesano_divergente": 0, "_coluna_ordem": coluna_ordem}
@@ -569,7 +630,17 @@ def importar_comparacao_folha(projeto_id, conteudo_bytes, timeout=3600,
     )
     sufixo = "\\.\nCOMMIT;\n"
 
-    linhas = _linhas_copy(ws, indice_para_coluna, projeto_id, mesano_alvo, contadores)
+    # 169ª rodada — intervalo escolhido pra dar uns ~25 avisos de progresso
+    # ao longo do arquivo inteiro, independente do tamanho real (arquivo
+    # grande -> intervalo maior, mesmo número de chamadas; arquivo pequeno
+    # -> nunca menos que 2000, pra não abrir conexão de progresso linha a
+    # linha à toa). Sem total_estimado (xlsx sem <dimension>), usa um valor
+    # fixo razoável (5000) — sem como calcular "25 avisos" sem saber o total.
+    intervalo_progresso = max(2000, total_estimado // 25) if total_estimado else 5000
+    _progredir_linha = (lambda processadas: ao_progredir(processadas, total_estimado)) if ao_progredir else None
+
+    linhas = _linhas_copy(ws, indice_para_coluna, projeto_id, mesano_alvo, contadores,
+                           ao_progredir=_progredir_linha, intervalo_progresso=intervalo_progresso)
     db.execute_stream(prefixo, linhas, sufixo, timeout=timeout,
                        ao_iniciar_processo=ao_iniciar_processo, foi_cancelado=foi_cancelado)
 

@@ -1039,6 +1039,29 @@ def _foi_cancelado_carga_comparacao_folha(carga_id):
         return False
 
 
+# 169ª rodada — pedido do usuário (verbatim, sobre o banner "Carga em
+# andamento" de Comparação Folha): "tem como ter um contador de
+# completude? que seja linhas carregadas / linhas totais, ou % de carga?"
+# Chamada por comparacao_folha_import.importar_comparacao_folha (parâmetro
+# ao_progredir) periodicamente durante o COPY — ver intervalo_progresso lá
+# pra quantas vezes isso dispara (umas ~25 vezes no arquivo inteiro, não a
+# cada linha). Mesmo padrão de try/except silencioso de
+# _ao_iniciar_processo_carga_comparacao_folha (145ª rodada) — isso é só
+# apoio visual ao progresso, uma falha aqui não pode derrubar a carga em
+# si, só deixa o contador desatualizado nesta carga.
+def _ao_progredir_carga_comparacao_folha(carga_id, processadas, total_estimado):
+    try:
+        db.execute(
+            "UPDATE cargas_comparacao_folha SET linhas_processadas = "
+            f"{db.q(processadas)}, total_linhas_estimado = {db.q(total_estimado)} "
+            f"WHERE id = {db.q(carga_id)}"
+        )
+    except Exception:
+        print(f"[comparacao_folha] falha ao atualizar progresso da carga {carga_id} "
+              "(contador do banner ficará desatualizado, mas a carga segue normalmente):", flush=True)
+        traceback.print_exc()
+
+
 def _processar_carga_comparacao_folha_picker(
     carga_id, projeto_id, file_id, mime_type, access_token, resource_key,
     nome_arquivo, usuario_id, usuario_nome, usuario_email,
@@ -1051,6 +1074,7 @@ def _processar_carga_comparacao_folha_picker(
             projeto_id, conteudo,
             ao_iniciar_processo=lambda proc: _ao_iniciar_processo_carga_comparacao_folha(carga_id, proc),
             foi_cancelado=lambda: _foi_cancelado_carga_comparacao_folha(carga_id),
+            ao_progredir=lambda processadas, total: _ao_progredir_carga_comparacao_folha(carga_id, processadas, total),
         )
     except google_drive.GoogleDriveError as e:
         _marcar_carga_comparacao_folha_erro(carga_id, str(e))
@@ -1143,6 +1167,7 @@ def _processar_carga_comparacao_folha_upload(
             projeto_id, conteudo,
             ao_iniciar_processo=lambda proc: _ao_iniciar_processo_carga_comparacao_folha(carga_id, proc),
             foi_cancelado=lambda: _foi_cancelado_carga_comparacao_folha(carga_id),
+            ao_progredir=lambda processadas, total: _ao_progredir_carga_comparacao_folha(carga_id, processadas, total),
         )
     except comparacao_folha_import.ComparacaoFolhaImportError as e:
         _marcar_carga_comparacao_folha_erro(carga_id, f'{e} (arquivo enviado: "{nome_arquivo}")')
