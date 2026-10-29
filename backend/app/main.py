@@ -1009,10 +1009,17 @@ def _ao_iniciar_processo_carga_comparacao_folha(carga_id, proc):
     carga INTEIRA com um erro confuso, apontando pra uma query interna de
     bookkeeping em vez do problema real. Agora uma falha aqui só desliga o
     suporte a cancelamento NESTA carga (loga pra investigar) — a
-    importação em si segue normalmente."""
+    importação em si segue normalmente.
+
+    169ª rodada — grava também `instancia_id` (RENDER_INSTANCE_ID deste
+    boot do container, ou None fora do Render) junto com o PID — ver
+    _carga_esta_orfa logo abaixo pro motivo (detectar quando um PID
+    gravado pertence a um container que já não existe mais, ex: morto por
+    OOM ou substituído por um redeploy no meio da carga)."""
     try:
         linha = db.execute_returning_one(
-            f"UPDATE cargas_comparacao_folha SET pid = {db.q(proc.pid)} "
+            f"UPDATE cargas_comparacao_folha SET pid = {db.q(proc.pid)}, "
+            f"instancia_id = {db.q(os.environ.get('RENDER_INSTANCE_ID'))} "
             f"WHERE id = {db.q(carga_id)} RETURNING cancelamento_solicitado"
         )
     except Exception:
@@ -1146,6 +1153,79 @@ def _marcar_carga_comparacao_folha_cancelada(carga_id):
     except Exception:
         print("[comparacao_folha] falha ao marcar carga como cancelada:", flush=True)
         traceback.print_exc()
+
+
+# 169ª rodada — pedido/bug reportado pelo usuário (verbatim): "peço o
+# cancelamento, aparece a mensagem que será cancelada, mas ela continua no
+# processo de carga". Investigando o Render (ver conversa sobre
+# hospedagem) achei a causa: o serviço vem sofrendo OOM kills com
+# frequência no plano atual, e cada OOM (ou redeploy, ou restart manual)
+# troca o CONTAINER inteiro. Se isso acontece NO MEIO de uma carga, a
+# thread que estava rodando ela desaparece com o container — ninguém
+# sobra pra marcar a linha como 'erro'/'cancelado' em
+# cargas_comparacao_folha, que fica "em_andamento" pra sempre, com um
+# `pid` que não existe mais em NENHUM processo vivo. O botão Cancelar
+# tentava os.kill(pid, SIGTERM) nesse PID órfão, recebia
+# ProcessLookupError (código antigo: silenciosamente ignorado, pensado só
+# pro caso raro "a carga terminou sozinha entre eu ler o PID e tentar
+# matar") e devolvia {"ok": true} sem ter corrigido nada de verdade.
+#
+# _carga_esta_orfa() distingue os dois casos com certeza, usando
+# RENDER_INSTANCE_ID (ver migration_047 e
+# _ao_iniciar_processo_carga_comparacao_folha, que grava esse valor junto
+# com o PID): se o `instancia_id` gravado for diferente do
+# RENDER_INSTANCE_ID ATUAL, o PID é de um boot do container que já não
+# existe — não precisa nem tentar os.kill (que, além de inútil, corre o
+# risco remoto de matar um processo ATUAL só por coincidência de reusar o
+# mesmo número de PID de um boot anterior).
+def _carga_esta_orfa(carga):
+    instancia_gravada = carga.get("instancia_id") if carga else None
+    if not instancia_gravada:
+        # Sem RENDER_INSTANCE_ID (ambiente local, ou carga antiga de antes
+        # desta rodada) — detecção de órfã fica desligada, mantém o
+        # comportamento anterior (só baseado em PID/os.kill).
+        return False
+    return instancia_gravada != os.environ.get("RENDER_INSTANCE_ID")
+
+
+def _criar_carga_comparacao_folha(projeto_id, nome_arquivo, usuario_atual):
+    """INSERT da linha de carga, compartilhado pelos dois pontos de
+    entrada (Picker e Upload). Se a carga 'em_andamento' que está
+    bloqueando (índice único idx_cargas_comparacao_folha_ativa — no máximo
+    uma carga ativa por projeto) for uma carga ÓRFÃ (ver
+    _carga_esta_orfa — container antigo que morreu no meio da importação
+    e nunca mais vai se auto-corrigir sozinha), corrige ela mesma (marca
+    como erro) e tenta de novo, uma vez — sem isso, uma carga morta
+    bloqueava QUALQUER carga nova pra sempre, sem o usuário ter como
+    limpar isso pela tela. Se a carga bloqueando estiver genuinamente em
+    andamento (container vivo, processando de verdade), o erro de índice
+    único sobe normal pro chamador devolver o 409 de sempre.
+
+    Levanta db.DbError (reaproveitado pelo chamador) se ainda não der pra
+    criar mesmo depois da correção."""
+    sql = (
+        "INSERT INTO cargas_comparacao_folha (projeto_id, nome_arquivo, iniciado_por, iniciado_por_nome) "
+        f"VALUES ({db.q(projeto_id)}, {db.q(nome_arquivo)}, {db.q(usuario_atual.get('id'))}, "
+        f"{db.q(usuario_atual.get('nome'))}) RETURNING *"
+    )
+    try:
+        return db.execute_returning_one(sql)
+    except db.DbError as e:
+        if "idx_cargas_comparacao_folha_ativa" not in str(e) and "duplicate key" not in str(e):
+            raise
+        carga_bloqueando = db.fetch_one(
+            f"SELECT id, pid, instancia_id FROM cargas_comparacao_folha "
+            f"WHERE projeto_id = {db.q(projeto_id)} AND status = 'em_andamento'"
+        )
+        if not carga_bloqueando or not _carga_esta_orfa(carga_bloqueando):
+            raise
+        _marcar_carga_comparacao_folha_erro(
+            carga_bloqueando["id"],
+            "Esta carga foi interrompida por um reinício do servidor antes de terminar "
+            "(provavelmente falta de memória) — nenhum dado foi alterado, a importação "
+            "nunca chegou a confirmar as mudanças no banco.",
+        )
+        return db.execute_returning_one(sql)  # se outra carga entrou no meio-tempo, deixa o erro subir normal
 
 
 # 90ª rodada — mesmo motivo/padrão de _processar_carga_comparacao_folha_picker
@@ -3413,11 +3493,7 @@ def create_app():
         usuario_atual = auth.buscar_usuario_publico(session.get("usuario_id")) or {}
 
         try:
-            carga = db.execute_returning_one(
-                "INSERT INTO cargas_comparacao_folha (projeto_id, nome_arquivo, iniciado_por, iniciado_por_nome) "
-                f"VALUES ({db.q(projeto_id)}, {db.q(nome_arquivo)}, {db.q(usuario_atual.get('id'))}, "
-                f"{db.q(usuario_atual.get('nome'))}) RETURNING *"
-            )
+            carga = _criar_carga_comparacao_folha(projeto_id, nome_arquivo, usuario_atual)
         except db.DbError as e:
             if "idx_cargas_comparacao_folha_ativa" in str(e) or "duplicate key" in str(e):
                 return jsonify({
@@ -3445,7 +3521,17 @@ def create_app():
         indicador de progresso da importação pelo Google Picker — inclusive
         depois de fechar e reabrir a aba, já que a carga em si roda no
         servidor, não no navegador. `null` quando o projeto nunca teve
-        nenhuma carga por esse caminho."""
+        nenhuma carga por esse caminho.
+
+        169ª rodada — o polling deste endpoint (a cada 3s, enquanto o
+        banner estiver visível — ver cfIniciarPollingCarga no front-end) é
+        também quem AUTOCORRIGE uma carga órfã (container morreu no meio
+        da importação — ver _carga_esta_orfa): se a carga mais recente
+        ainda está 'em_andamento' mas pertence a um boot de container que
+        já não existe mais, marca como erro ANTES de devolver pro
+        front-end — assim o banner se corrige sozinho (passa de "em
+        andamento" pra "erro") mesmo que o usuário nunca clique em
+        Cancelar."""
         pid = request.args.get("projeto_id")
         if not pid:
             return jsonify({"erro": "projeto_id é obrigatório"}), 400
@@ -3453,6 +3539,14 @@ def create_app():
             f"SELECT * FROM cargas_comparacao_folha WHERE projeto_id = {db.q(pid)} "
             "ORDER BY criado_em DESC LIMIT 1"
         )
+        if carga and carga.get("status") == "em_andamento" and _carga_esta_orfa(carga):
+            _marcar_carga_comparacao_folha_erro(
+                carga["id"],
+                "Esta carga foi interrompida por um reinício do servidor antes de terminar "
+                "(provavelmente falta de memória) — nenhum dado foi alterado, a importação "
+                "nunca chegou a confirmar as mudanças no banco. Inicie a carga novamente.",
+            )
+            carga = db.fetch_one(f"SELECT * FROM cargas_comparacao_folha WHERE id = {db.q(carga['id'])}")
         return jsonify(carga)
 
     @app.post("/api/comparacao-folha/importar/upload")
@@ -3488,11 +3582,7 @@ def create_app():
         usuario_atual = auth.buscar_usuario_publico(session.get("usuario_id")) or {}
 
         try:
-            carga = db.execute_returning_one(
-                "INSERT INTO cargas_comparacao_folha (projeto_id, nome_arquivo, iniciado_por, iniciado_por_nome) "
-                f"VALUES ({db.q(projeto_id)}, {db.q(nome_arquivo)}, {db.q(usuario_atual.get('id'))}, "
-                f"{db.q(usuario_atual.get('nome'))}) RETURNING *"
-            )
+            carga = _criar_carga_comparacao_folha(projeto_id, nome_arquivo, usuario_atual)
         except db.DbError as e:
             if "idx_cargas_comparacao_folha_ativa" in str(e) or "duplicate key" in str(e):
                 return jsonify({
@@ -3532,10 +3622,29 @@ def create_app():
         comparacao_folha_import.importar_comparacao_folha) — fechar a
         conexão antes do COMMIT faz o PRÓPRIO Postgres desfazer (rollback)
         o que ainda não tinha sido confirmado, preservando intactos os
-        dados que já existiam daquele mês."""
-        carga = db.fetch_one(f"SELECT status, pid FROM cargas_comparacao_folha WHERE id = {db.q(carga_id)}")
+        dados que já existiam daquele mês.
+
+        169ª rodada — pedido/bug reportado pelo usuário: cancelava e a
+        carga continuava "em andamento" pra sempre. Acontecia quando o
+        CONTAINER que rodava a carga já tinha morrido (OOM, redeploy —
+        ver _carga_esta_orfa) ANTES do clique em Cancelar: o PID gravado
+        não existe mais neste (nem em nenhum outro) processo vivo, então
+        os.kill só dava ProcessLookupError, silenciosamente ignorado, sem
+        nunca atualizar o status da carga. Agora verifica isso PRIMEIRO —
+        se a carga for órfã, marca como cancelada na hora (sem tentar
+        os.kill, que seria inútil e corre o risco remoto de atingir um
+        PID reaproveitado por coincidência em um boot novo)."""
+        carga = db.fetch_one(f"SELECT status, pid, instancia_id FROM cargas_comparacao_folha WHERE id = {db.q(carga_id)}")
         if not carga or carga["status"] != "em_andamento":
             return jsonify({"erro": "Essa carga não está mais em andamento — nada para cancelar."}), 404
+
+        if _carga_esta_orfa(carga):
+            _marcar_carga_comparacao_folha_cancelada(carga_id)
+            return jsonify({
+                "ok": True,
+                "aviso": "Esta carga já tinha sido interrompida por um reinício do servidor — "
+                "marcada como cancelada.",
+            }), 202
 
         db.execute(
             f"UPDATE cargas_comparacao_folha SET cancelamento_solicitado = true WHERE id = {db.q(carga_id)}"
