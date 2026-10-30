@@ -280,6 +280,28 @@
      cfdRenderStatusRubricaSituacao. */
   .cfd-rubsit-table .cfd-pivot-pct{color:var(--accent);font-weight:600;font-size:10.5px;margin-left:3px;}
 
+  /* 169ª rodada (continuação 8) — pedido do usuário, depois de ver o
+     quadro "Status da Rubrica × Situação" com 10 colunas de situação lado
+     a lado: "pinte as colunas para uma visualização mais clara e fácil".
+     Aplicada via classe (cfdRenderStatusRubricaSituacao calcula qual
+     classe cada coluna leva, célula a célula, já que a ordem das colunas
+     de Situação é dinâmica — vem ordenada por total, não tem posição
+     fixa): a coluna "Não Divergente" (a leitura mais importante — é a
+     única situação "boa", todo o resto é algum tipo de divergência) ganha
+     um verde suave (var(--ok-soft)) do cabeçalho até o rodapé, pra pular
+     aos olhos; as demais colunas de situação alternam entre um cinza
+     suave (var(--surface-2)) e transparente, só pra marcar visualmente
+     onde uma coluna termina e a próxima começa (fica fácil "descer" o
+     olho por uma coluna sem contar casas); a coluna Total leva um azul
+     suave (var(--accent-soft)), consistente com a cor usada noutras
+     tabelas do site pra marcar a coluna de totais. Tons "soft" (já usados
+     em badges no resto do site) são claros o bastante pra não brigar com
+     o texto por cima, e têm par certo pro modo escuro via variável CSS —
+     não precisa de regra extra pra dark mode. */
+  .cfd-rubsit-table th.cfd-col-nd,.cfd-rubsit-table td.cfd-col-nd{background:var(--ok-soft);}
+  .cfd-rubsit-table th.cfd-col-alt,.cfd-rubsit-table td.cfd-col-alt{background:var(--surface-2);}
+  .cfd-rubsit-table th.cfd-col-total,.cfd-rubsit-table td.cfd-col-total{background:var(--accent-soft);}
+
   /* 155ª rodada — mesmo pedido da 154ª, agora pro quadro "Comparação por
      Tipo de Rubrica" (par ao lado de "% por Situação"): colunas como
      "% não prog./cadastr." também estouravam a largura por ficarem numa
@@ -12712,7 +12734,17 @@ function cfdRenderStatusRubricaSituacao(d){
     $("cfd-statussit-contagem").textContent = "";
     return;
   }
-  $("cfd-statussit-thead").innerHTML = `<tr><th>Status da Rubrica</th>${situacoes.map(s=>`<th>${esc(s)}</th>`).join("")}<th>Total</th></tr>`;
+  // 169ª rodada (continuação 8) — pedido do usuário: "pinte as colunas para
+  // uma visualização mais clara e fácil". _cfdStatussitColClass() decide a
+  // cor de CADA coluna de situação (a ordem vem do backend por total
+  // decrescente, não é fixa — por isso a cor é calculada por nome/posição
+  // a cada render, não fica "grudada" numa posição de coluna): "Não
+  // Divergente" (a única situação "boa") sempre em verde suave, as demais
+  // alternam cinza suave/transparente só pra separar visualmente uma
+  // coluna da outra, e a coluna Total fica em azul suave. Ver CSS
+  // (.cfd-col-nd/.cfd-col-alt/.cfd-col-total) logo acima de .cfd-pivot-pct.
+  const _cfdStatussitColClass = (s, i) => s === "Não Divergente" ? "cfd-col-nd" : (i % 2 === 0 ? "cfd-col-alt" : "");
+  $("cfd-statussit-thead").innerHTML = `<tr><th>Status da Rubrica</th>${situacoes.map((s,i)=>`<th class="${_cfdStatussitColClass(s,i)}">${esc(s)}</th>`).join("")}<th class="cfd-col-total">Total</th></tr>`;
   // 169ª rodada (continuação 7) — pedido do usuário (verbatim, depois de
   // ver a linha "% da linha" da continuação 2): "esses % em linha separada
   // das quantidades não ficou legal, coloque ao lado de quantidade e pinte
@@ -12724,21 +12756,26 @@ function cfdRenderStatusRubricaSituacao(d){
   $("cfd-statussit-tbody").innerHTML = linhas.map(l=>{
     const rotulo = pill(l.status_rubrica, STATUS_RUBRICA_COLOR[l.status_rubrica]||"faint");
     const total = Number(l.total||0);
-    const celulas = l.valores.map(v=>{
-      if(!v) return `<td class="mono">—</td>`;
+    const celulas = l.valores.map((v,i)=>{
+      const cls = _cfdStatussitColClass(situacoes[i], i);
+      const classAttr = cls ? ` class="mono ${cls}"` : ` class="mono"`;
+      if(!v) return `<td${classAttr}>—</td>`;
       const pctHtml = total ? (()=>{
         const pct = Math.round(1000 * v / total) / 10;
         return ` <span class="cfd-pivot-pct">(${pct.toLocaleString('pt-BR', {minimumFractionDigits:1, maximumFractionDigits:1})}%)</span>`;
       })() : "";
-      return `<td class="mono">${Number(v).toLocaleString('pt-BR')}${pctHtml}</td>`;
+      return `<td${classAttr}>${Number(v).toLocaleString('pt-BR')}${pctHtml}</td>`;
     }).join("");
-    return `<tr><td>${rotulo}</td>${celulas}<td class="mono"><strong>${total.toLocaleString('pt-BR')}</strong></td></tr>`;
+    return `<tr><td>${rotulo}</td>${celulas}<td class="mono cfd-col-total"><strong>${total.toLocaleString('pt-BR')}</strong></td></tr>`;
   }).join("");
   const totaisColuna = d.totais_situacao || [];
   $("cfd-statussit-tfoot").innerHTML = `<tr style="font-weight:600;background:var(--surface-2);border-top:2px solid var(--border);">
     <td>Total</td>
-    ${totaisColuna.map(t=>`<td class="mono">${Number(t||0).toLocaleString('pt-BR')}</td>`).join("")}
-    <td class="mono">${Number(d.total_geral||0).toLocaleString('pt-BR')}</td>
+    ${totaisColuna.map((t,i)=>{
+      const cls = _cfdStatussitColClass(situacoes[i], i);
+      return `<td class="mono${cls?` ${cls}`:""}">${Number(t||0).toLocaleString('pt-BR')}</td>`;
+    }).join("")}
+    <td class="mono cfd-col-total">${Number(d.total_geral||0).toLocaleString('pt-BR')}</td>
   </tr>`;
   $("cfd-statussit-contagem").textContent = `${linhas.length.toLocaleString('pt-BR')} status × ${situacoes.length} situação(ões)`;
 }
