@@ -1895,6 +1895,27 @@
         <tfoot id="cfd-statussit-tfoot"></tfoot>
       </table></div>
     </div>
+    <!-- 169ª rodada (continuação 9) — pedido do usuário (verbatim): "elabore
+         um quadro nesta aba apresentando as rubricas por situação por tema,
+         esse tema pode ser analisado por vc pelo nome mais o Grupo de
+         cálculo". Não existe campo "tema" cadastrado em lugar nenhum — é uma
+         classificação deduzida (ver _classificar_tema_rubrica/_TEMA_REGRAS em
+         comparacao_folha.py, por palavras-chave no nome da rubrica + Grupo de
+         Cálculo). Mesmíssimo padrão visual das duas tabelas vizinhas
+         (cabeçalho/linhas via JS porque as colunas de Situação são
+         dinâmicas) — cfdRenderTemaSituacao. -->
+    <div class="card card--zona-azul" style="margin-top:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+        <h3>🏷️ Rubricas por Tema × Situação</h3>
+        <span class="muted" id="cfd-tema-contagem" style="font-size:11.5px;"></span>
+      </div>
+      <div class="view-sub" style="margin-top:-6px;">Quantidade de linhas comparadas por tema da rubrica (linha — classificação automática a partir do nome e do Grupo de Cálculo) e Situação da Comparação (coluna) — totais ao final de cada linha e de cada coluna. "Outros / Não classificado" reúne rubricas sem palavra-chave reconhecida.</div>
+      <div class="table-wrap"><table class="cfd-rubsit-table">
+        <thead id="cfd-tema-thead"></thead>
+        <tbody id="cfd-tema-tbody"></tbody>
+        <tfoot id="cfd-tema-tfoot"></tfoot>
+      </table></div>
+    </div>
     <!-- 152ª rodada — pedido do usuário (verbatim): "no dashboard de
          Comparação de folha gerar um quadro no padrão da imagem 1.
          Bidimensional relação das rubricas por situação e a quantidade de
@@ -12665,6 +12686,10 @@ function cfdMostrarAguardandoCompetencia(msg){
   $("cfd-statussit-thead").innerHTML = `<tr><th>Status da Rubrica</th><th>Total</th></tr>`;
   $("cfd-statussit-tbody").innerHTML = `<tr class="empty-row"><td colspan="2">${esc(textoCelula)}</td></tr>`;
   $("cfd-statussit-tfoot").innerHTML = "";
+  $("cfd-tema-contagem").textContent = "";
+  $("cfd-tema-thead").innerHTML = `<tr><th>Tema</th><th>Total</th></tr>`;
+  $("cfd-tema-tbody").innerHTML = `<tr class="empty-row"><td colspan="2">${esc(textoCelula)}</td></tr>`;
+  $("cfd-tema-tfoot").innerHTML = "";
   $("cfd-rubricas-sem-uso-tbody").innerHTML = `<tr class="empty-row"><td colspan="3">${esc(textoCelula)}</td></tr>`;
   $("cfd-verbas-sem-uso-tbody").innerHTML = `<tr class="empty-row"><td colspan="3">${esc(textoCelula)}</td></tr>`;
   $("cfd-rubricas-sem-param-tbody").innerHTML = `<tr class="empty-row"><td colspan="3">${esc(textoCelula)}</td></tr>`;
@@ -12778,6 +12803,51 @@ function cfdRenderStatusRubricaSituacao(d){
     <td class="mono cfd-col-total">${Number(d.total_geral||0).toLocaleString('pt-BR')}</td>
   </tr>`;
   $("cfd-statussit-contagem").textContent = `${linhas.length.toLocaleString('pt-BR')} status × ${situacoes.length} situação(ões)`;
+}
+
+// 169ª rodada (continuação 9) — quadro "Rubricas por Tema × Situação" (ver
+// view-comparacao-folha-dashboard no HTML e comparacao_folha.por_tema_x_situacao()
+// no backend). Mesmíssimo padrão de cfdRenderStatusRubricaSituacao logo
+// acima (colunas de Situação dinâmicas, % inline na mesma célula, colunas
+// pintadas) — só troca o rótulo da linha (tema, em vez de status do
+// funil). `d` é r.por_tema_situacao do retorno de GET /comparacao-folha/dashboard.
+function cfdRenderTemaSituacao(d){
+  const situacoes = d.situacoes || [];
+  const linhas = d.linhas || [];
+  if(!situacoes.length){
+    $("cfd-tema-thead").innerHTML = `<tr><th>Tema</th><th>Total</th></tr>`;
+    $("cfd-tema-tbody").innerHTML = `<tr class="empty-row"><td colspan="2">Nenhum dado para esta competência.</td></tr>`;
+    $("cfd-tema-tfoot").innerHTML = "";
+    $("cfd-tema-contagem").textContent = "";
+    return;
+  }
+  const _cfdTemaColClass = (s, i) => s === "Não Divergente" ? "cfd-col-nd" : (i % 2 === 0 ? "cfd-col-alt" : "");
+  $("cfd-tema-thead").innerHTML = `<tr><th>Tema</th>${situacoes.map((s,i)=>`<th class="${_cfdTemaColClass(s,i)}">${esc(s)}</th>`).join("")}<th class="cfd-col-total">Total</th></tr>`;
+  $("cfd-tema-tbody").innerHTML = linhas.map(l=>{
+    const rotulo = pill(l.tema, "faint");
+    const total = Number(l.total||0);
+    const celulas = l.valores.map((v,i)=>{
+      const cls = _cfdTemaColClass(situacoes[i], i);
+      const classAttr = cls ? ` class="mono ${cls}"` : ` class="mono"`;
+      if(!v) return `<td${classAttr}>—</td>`;
+      const pctHtml = total ? (()=>{
+        const pct = Math.round(1000 * v / total) / 10;
+        return ` <span class="cfd-pivot-pct">(${pct.toLocaleString('pt-BR', {minimumFractionDigits:1, maximumFractionDigits:1})}%)</span>`;
+      })() : "";
+      return `<td${classAttr}>${Number(v).toLocaleString('pt-BR')}${pctHtml}</td>`;
+    }).join("");
+    return `<tr><td>${rotulo}</td>${celulas}<td class="mono cfd-col-total"><strong>${total.toLocaleString('pt-BR')}</strong></td></tr>`;
+  }).join("");
+  const totaisColuna = d.totais_situacao || [];
+  $("cfd-tema-tfoot").innerHTML = `<tr style="font-weight:600;background:var(--surface-2);border-top:2px solid var(--border);">
+    <td>Total</td>
+    ${totaisColuna.map((t,i)=>{
+      const cls = _cfdTemaColClass(situacoes[i], i);
+      return `<td class="mono${cls?` ${cls}`:""}">${Number(t||0).toLocaleString('pt-BR')}</td>`;
+    }).join("")}
+    <td class="mono cfd-col-total">${Number(d.total_geral||0).toLocaleString('pt-BR')}</td>
+  </tr>`;
+  $("cfd-tema-contagem").textContent = `${linhas.length.toLocaleString('pt-BR')} tema(s) × ${situacoes.length} situação(ões)`;
 }
 
 // 169ª rodada (continuação) — pedido do usuário (print do quadro "Top
@@ -12943,6 +13013,7 @@ async function cfdCarregarDados(){
 
   cfdRenderRubricaSituacao(r.por_rubrica_situacao || {});
   cfdRenderStatusRubricaSituacao(r.por_status_rubrica_situacao || {});
+  cfdRenderTemaSituacao(r.por_tema_situacao || {});
 
   const cob = r.cobertura_mapeamento || {};
   $("cfd-rubricas-sem-uso-tbody").innerHTML = cfdListaCoberturaHtml(cob.rubricas_parametrizadas_sem_uso, "linhas_parametrizadas", 3);

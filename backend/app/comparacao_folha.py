@@ -17,6 +17,7 @@ Confirmado com o usuário (AskUserQuestion, 55ª rodada): a tela é só consulta
 (sem edição manual por linha) — "filtros fortes e exportação" pra começar.
 """
 import re
+import unicodedata
 
 from . import db
 
@@ -790,6 +791,7 @@ def dashboard(projeto_id, mesano=None):
         "por_empresa": por_empresa,
         "por_rubrica_situacao": por_rubrica_situacao(projeto_id, mesano),
         "por_status_rubrica_situacao": por_status_rubrica_x_situacao(projeto_id, mesano),
+        "por_tema_situacao": por_tema_x_situacao(projeto_id, mesano),
         "cobertura_mapeamento": {
             "rubricas_parametrizadas_sem_uso": rubricas_parametrizadas_sem_uso,
             "verbas_parametrizadas_sem_uso": verbas_parametrizadas_sem_uso,
@@ -911,6 +913,83 @@ _ORDEM_STATUS_RUBRICA = (
 _STATUS_RUBRICA_MULTIPLAS = "(múltiplas situações)"
 _STATUS_RUBRICA_SEM_CADASTRO = "(sem rubrica cadastrada)"
 
+# 169ª rodada (continuação 9) — pedido do usuário (verbatim): "elabore um
+# quadro nesta aba apresentando as rubricas por situação por tema, esse tema
+# pode ser analisado por vc pelo nome mais o Grupo de cálculo". Não existe
+# campo "tema" nem em `rubricas` nem na planilha de origem — é uma
+# classificação temática que esta rotina DEDUZ a partir de
+# nome_abreviado + nome_extenso + grupo_calculo, por palavras-chave. É uma
+# heurística de domínio (folha de pagamento do setor público), montada sem
+# acesso aos dados reais de produção (esta sessão não tem acesso direto ao
+# banco) — a lista de temas e palavras-chave abaixo deve ser tratada como
+# um PRIMEIRO RECORTE, a refinar conforme o usuário revisar o quadro:
+# qualquer rubrica que não bata com nenhuma regra cai em
+# "Outros / Não classificado" (ver _TEMA_OUTROS) — essa linha é o sinal de
+# que falta regra nova, não um "erro".
+#
+# Regras checadas NA ORDEM (a primeira que bater define o tema) contra o
+# texto combinado e normalizado (maiúsculo, sem acento, sem "º") de
+# nome_extenso + nome_abreviado + grupo_calculo — por isso termos mais
+# específicos vêm antes dos mais genéricos (ex: "GRATIFICACAO NATALINA"
+# cai em 13º Salário, não na linha genérica de Gratificações, porque a
+# regra de 13º é checada primeiro).
+_TEMA_REGRAS = (
+    ("13º Salário", ("DECIMO TERCEIRO", "13 SALARIO", "13O SALARIO", "GRATIFICACAO NATALINA", "ABONO NATALINO")),
+    ("Férias", ("FERIA",)),
+    ("Salário Família", ("SALARIO FAMILIA",)),
+    ("Horas Extras", ("HORA EXTRA", "HORAS EXTRAS")),
+    ("Adicional Noturno", ("ADICIONAL NOTURNO", "AD NOTURNO", "ADIC NOTURNO")),
+    ("Insalubridade / Periculosidade", ("INSALUBRIDADE", "PERICULOSIDADE")),
+    ("Adicional por Tempo de Serviço", ("TEMPO DE SERVICO", "QUINQUENIO", "ANUENIO", "TRIENIO", "ADICIONAL TEMPO")),
+    ("Gratificações e Funções Comissionadas", (
+        "GRATIFICACAO", "FUNCAO GRATIFICADA", "FUNCAO COMISSIONADA", "CARGO COMISSIONADO", "FUNCAO DE CONFIANCA",
+    )),
+    ("Outros Adicionais", ("ADICIONAL", "ADIC ")),
+    ("Vencimento, Salário Base e Subsídio", ("VENCIMENTO", "SALARIO BASE", "SUBSIDIO", "REMUNERACAO BASE")),
+    ("Benefícios e Auxílios", (
+        "AUXILIO", "VALE ALIMENTACAO", "VALE TRANSPORTE", "VALE REFEICAO", "CESTA BASICA",
+    )),
+    ("Diárias e Ajuda de Custo", ("DIARIA", "AJUDA DE CUSTO", "DESLOCAMENTO")),
+    ("Previdência (INSS/RPPS)", ("INSS", "RPPS", "PREVIDENCIA", "PSS ")),
+    ("Imposto de Renda (IRRF)", ("IRRF", "IMPOSTO DE RENDA")),
+    ("FGTS", ("FGTS",)),
+    ("Pensão Alimentícia e Consignações", ("PENSAO ALIMENTICIA", "CONSIGNACAO", "CONSIGNADO")),
+    ("Faltas, Afastamentos e Licenças", ("FALTA", "AFASTAMENTO", "LICENCA")),
+    ("Rescisão e Indenizações", ("RESCISAO", "AVISO PREVIO", "INDENIZACAO", "MULTA FGTS", "MULTA 40")),
+    ("Estágio e Bolsas", ("ESTAGIO", "BOLSA")),
+    ("Sindical", ("SINDICAL",)),
+)
+_TEMA_OUTROS = "Outros / Não classificado"
+_TEMA_MULTIPLOS = "(múltiplos temas)"
+_TEMA_SEM_CADASTRO = "(sem rubrica cadastrada)"
+# Ordem de exibição das linhas "reais" (por tamanho de total, não fixa — ver
+# por_tema_x_situacao) — só as 3 linhas especiais (Outros, múltiplos,
+# sem-cadastro) têm posição fixa, sempre ao final, nessa ordem.
+_ORDEM_TEMA_ESPECIAIS_FINAL = (_TEMA_OUTROS, _TEMA_MULTIPLOS, _TEMA_SEM_CADASTRO)
+
+
+def _normalizar_texto_tema(*partes):
+    """Maiúsculo, sem acento, sem 'º/°' — só pra bater contra _TEMA_REGRAS.
+    Nunca usado pra montar SQL nem pra exibição (isso usa o texto original)."""
+    texto = " ".join(str(p) for p in partes if p)
+    if not texto:
+        return ""
+    texto = texto.upper()
+    texto = unicodedata.normalize("NFKD", texto)
+    texto = "".join(c for c in texto if not unicodedata.combining(c))
+    return texto.replace("º", " ").replace("°", " ")
+
+
+def _classificar_tema_rubrica(nome_abreviado, nome_extenso, grupo_calculo):
+    texto = _normalizar_texto_tema(nome_extenso, nome_abreviado, grupo_calculo)
+    if not texto:
+        return _TEMA_OUTROS
+    for tema, palavras in _TEMA_REGRAS:
+        for palavra in palavras:
+            if palavra in texto:
+                return tema
+    return _TEMA_OUTROS
+
 
 def _normaliza_codigo_rubrica_py(codigo):
     """Réplica em Python de normaliza_codigo_rubrica() (migration_036) —
@@ -993,6 +1072,92 @@ def por_status_rubrica_x_situacao(projeto_id, mesano=None):
         valores = [valores_dict.get(s, 0) for s in lista_situacoes]
         linhas.append({
             "status_rubrica": status_rubrica,
+            "total": sum(valores),
+            "valores": valores,
+        })
+
+    return {
+        "situacoes": lista_situacoes,
+        "totais_situacao": totais_situacao,
+        "linhas": linhas,
+        "total_geral": total_geral,
+    }
+
+
+# 169ª rodada (continuação 9) — pedido do usuário (verbatim): "elabore um
+# quadro nesta aba apresentando as rubricas por situação por tema, esse tema
+# pode ser analisado por vc pelo nome mais o Grupo de cálculo". Mesmíssimo
+# padrão de por_status_rubrica_x_situacao logo acima (reaproveita até a
+# mesma query de agregação em comparacao_folha, UMA vez só via GROUP BY —
+# ver aviso de performance no topo do arquivo) — só troca a classificação
+# de "status do funil de levantamento" (rubricas.status) por "tema"
+# (_classificar_tema_rubrica, deduzido de nome + grupo_calculo, ver
+# comentário de _TEMA_REGRAS acima). Mesma lógica de ambiguidade: se o
+# mesmo codigo_ergon aparece em mais de uma linha de `rubricas` (empresas
+# diferentes) e essas linhas caem em temas DIFERENTES, vira
+# "(múltiplos temas)" em vez de escolher um arbitrariamente.
+def por_tema_x_situacao(projeto_id, mesano=None):
+    where = _where_filtros(projeto_id=projeto_id, mesano=mesano)
+
+    linhas_raw = db.fetch_all(f"""
+        SELECT
+          rubrica_ergon,
+          COALESCE(situacao, '(sem situação)') AS situacao,
+          COUNT(*) AS total
+        FROM comparacao_folha{where}
+        GROUP BY rubrica_ergon, COALESCE(situacao, '(sem situação)')
+    """)
+    if not linhas_raw:
+        return {"situacoes": [], "totais_situacao": [], "linhas": [], "total_geral": 0}
+
+    rubricas_rows = db.fetch_all(f"""
+        SELECT codigo_ergon, nome_abreviado, nome_extenso, grupo_calculo
+        FROM rubricas
+        WHERE projeto_id = {db.q(projeto_id)} AND codigo_ergon IS NOT NULL
+    """)
+    tema_por_codigo = {}
+    for r in rubricas_rows:
+        chave = _normaliza_codigo_rubrica_py(r["codigo_ergon"])
+        if chave is None:
+            continue
+        tema = _classificar_tema_rubrica(r.get("nome_abreviado"), r.get("nome_extenso"), r.get("grupo_calculo"))
+        tema_por_codigo.setdefault(chave, set()).add(tema)
+
+    def _resolve_tema(rubrica_ergon):
+        chave = _normaliza_codigo_rubrica_py(rubrica_ergon)
+        temas = tema_por_codigo.get(chave) if chave is not None else None
+        if not temas:
+            return _TEMA_SEM_CADASTRO
+        if len(temas) > 1:
+            return _TEMA_MULTIPLOS
+        return next(iter(temas))
+
+    situacao_totais = {}
+    for row in linhas_raw:
+        situacao_totais[row["situacao"]] = situacao_totais.get(row["situacao"], 0) + row["total"]
+    lista_situacoes = sorted(situacao_totais.keys(), key=lambda s: situacao_totais[s], reverse=True)
+    totais_situacao = [situacao_totais[s] for s in lista_situacoes]
+    total_geral = sum(totais_situacao)
+
+    pivot = {}
+    for row in linhas_raw:
+        tema = _resolve_tema(row["rubrica_ergon"])
+        linha_pivot = pivot.setdefault(tema, {})
+        linha_pivot[row["situacao"]] = linha_pivot.get(row["situacao"], 0) + row["total"]
+
+    # Linhas "reais" (temas de verdade) ordenadas por total decrescente —
+    # mesmo critério das colunas. As 3 linhas especiais (Outros/múltiplos/
+    # sem-cadastro) sempre ao final, nessa ordem fixa, fora do ranking.
+    temas_reais = [t for t in pivot.keys() if t not in _ORDEM_TEMA_ESPECIAIS_FINAL]
+    temas_reais.sort(key=lambda t: sum(pivot[t].values()), reverse=True)
+    ordem_linhas = temas_reais + [t for t in _ORDEM_TEMA_ESPECIAIS_FINAL if t in pivot]
+
+    linhas = []
+    for tema in ordem_linhas:
+        valores_dict = pivot[tema]
+        valores = [valores_dict.get(s, 0) for s in lista_situacoes]
+        linhas.append({
+            "tema": tema,
             "total": sum(valores),
             "valores": valores,
         })
