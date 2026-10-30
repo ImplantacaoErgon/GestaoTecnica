@@ -269,15 +269,16 @@
   .cfd-rubsit-table thead th:first-child{max-width:none;white-space:nowrap;}
   .cfd-rubsit-table tbody td,.cfd-rubsit-table tfoot td{padding:5px 7px;font-size:11.5px;}
 
-  /* 169ª rodada (continuação 2) — pedido do usuário: linha extra de % logo
-     abaixo de cada linha de Status da Rubrica, no quadro "Status da Rubrica
-     × Situação da Comparação". Visualmente subordinada à linha de cima (sem
-     borda própria, fonte menor, cor apagada) pra ficar claro que é um
-     detalhamento dela, não uma linha de status própria — e com borda inferior
-     separando do próximo par de linhas. Escopado só a essa linha (classe
-     própria), não mexe nas outras linhas da mesma tabela. */
-  .cfd-rubsit-table tbody tr.cfd-pivot-pct-row td{color:var(--text-faint);font-size:12.5px;font-weight:600;font-style:italic;border-top:none;border-bottom:1px solid var(--border);padding-top:1px;padding-bottom:5px;}
-  .cfd-rubsit-table tbody tr.cfd-pivot-pct-row td:first-child{font-style:normal;}
+  /* 169ª rodada (continuação 7) — pedido do usuário (verbatim, depois de
+     ver a linha extra de % que a continuação 2 tinha criado): "esses % em
+     linha separada das quantidades não ficou legal, coloque ao lado de
+     quantidade e pinte as colunas Quantidade - % em cores diferentes para
+     não fica muito confuso". O % volta a ficar na MESMA célula da
+     quantidade (não mais numa linha própria abaixo), com cor própria
+     (var(--accent)) pra se distinguir visualmente do número principal sem
+     precisar de uma linha inteira a mais — ver .cfd-pivot-pct, usada em
+     cfdRenderStatusRubricaSituacao. */
+  .cfd-rubsit-table .cfd-pivot-pct{color:var(--accent);font-weight:600;font-size:10.5px;margin-left:3px;}
 
   /* 155ª rodada — mesmo pedido da 154ª, agora pro quadro "Comparação por
      Tipo de Rubrica" (par ao lado de "% por Situação"): colunas como
@@ -12712,25 +12713,26 @@ function cfdRenderStatusRubricaSituacao(d){
     return;
   }
   $("cfd-statussit-thead").innerHTML = `<tr><th>Status da Rubrica</th>${situacoes.map(s=>`<th>${esc(s)}</th>`).join("")}<th>Total</th></tr>`;
-  // 169ª rodada (continuação 2) — pedido do usuário (verbatim): "abra uma
-  // linha para situação da rubrica e nessa linha informes os respectivos
-  // percentuais de cada situação da rubrica" — cada status ganha uma SEGUNDA
-  // linha logo abaixo (cfd-pivot-pct-row, ver CSS), com o % de cada Situação
-  // sobre o total DAQUELA linha (não do total geral) — mesmo raciocínio de
-  // por_tiporubr no backend (cada status compara consigo mesmo, pra dar pra
-  // ver o perfil de situações DENTRO de cada status, não o peso de volume).
+  // 169ª rodada (continuação 7) — pedido do usuário (verbatim, depois de
+  // ver a linha "% da linha" da continuação 2): "esses % em linha separada
+  // das quantidades não ficou legal, coloque ao lado de quantidade e pinte
+  // as colunas Quantidade - % em cores diferentes para não fica muito
+  // confuso" — volta a ser UMA linha por status, com o % de cada Situação
+  // (sobre o total DAQUELA linha, mesmo raciocínio de por_tiporubr no
+  // backend) dentro da MESMA célula da quantidade, mas numa cor própria
+  // (.cfd-pivot-pct, ver CSS) pra não se confundir com o número principal.
   $("cfd-statussit-tbody").innerHTML = linhas.map(l=>{
     const rotulo = pill(l.status_rubrica, STATUS_RUBRICA_COLOR[l.status_rubrica]||"faint");
     const total = Number(l.total||0);
-    const celulas = l.valores.map(v=>`<td class="mono">${v ? Number(v).toLocaleString('pt-BR') : "—"}</td>`).join("");
-    const linhaPrincipal = `<tr><td>${rotulo}</td>${celulas}<td class="mono"><strong>${total.toLocaleString('pt-BR')}</strong></td></tr>`;
-    const celulasPct = l.valores.map(v=>{
-      if(!v || !total) return `<td class="mono">—</td>`;
-      const pct = Math.round(1000 * v / total) / 10;
-      return `<td class="mono">${pct.toLocaleString('pt-BR', {minimumFractionDigits:1, maximumFractionDigits:1})}%</td>`;
+    const celulas = l.valores.map(v=>{
+      if(!v) return `<td class="mono">—</td>`;
+      const pctHtml = total ? (()=>{
+        const pct = Math.round(1000 * v / total) / 10;
+        return ` <span class="cfd-pivot-pct">(${pct.toLocaleString('pt-BR', {minimumFractionDigits:1, maximumFractionDigits:1})}%)</span>`;
+      })() : "";
+      return `<td class="mono">${Number(v).toLocaleString('pt-BR')}${pctHtml}</td>`;
     }).join("");
-    const linhaPct = `<tr class="cfd-pivot-pct-row"><td>% da linha</td>${celulasPct}<td class="mono">${total ? "100%" : "—"}</td></tr>`;
-    return linhaPrincipal + linhaPct;
+    return `<tr><td>${rotulo}</td>${celulas}<td class="mono"><strong>${total.toLocaleString('pt-BR')}</strong></td></tr>`;
   }).join("");
   const totaisColuna = d.totais_situacao || [];
   $("cfd-statussit-tfoot").innerHTML = `<tr style="font-weight:600;background:var(--surface-2);border-top:2px solid var(--border);">
