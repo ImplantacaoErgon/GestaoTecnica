@@ -6,12 +6,13 @@ import os
 import signal
 import threading
 import traceback
+import urllib.parse
 import uuid
 from datetime import datetime, date, timedelta
 
 from flask import Flask, request, jsonify, send_from_directory, send_file, abort, session
 
-from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_renumeracao, cronograma_anomalias, cronograma_export, cronograma_export_xml, cronograma_comparacao, relatorio_executivo, relatorio_pdf, dashboard_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, drive_rubricas, rubricas_auto_update, comparacao_folha, comparacao_folha_import, comparacao_folha_dashboard_snapshots, comparacao_folha_rubrica_situacao_export, google_drive, migracao_quadro_export, requisitos_ia, migracao_rejeicoes, migracao_rejeicoes_import, ciclos_migracao_import
+from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_renumeracao, cronograma_anomalias, cronograma_export, cronograma_export_xml, cronograma_comparacao, relatorio_executivo, relatorio_pdf, dashboard_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, rubricas_depara_analise, drive_rubricas, rubricas_auto_update, comparacao_folha, comparacao_folha_import, comparacao_folha_dashboard_snapshots, comparacao_folha_rubrica_situacao_export, google_drive, migracao_quadro_export, requisitos_ia, migracao_rejeicoes, migracao_rejeicoes_import, ciclos_migracao_import
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 FRONTEND_DIR = os.environ.get(
@@ -3253,6 +3254,58 @@ def create_app():
         except Exception as e:
             return jsonify({"erro": f"Falha ao ler a planilha: {e}"}), 400
         return jsonify(resultado)
+
+    # 169ª rodada — pedido do usuário (verbatim): "crie um botão na Aba
+    # Rubricas que faça essa análise, mas que solicite o arquivo base de
+    # de_para de Verbas do Consist (Legado) com o Ergon, a outra tabela o
+    # sistema pode buscar da tabela Rubricas". Recebe o de_para (CSV/XLSX),
+    # cruza com `rubricas` do projeto e devolve o .xlsx com as abas (ver
+    # app/rubricas_depara_analise.py). Não grava nada no banco. Os totais vão
+    # também no cabeçalho X-Analise-Resumo (JSON URL-encoded), pra tela
+    # mostrar o resumo sem precisar abrir a planilha.
+    @app.post("/api/rubricas/analise-depara")
+    def rubricas_analise_depara():
+        projeto_id = request.form.get("projeto_id")
+        file = request.files.get("file")
+        if not (projeto_id and file):
+            return jsonify({"erro": "projeto_id e file são obrigatórios"}), 400
+        projeto = db.fetch_one(f"SELECT nome, sigla FROM projetos WHERE id = {db.q(projeto_id)}")
+        if not projeto:
+            abort(404)
+        try:
+            depara = rubricas_depara_analise.ler_depara(file.read(), file.filename or "")
+        except rubricas_depara_analise.DeparaErro as e:
+            return jsonify({"erro": str(e)}), 400
+        except Exception as e:
+            return jsonify({"erro": f"Falha ao ler o arquivo de_para: {e}"}), 400
+        rubricas = db.fetch_all(f"""
+            SELECT id, linha_planilha, codigo_ergon, verba_legado, descricao_legado,
+                   nome_abreviado, nome_extenso, status, empresas
+            FROM rubricas WHERE projeto_id = {db.q(projeto_id)}
+            ORDER BY linha_planilha NULLS LAST, codigo_ergon
+        """)
+        if not rubricas:
+            return jsonify({"erro": "Este projeto ainda não tem rubricas cadastradas — importe a planilha de Rubricas primeiro."}), 400
+        try:
+            resultado = rubricas_depara_analise.analisar(depara, rubricas)
+            xlsx_bytes = rubricas_depara_analise.gerar_planilha_bytes(resultado, {
+                "projeto": projeto.get("nome") or projeto.get("sigla"),
+                "arquivo_depara": file.filename,
+            })
+        except Exception as e:
+            print(f"[rubricas_depara_analise] erro: {e}", flush=True)
+            traceback.print_exc()
+            return jsonify({"erro": f"Falha ao gerar a análise: {e}"}), 500
+        base = (projeto.get("sigla") or projeto.get("nome") or "projeto").strip()
+        base = "".join(c if c.isalnum() or c in "-_" else "-" for c in base).strip("-") or "projeto"
+        resp = send_file(
+            io.BytesIO(xlsx_bytes),
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True, download_name=f"analise-depara-verbas-{base}-{date.today().isoformat()}.xlsx",
+        )
+        resp.headers["X-Analise-Resumo"] = urllib.parse.quote(json.dumps(resultado["contagens"]))
+        resp.headers["Access-Control-Expose-Headers"] = "X-Analise-Resumo, Content-Disposition"
+        return resp
 
     @app.post("/api/rubricas/importar/drive/preview")
     def importar_rubricas_drive_preview():

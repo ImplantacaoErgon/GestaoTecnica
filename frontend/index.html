@@ -1630,6 +1630,7 @@
       <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn secondary small" id="btn-atualizar-rubricas-drive" title="Busca automaticamente, no Google Drive, a versão mais recente da planilha de Levantamento de Rubricas">🔄 Atualizar Rubricas</button>
         <button class="btn secondary small" id="btn-rub-analise-datas" title="Mostra, para cada situação do funil, quantas rubricas têm aquela data preenchida x quantas realmente permanecem nela x quantas foram sobrepostas por uma data mais recente em outra etapa">📊 Análise de datas × situação</button>
+        <button class="btn secondary small" id="btn-rub-analise-depara" title="Cruza o de_para de Verbas (Consist/legado → Ergon) que você enviar com a tabela Rubricas e gera uma planilha com: verbas sem rubrica Ergon, rubricas sem verba legado, duplicidades e registros corretos (match)">🔍 Análise de_para de Verbas</button>
         <button class="btn secondary small" id="btn-import-rubricas">⬆ Importar planilha</button>
         <button class="btn small" id="btn-new-rubrica">+ Nova rubrica</button>
       </div>
@@ -2866,6 +2867,38 @@
   </div>
 </div>
 
+<!-- ================= MODAL: ANÁLISE DE_PARA DE VERBAS × RUBRICAS (169ª rodada) =================
+     Pedido do usuário (verbatim): "crie um botão na Aba Rubricas que faça essa
+     análise, mas que solicite o arquivo base de de_para de Verbas do Consist
+     (Legado) com o Ergon, a outra tabela o sistema pode buscar da tabela
+     Rubricas". O arquivo de_para (CSV ou XLSX) é enviado pro backend
+     (POST /api/rubricas/analise-depara), que cruza com a tabela `rubricas` do
+     projeto e devolve a planilha .xlsx pronta; os totais voltam no cabeçalho
+     X-Analise-Resumo pra aparecer aqui sem abrir o arquivo. Não grava nada. -->
+<div class="overlay" id="overlay-rub-depara" hidden>
+  <div class="modal" style="max-width:760px;">
+    <div class="modal-head"><h2>🔍 Análise de_para de Verbas × Rubricas</h2><button class="btn ghost" id="rdp-close">✕</button></div>
+    <div class="modal-body single-col">
+      <div class="field full">
+        <label>Arquivo de_para de Verbas (Consist/legado → Ergon)</label>
+        <input id="rdp-file" type="file" accept=".csv,.xlsx,.xlsm,.txt">
+        <p class="muted" style="margin-top:8px;">Envie o arquivo base do de_para (CSV ou Excel, com as colunas EMPRESA_ORIGEM, VERBA_ORIGEM e RUBRICA_ERGON). A outra ponta da comparação é a tabela Rubricas deste projeto, lida direto do sistema. Nada é gravado — o resultado é uma planilha para download com as abas: <b>Verbas sem Rubrica Ergon</b>, <b>Rubricas sem Verba Legado</b>, <b>Duplicidades</b>, <b>Registros corretos (match)</b> e <b>Divergências</b> (vínculos diferentes entre as duas fontes), mais um Resumo.</p>
+      </div>
+      <div id="rdp-resultado" hidden>
+        <div class="kpis" id="rdp-kpis" style="margin:14px 0 6px;"></div>
+        <div class="muted" id="rdp-aviso" style="font-size:12.5px;"></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <span id="rdp-hint" class="muted"></span>
+      <div style="display:flex;gap:8px;">
+        <button class="btn secondary" id="rdp-fechar">Fechar</button>
+        <button class="btn" id="rdp-gerar">Gerar análise</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ================= MODAL: IMPORTAR RUBRICAS (Excel) — 53ª rodada ================= -->
 <div class="overlay" id="overlay-importar-rubricas" hidden>
   <div class="modal wide">
@@ -4016,7 +4049,7 @@ async function afterProjetoReady(){
   aplicarMarcaNoTopo();
   fillStaticSelects();
   wireNav(); wireDashboardRefresh(); wireHorasRecursoFiltro(); wireRelatorioExecutivo(); wireDashboardPdf(); wireRelatorioAtividades(); wireAtividadeModal(); wireRequisitoModal(); wireFilters(); wireGanttToolbar(); wireImportCsv(); wireImportDocumentoTr(); wireImportCronograma(); wireExportarCronograma(); wireExportarCronogramaXml(); wireRemoverCronograma(); wireRemoverRequisitos(); wireVersoesCronograma(); wireReplanejarCronograma(); wireEdicaoLoteCronograma(); wireRenumerarCronograma();
-  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros(); wireQuadroCicloModal(); wireImportCiclosMigracao(); wireMigracaoRejeicoesPane(); wireRubricaModal(); wireRubricasFiltros(); wireRubAnaliseDatas(); wireRubKpisFiltro(); wireRubricasPorEmpresaFiltros(); wireImportRubricas(); wireComparacaoFolhaPane(); wireComparacaoFolhaDashboard(); wireVexFolhaComparacaoToggle(); wireVexMigracaoEvolucaoSelect();
+  wireConfiguracoes(); wireParametros(); wireMinhasAtividades(); wireManuaisPane(); wireAnalisarRequisitos(); wireFaturaModal(); wireFaturaFiltros(); wireAuditoriaPane(); wireRiscoModal(); wireMarcoModal(); wirePendenciaModal(); wireItemMigracaoModal(); wireMigracaoFiltros(); wireQuadroCicloModal(); wireImportCiclosMigracao(); wireMigracaoRejeicoesPane(); wireRubricaModal(); wireRubricasFiltros(); wireRubAnaliseDatas(); wireRubAnaliseDepara(); wireRubKpisFiltro(); wireRubricasPorEmpresaFiltros(); wireImportRubricas(); wireComparacaoFolhaPane(); wireComparacaoFolhaDashboard(); wireVexFolhaComparacaoToggle(); wireVexMigracaoEvolucaoSelect();
   setupCsvTemplateLink();
   await Promise.all([loadAtividades(), loadRequisitos(), loadRiscosMarcos(), loadFaturas(), loadPendencias(), loadItensMigracao(), loadRubricas(), loadRubricasAutoUpdateStatus()]);
   // Reaplica agora que REQUISITOS/ATIVIDADES já estão carregados — os selects
@@ -8428,6 +8461,83 @@ function openRubAnaliseDatasModal(){
   $("overlay-rub-analise-datas").hidden = false;
 }
 function closeRubAnaliseDatasModal(){ $("overlay-rub-analise-datas").hidden = true; }
+
+// 169ª rodada — botão "🔍 Análise de_para de Verbas" (aba Rubricas). Envia o
+// arquivo de_para pro backend, que cruza com a tabela Rubricas do projeto e
+// devolve o .xlsx pronto (ver app/rubricas_depara_analise.py). Não usa api()
+// porque a resposta é um arquivo, não JSON — replica só o que importa dela
+// (cabeçalho X-Usuario, aviso de sessão expirada, mensagem de erro do servidor).
+function wireRubAnaliseDepara(){
+  $("btn-rub-analise-depara").addEventListener("click", openRubDeparaModal);
+  $("rdp-close").addEventListener("click", closeRubDeparaModal);
+  $("rdp-fechar").addEventListener("click", closeRubDeparaModal);
+  $("overlay-rub-depara").addEventListener("click", e=>{ if(e.target.id==="overlay-rub-depara") closeRubDeparaModal(); });
+  $("rdp-gerar").addEventListener("click", gerarAnaliseDepara);
+}
+function openRubDeparaModal(){
+  $("rdp-file").value = "";
+  $("rdp-resultado").hidden = true;
+  $("rdp-hint").textContent = "";
+  $("overlay-rub-depara").hidden = false;
+}
+function closeRubDeparaModal(){ $("overlay-rub-depara").hidden = true; }
+
+async function gerarAnaliseDepara(){
+  const file = $("rdp-file").files[0];
+  if(!file){ toast("Selecione o arquivo de_para de Verbas.", true); return; }
+  const fd = new FormData(); fd.append("projeto_id", PROJETO.id); fd.append("file", file);
+  const btn = $("rdp-gerar");
+  btn.disabled = true; btn.textContent = "Analisando…";
+  $("rdp-hint").textContent = "Cruzando o de_para com a tabela Rubricas…";
+  try{
+    const headers = {};
+    if(USUARIO_LOGADO && USUARIO_LOGADO.nome) headers["X-Usuario"] = nomeParaHeaderHttp(USUARIO_LOGADO.nome);
+    const res = await fetch(API+"/rubricas/analise-depara", {method:"POST", headers, body: fd});
+    if(res.status === 401){
+      USUARIO_LOGADO = null;
+      toast("Sessão expirada. Faça login novamente.", true);
+      mostrarAuthScreen("login");
+      return;
+    }
+    if(!res.ok){
+      let msg = "Falha ao gerar a análise.";
+      try{ msg = (await res.json()).erro || msg; }catch(e){}
+      toast(msg, true);
+      $("rdp-hint").textContent = "";
+      return;
+    }
+    let c = {};
+    try{ c = JSON.parse(decodeURIComponent(res.headers.get("X-Analise-Resumo") || "{}")); }catch(e){}
+    const blob = await res.blob();
+    let nome = "analise-depara-verbas.xlsx";
+    const cd = res.headers.get("Content-Disposition") || "";
+    const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cd);
+    if(m) nome = decodeURIComponent(m[1]);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = nome;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 10000);
+    const fmt = n => Number(n||0).toLocaleString("pt-BR");
+    $("rdp-kpis").innerHTML = [
+      {l:"Verbas sem Rubrica Ergon", v:c.sem_rubrica_ergon},
+      {l:"Rubricas sem Verba Legado", v:c.rubricas_sem_verba},
+      {l:`Duplicidades (${fmt(c.duplicidades_grupos)} grupos)`, v:c.duplicidades},
+      {l:"Registros corretos (match)", v:c.match},
+      {l:"Divergências", v:c.divergencias},
+    ].map(k=>`<div class="kpi"><div class="label">${esc(k.l)}</div><div class="value">${fmt(k.v)}</div></div>`).join("");
+    $("rdp-aviso").textContent = `Lidos ${fmt(c.depara_registros)} registros do de_para`
+      + (c.depara_linhas_ignoradas ? ` (${fmt(c.depara_linhas_ignoradas)} linha(s) ignorada(s) — ver aba Avisos)` : "")
+      + ` e ${fmt(c.rubricas_linhas)} linhas da tabela Rubricas. A planilha "${nome}" foi baixada.`;
+    $("rdp-resultado").hidden = false;
+    $("rdp-hint").textContent = "";
+  }catch(e){
+    toast("Falha ao gerar a análise: " + (e && e.message ? e.message : e), true);
+    $("rdp-hint").textContent = "";
+  }finally{
+    btn.disabled = false; btn.textContent = "Gerar análise";
+  }
+}
 
 function abrirRadDetalhe(p){
   $("rad-detalhe-titulo").textContent = `Sobrepostas — tinham data de "${p.status}", mas outra etapa tem data mais recente`;
