@@ -1627,6 +1627,10 @@
         <option>Excluída</option>
       </select>
       <select id="rub-grupo"><option value="">Grupo de cálculo (todos)</option></select>
+      <!-- 170ª rodada — coluna "Motivo de Envio à Techne" da planilha (migration_048).
+           As opções vêm dos motivos presentes nos dados (ver renderRubricas); a opção
+           fixa "Enviadas sem motivo" lista o que já foi enviado à Techne sem justificativa. -->
+      <select id="rub-motivo-envio"><option value="">Motivo de envio (todos)</option></select>
       <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn secondary small" id="btn-atualizar-rubricas-drive" title="Busca automaticamente, no Google Drive, a versão mais recente da planilha de Levantamento de Rubricas">🔄 Atualizar Rubricas</button>
         <button class="btn secondary small" id="btn-rub-analise-datas" title="Mostra, para cada situação do funil, quantas rubricas têm aquela data preenchida x quantas realmente permanecem nela x quantas foram sobrepostas por uma data mais recente em outra etapa">📊 Análise de datas × situação</button>
@@ -1636,9 +1640,10 @@
       </div>
     </div>
     <div class="muted" id="rub-auto-update-status" style="font-size:12px;margin:-6px 0 10px 2px;"></div>
+    <div class="muted" id="rub-sem-motivo-aviso" style="font-size:12px;margin:-4px 0 10px 2px;" hidden></div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Código ERGON</th><th>Verba legado</th><th>Nome</th><th>Grupo de cálculo</th><th>Tipo</th><th>Empresas</th><th>Status</th><th>Analista</th></tr></thead>
+        <thead><tr><th>Código ERGON</th><th>Verba legado</th><th>Nome</th><th>Grupo de cálculo</th><th>Tipo</th><th>Empresas</th><th>Status</th><th>Motivo de envio à Techne</th><th>Analista</th></tr></thead>
         <tbody id="rubricas-tbody"></tbody>
       </table>
     </div>
@@ -2847,6 +2852,11 @@
       <div class="field"><label>Data Levantamento</label><input id="rub-data-levantamento" type="date"></div>
       <div class="field"><label>Revisado por</label><input id="rub-revisado-por" type="text"></div>
       <div class="field"><label>Data de envio à Techne</label><input id="rub-data-envio-techne" type="date"></div>
+      <div class="field full"><label>Motivo de envio à Techne (ex.: Programação)</label><textarea id="rub-motivo-envio-techne" rows="2" placeholder="Por que esta rubrica foi enviada à Techne — registre o motivo a cada nova mudança de regra"></textarea></div>
+      <div class="field full" id="rub-envios-hist-wrap" hidden>
+        <label>Histórico de envios à Techne</label>
+        <div class="muted" id="rub-envios-hist" style="font-size:12.5px;"></div>
+      </div>
       <div class="field"><label>Consultor Techne responsável</label><input id="rub-consultor-techne" type="text"></div>
       <div class="field"><label>Data de liberação para testes</label><input id="rub-data-liberacao-testes" type="date"></div>
       <div class="field"><label>Condições mínimas para testes</label><textarea id="rub-condicoes-minimas"></textarea></div>
@@ -8153,7 +8163,19 @@ function rubFilters(){
     codigoErgon: ($("rub-f-codigo-ergon").value||"").trim().toLowerCase(),
     status: $("rub-status").value,
     grupo: $("rub-grupo").value,
+    motivo: $("rub-motivo-envio").value,
   };
+}
+
+// 170ª rodada — "enviada sem motivo" = está hoje nas mãos da Techne (Enviada à
+// Techne / Liberada para testes / Em homologação) e o campo está vazio. Homologadas
+// ficam de fora de propósito: foram enviadas antes da coluna existir e o motivo
+// delas já não controla mudança de regra em andamento. Mesmo critério do backend
+// (list_rubricas ?sem_motivo_envio=1 e a prévia da importação).
+const RUB_SEM_MOTIVO = "__sem_motivo__";
+const RUB_STATUS_COM_TECHNE = ["Enviada à Techne","Liberada para testes","Em homologação"];
+function rubEnviadaSemMotivo(r){
+  return RUB_STATUS_COM_TECHNE.includes(r.status) && !(r.motivo_envio_techne||"").trim();
 }
 
 function renderRubricas(){
@@ -8163,12 +8185,32 @@ function renderRubricas(){
   const grupos = Array.from(new Set(RUBRICAS.map(r=>r.grupo_calculo).filter(Boolean))).sort((a,b)=>a.localeCompare(b,'pt-BR'));
   $("rub-grupo").innerHTML = `<option value="">Grupo de cálculo (todos)</option>` + grupos.map(g=>`<option ${g===grupoAtual?"selected":""}>${esc(g)}</option>`).join("");
 
+  // 170ª rodada — opções do filtro "Motivo de envio" (distintos presentes nos dados).
+  // `temColunaMotivo`: false enquanto a migration_048 não foi aplicada (a API não devolve
+  // o campo) — nesse caso o filtro e o aviso ficam escondidos em vez de mostrar tudo "sem motivo".
+  const temColunaMotivo = RUBRICAS.length>0 && ("motivo_envio_techne" in RUBRICAS[0]);
+  const motivoAtual = $("rub-motivo-envio").value;
+  const motivos = Array.from(new Set(RUBRICAS.map(r=>(r.motivo_envio_techne||"").trim()).filter(Boolean))).sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  $("rub-motivo-envio").hidden = !temColunaMotivo;
+  $("rub-motivo-envio").innerHTML = `<option value="">Motivo de envio (todos)</option><option value="${RUB_SEM_MOTIVO}" ${motivoAtual===RUB_SEM_MOTIVO?"selected":""}>⚠ Enviadas sem motivo</option>`
+    + motivos.map(m=>`<option value="${esc(m)}" ${m===motivoAtual?"selected":""}>${esc(m)}</option>`).join("");
+  const qtdSemMotivo = temColunaMotivo ? RUBRICAS.filter(r=>r.status!=="Excluída" && rubEnviadaSemMotivo(r)).length : 0;
+  const avisoSM = $("rub-sem-motivo-aviso");
+  avisoSM.hidden = !qtdSemMotivo;
+  avisoSM.innerHTML = qtdSemMotivo
+    ? `⚠ ${qtdSemMotivo} rubrica(s) em poder da Techne (enviada / liberada para testes / em homologação) estão <b>sem motivo de envio</b> — sem o motivo não dá para controlar as mudanças de regra. <a href="#" id="rub-sem-motivo-link">Ver quais</a>`
+    : "";
+  const lnkSM = $("rub-sem-motivo-link");
+  if(lnkSM) lnkSM.addEventListener("click", e=>{ e.preventDefault(); $("rub-motivo-envio").value = RUB_SEM_MOTIVO; renderRubricas(); });
+
   const f = rubFilters();
   const list = RUBRICAS.filter(r=>{
     if(f.status && r.status!==f.status) return false;
     if(f.grupo && r.grupo_calculo!==f.grupo) return false;
+    if(f.motivo === RUB_SEM_MOTIVO){ if(!rubEnviadaSemMotivo(r)) return false; }
+    else if(f.motivo && (r.motivo_envio_techne||"").trim()!==f.motivo) return false;
     if(f.codigoErgon && !(r.codigo_ergon||"").toLowerCase().includes(f.codigoErgon)) return false;
-    if(f.search && !([r.codigo_ergon,r.verba_legado,r.nome_abreviado,r.nome_extenso,r.descricao_legado].join(" ").toLowerCase().includes(f.search))) return false;
+    if(f.search && !([r.codigo_ergon,r.verba_legado,r.nome_abreviado,r.nome_extenso,r.descricao_legado,r.motivo_envio_techne].join(" ").toLowerCase().includes(f.search))) return false;
     return true;
   });
 
@@ -8230,16 +8272,17 @@ function renderRubricas(){
       <td class="mono">${esc(r.tipo||"—")}</td>
       <td class="muted">${empresasAplicaveis.length ? empresasAplicaveis.join(", ") : "—"}</td>
       <td>${pill(r.status, STATUS_RUBRICA_COLOR[r.status]||"faint")}</td>
+      <td class="muted">${r.motivo_envio_techne ? esc(r.motivo_envio_techne) : (rubEnviadaSemMotivo(r) && "motivo_envio_techne" in r ? `<span style="color:var(--warn,#b45309)">⚠ sem motivo</span>` : "—")}</td>
       <td class="muted">${esc(r.analista||"—")}</td>
     </tr>`;
-  }).join("") : `<tr class="empty-row"><td colspan="8">Nenhuma rubrica encontrada — importe a planilha ou cadastre manualmente.</td></tr>`;
+  }).join("") : `<tr class="empty-row"><td colspan="9">Nenhuma rubrica encontrada — importe a planilha ou cadastre manualmente.</td></tr>`;
   $("rubricas-tbody").querySelectorAll("tr[data-id]").forEach(tr=>{
     tr.addEventListener("click", ()=>openRubricaModal(byId(RUBRICAS, tr.dataset.id)));
   });
 }
 
 function wireRubricasFiltros(){
-  ["rub-search","rub-f-codigo-ergon","rub-status","rub-grupo"].forEach(id=>{
+  ["rub-search","rub-f-codigo-ergon","rub-status","rub-grupo","rub-motivo-envio"].forEach(id=>{
     $(id).addEventListener("input", renderRubricas);
     $(id).addEventListener("change", renderRubricas);
   });
@@ -8606,6 +8649,7 @@ function openRubricaModal(r){
   $("rub-data-levantamento").value = r?.data_levantamento || "";
   $("rub-revisado-por").value = r?.revisado_por || "";
   $("rub-data-envio-techne").value = r?.data_envio_techne || "";
+  $("rub-motivo-envio-techne").value = r?.motivo_envio_techne || "";
   $("rub-consultor-techne").value = r?.consultor_techne || "";
   $("rub-data-liberacao-testes").value = r?.data_liberacao_testes || "";
   $("rub-condicoes-minimas").value = r?.condicoes_minimas_testes || "";
@@ -8629,6 +8673,36 @@ function openRubricaModal(r){
 
   $("rub-delete").hidden = !r;
   $("overlay-rubrica").hidden = false;
+  carregarHistoricoEnviosTechne(r);
+}
+
+// 170ª rodada — histórico (temporalidade) do envio à Techne: cada mudança de data
+// de envio ou de motivo, com quem mudou e por qual caminho (planilha, atualização
+// automática, tela). Só aparece em rubrica já salva e depois da migration_048.
+async function carregarHistoricoEnviosTechne(r){
+  const wrap = $("rub-envios-hist-wrap"), box = $("rub-envios-hist");
+  wrap.hidden = true; box.innerHTML = "";
+  if(!r) return;
+  const idEsperado = r.id;
+  try{
+    const resp = await api(`/rubricas/${r.id}/envios-techne-historico`);
+    if(editingRubricaId !== idEsperado) return; // modal já mudou de rubrica/fechou
+    if(!resp || !resp.disponivel) return;
+    const itens = resp.itens || [];
+    wrap.hidden = false;
+    if(!itens.length){ box.textContent = "Nenhuma mudança registrada ainda."; return; }
+    const fmtD = v => v ? String(v).slice(0,10).split("-").reverse().join("/") : "—";
+    const fmtT = v => { const d = new Date(v); return isNaN(d) ? "" : d.toLocaleString("pt-BR"); };
+    box.innerHTML = itens.map(h=>{
+      const partes = [];
+      if((h.motivo_envio_techne||"") !== (h.motivo_anterior||""))
+        partes.push(`motivo: ${h.motivo_anterior ? `"${esc(h.motivo_anterior)}"` : "<i>vazio</i>"} → ${h.motivo_envio_techne ? `"${esc(h.motivo_envio_techne)}"` : "<i>vazio</i>"}`);
+      if(String(h.data_envio_techne||"").slice(0,10) !== String(h.data_envio_anterior||"").slice(0,10))
+        partes.push(`data de envio: ${fmtD(h.data_envio_anterior)} → ${fmtD(h.data_envio_techne)}`);
+      if(!partes.length) partes.push(`motivo: ${h.motivo_envio_techne ? `"${esc(h.motivo_envio_techne)}"` : "<i>vazio</i>"} · data de envio: ${fmtD(h.data_envio_techne)}`);
+      return `<div style="padding:3px 0;border-bottom:1px solid var(--line,#e5e7eb);"><b>${esc(fmtT(h.registrado_em))}</b> — ${partes.join("; ")}<span class="muted"> (${esc(h.registrado_por||"usuário não identificado")}${h.origem ? " · "+esc(h.origem) : ""})</span></div>`;
+    }).join("");
+  }catch(e){}
 }
 function closeRubricaModal(){ $("overlay-rubrica").hidden = true; editingRubricaId = null; }
 
@@ -8663,6 +8737,7 @@ async function saveRubrica(){
     data_levantamento: $("rub-data-levantamento").value || null,
     revisado_por: $("rub-revisado-por").value.trim() || null,
     data_envio_techne: $("rub-data-envio-techne").value || null,
+    motivo_envio_techne: $("rub-motivo-envio-techne").value.trim() || null,
     consultor_techne: $("rub-consultor-techne").value.trim() || null,
     data_liberacao_testes: $("rub-data-liberacao-testes").value || null,
     condicoes_minimas_testes: $("rub-condicoes-minimas").value.trim() || null,

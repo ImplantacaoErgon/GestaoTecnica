@@ -22,6 +22,7 @@ reimportar sem duplicar — ver db/migration_029_rubricas.sql.
 """
 import io
 import re
+import unicodedata
 from datetime import date, datetime
 
 import openpyxl
@@ -49,49 +50,135 @@ LINHA_PRIMEIRA_DADOS = 3
 ABA_EXCLUIDAS = "Excluídas"
 LINHA_PRIMEIRA_DADOS_EXCLUIDAS = 2
 
-# índice de coluna (0-based, como as colunas do Excel enumeradas a partir de A=0)
-# -> nome do campo em `rubricas`. Levantado direto do cabeçalho real da planilha
-# do cliente (linha 2) — se o cliente reorganizar colunas, isso quebra e o
-# aviso de cabeçalho não-batido em parse_rubricas_document() pega o problema
-# antes de importar qualquer coisa errada.
-COLUNAS = {
-    0: "analista", 1: "verba_legado", 2: "descricao_legado", 3: "codigo_ergon",
-    4: "nome_abreviado", 6: "nome_extenso", 8: "tipo", 9: "grupo_calculo",
-    10: "ordem_grupo_calculo", 11: "legislacao", 12: "valor_formula",
-    13: "quant_autorizado", 14: "fato_origem",
-    15: "validacao_compatibilidade", 16: "validacao_incompatibilidade",
-    17: "regime_vinculo_direito", 18: "categoria_cargo_direito", 19: "secretaria",
-    20: "outras_condicoes", 21: "incompatibilidade", 22: "periodicidade",
-    23: "totalizacao", 24: "regra_negocio", 25: "data_levantamento",
-    26: "questionamentos_juridico", 27: "revisado_por", 28: "observacoes_finais",
-    29: "situacao_planilha", 30: "data_envio_techne", 31: "data_liberacao_testes",
-    32: "observacoes_liberacao", 33: "consultor_techne",
-    34: "condicoes_minimas_testes", 35: "questionamentos_consultor",
-    36: "responsavel_homologacao", 37: "data_inicio_homologacao",
-    38: "data_homologacao", 39: "observacoes_homologacao",
+# 170ª rodada — a planilha do cliente ganhou a coluna "Motivo de Envio à
+# Techne" NO MEIO do cabeçalho (logo depois de "Data de envio à TECHNE"),
+# deslocando em 1 posição todas as colunas seguintes (liberação, homologação,
+# empresas E01..E24, códigos COD Exx, incidências). O mapeamento anterior era
+# por POSIÇÃO FIXA de coluna (0=Análise, 1=Verba 07 ...) — com a planilha
+# nova ele não dava erro nenhum: gravava, em silêncio, a coluna errada em
+# cada campo (ex: a data de liberação lida do lugar do motivo, empresas e
+# incidências trocadas, status de rubricas homologadas recalculado errado).
+# Agora cada campo é localizado pelo TEXTO DO CABEÇALHO (linha 2): inserir,
+# tirar ou reordenar colunas não afeta mais a importação, e uma coluna nova
+# desconhecida é simplesmente ignorada. Cabeçalho comparado sem acento, sem
+# diferença de maiúscula/minúscula e com espaços/quebras de linha colapsados.
+#
+# (campo em `rubricas`, cabeçalho normalizado, casa_por_prefixo) — prefixo
+# vale pros cabeçalhos longos da planilha, que trazem uma explicação
+# entre parênteses depois do nome ("Nome Abreviado (30 caracteres)").
+CAMPOS_POR_CABECALHO = (
+    ("analista", "analise", False),
+    ("verba_legado", "verba 07", False),
+    ("descricao_legado", "descricao e07", False),
+    ("codigo_ergon", "rubrica ergon", False),
+    ("nome_abreviado", "nome abreviado", True),
+    ("nome_extenso", "nome por extenso", True),
+    ("tipo", "tipo de rubrica", False),
+    ("grupo_calculo", "grupo de calculo", False),
+    ("ordem_grupo_calculo", "ordem grupo de calculo", False),
+    ("legislacao", "legislacao", False),
+    ("valor_formula", "r$ / %", False),
+    ("quant_autorizado", "quant. autorizado", False),
+    ("fato_origem", "fato origem", False),
+    ("validacao_compatibilidade", "validacao compatibilidade", False),
+    ("validacao_incompatibilidade", "validacao incompatibilidade", False),
+    ("regime_vinculo_direito", "regime juridico", True),
+    ("categoria_cargo_direito", "categoria/subcategoria", True),
+    ("secretaria", "secretaria", False),
+    ("outras_condicoes", "outras condicoes", True),
+    ("incompatibilidade", "incompatibilidade", True),
+    ("periodicidade", "periodicidade", True),
+    ("totalizacao", "totalizacao", True),
+    ("regra_negocio", "regra de negocio", False),
+    ("data_levantamento", "data levantamento", False),
+    ("questionamentos_juridico", "questionamentos ao juridico", False),
+    ("revisado_por", "revisado por", True),
+    ("observacoes_finais", "observacoes finais", False),
+    ("situacao_planilha", "ep", False),
+    ("data_envio_techne", "data de envio a techne", False),
+    ("motivo_envio_techne", "motivo de envio a techne", False),
+    ("data_liberacao_testes", "data de liberacao para testes", False),
+    ("observacoes_liberacao", "observacoes da liberacao", False),
+    ("consultor_techne", "techne consultor responsavel", False),
+    ("condicoes_minimas_testes", "techne condicoes minimas para testes", False),
+    ("questionamentos_consultor", "techne questionamentos e duvidas do consultor", False),
+    ("responsavel_homologacao", "responsavel", False),
+    ("data_inicio_homologacao", "data inicio dos testes de homologacao", False),
+    ("data_homologacao", "data da homologacao", False),
+    ("observacoes_homologacao", "observacoes", False),
+)
+# Sem estes a planilha não é a esperada — a importação é barrada (os demais
+# só geram um aviso e o campo fica vazio).
+CAMPOS_ESSENCIAIS = ("verba_legado", "codigo_ergon", "nome_abreviado")
+
+# Flags "SIM"/"-" de quais empresas essa rubrica se aplica (cabeçalho "E01") e
+# o código/verba específico dela em cada uma (cabeçalho "COD E01") — ver
+# comentário na migração 029. As siglas são descobertas pelo cabeçalho (uma
+# empresa nova na planilha entra sozinha); a ORDEM entre as faixas não
+# importa mais.
+_RE_CAB_EMPRESA_FLAG = re.compile(r"^e(\d{2})$")
+_RE_CAB_EMPRESA_CODIGO = re.compile(r"^cod e(\d{2})$")
+
+# cabeçalho normalizado -> chave em `incidencias`
+INCIDENCIA_POR_CABECALHO = {
+    "incide ir": "ir", "incide rgps": "rgps", "incide rpps": "rpps", "incide fgts": "fgts",
+    "incide 13o": "decimo_terceiro", "compoe remuneracao": "compoe_remuneracao",
+    "incide excedente": "incide_excedente", "incorpora aposentadoria": "incorpora_aposentadoria",
+    "base consignacoes": "base_consignacoes", "base quinquenio": "base_quinquenio",
+    "base quinquenio proporcional": "base_quinquenio_proporcional",
+    "base hora extra": "base_hora_extra", "base complemento sm": "base_complemento_sm",
+    "base faltas": "base_faltas", "1/3 ferias": "um_terco_ferias",
+    "adiantamento 13o salario": "adiantamento_13", "ressarcimento cessao": "ressarcimento_cessao",
 }
 
-# Flags "SIM"/"-" de quais empresas essa rubrica se aplica, e o código específico
-# que ela tem em cada uma (colunas separadas na planilha — ver comentário na
-# migração). Note que a ORDEM das siglas não é a mesma entre as duas faixas de
-# coluna (E16 aparece por último nas flags e primeiro nos códigos) — é assim na
-# planilha original, não é erro de digitação aqui.
-EMPRESA_FLAG_COL = {
-    40: "E01", 41: "E03", 42: "E04", 43: "E06", 44: "E07",
-    45: "E08", 46: "E13", 47: "E18", 48: "E23", 49: "E24", 50: "E16",
-}
-EMPRESA_CODIGO_COL = {
-    51: "E16", 52: "E01", 53: "E03", 54: "E04", 55: "E06",
-    56: "E07", 57: "E08", 58: "E13", 59: "E18", 60: "E23", 61: "E24",
-}
 
-INCIDENCIA_COL = {
-    62: "ir", 63: "rgps", 64: "rpps", 65: "fgts", 66: "decimo_terceiro",
-    67: "compoe_remuneracao", 68: "incide_excedente", 69: "incorpora_aposentadoria",
-    70: "base_consignacoes", 71: "base_quinquenio", 72: "base_quinquenio_proporcional",
-    73: "base_hora_extra", 74: "base_complemento_sm", 75: "base_faltas",
-    76: "um_terco_ferias", 77: "adiantamento_13", 78: "ressarcimento_cessao",
-}
+def _normaliza_cabecalho(valor):
+    """"Motivo de Envio à Techne" -> "motivo de envio a techne". NFKD também
+    reduz "13º" a "13o"."""
+    if valor is None:
+        return ""
+    s = unicodedata.normalize("NFKD", str(valor))
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    return re.sub(r"\s+", " ", s.replace("\xa0", " ")).strip().lower()
+
+
+def mapear_colunas(ws, linha_cabecalho=None):
+    """Lê o cabeçalho e devolve {"campos": {campo: coluna_1based},
+    "empresa_flag": {sigla: col}, "empresa_codigo": {sigla: col},
+    "incidencias": {chave: col}, "nao_encontrados": [campo, ...]}."""
+    linha = linha_cabecalho or LINHA_CABECALHO
+    cabecalhos = [
+        (col, _normaliza_cabecalho(ws.cell(row=linha, column=col).value))
+        for col in range(1, (ws.max_column or 0) + 1)
+    ]
+    cabecalhos = [(c, h) for c, h in cabecalhos if h]
+    usadas = set()
+    campos = {}
+    for campo, esperado, por_prefixo in CAMPOS_POR_CABECALHO:
+        achada = next((c for c, h in cabecalhos if c not in usadas and h == esperado), None)
+        if achada is None and por_prefixo:
+            achada = next((c for c, h in cabecalhos if c not in usadas and h.startswith(esperado)), None)
+        if achada is not None:
+            campos[campo] = achada
+            usadas.add(achada)
+    flags, codigos, incidencias = {}, {}, {}
+    for col, h in cabecalhos:
+        m = _RE_CAB_EMPRESA_FLAG.match(h)
+        if m:
+            flags[f"E{m.group(1)}"] = col
+            continue
+        m = _RE_CAB_EMPRESA_CODIGO.match(h)
+        if m:
+            codigos[f"E{m.group(1)}"] = col
+            continue
+        if h in INCIDENCIA_POR_CABECALHO:
+            incidencias[INCIDENCIA_POR_CABECALHO[h]] = col
+    return {
+        "campos": campos, "empresa_flag": flags, "empresa_codigo": codigos,
+        "incidencias": incidencias,
+        "nao_encontrados": [c for c, _e, _p in CAMPOS_POR_CABECALHO if c not in campos],
+    }
+
 
 DATE_FIELDS = {
     "data_levantamento", "data_envio_techne", "data_liberacao_testes",
@@ -184,7 +271,7 @@ _STATUS_POR_CAMPO_DATA = [
 ]
 
 
-def _linha_tachada(ws, r):
+def _linha_tachada(ws, r, colunas=(2, 3, 4, 5)):
     """167ª rodada — pedido do usuário (verbatim): "Se uma linha estiver
     'tachada' pode considerar excluída". O cliente usa formatação de
     tachado (strikethrough) na aba "Levantamento Rubricas" pra indicar,
@@ -196,7 +283,7 @@ def _linha_tachada(ws, r):
     delas, com valor preenchido, estiver com tachado. `data_only=True` no
     load do workbook não impede o acesso a `cell.font` — só afeta se uma
     fórmula devolve o valor calculado ou o texto da fórmula."""
-    for col in (2, 3, 4, 5):
+    for col in colunas:
         cel = ws.cell(row=r, column=col)
         if cel.value is not None and cel.font and cel.font.strike:
             return True
@@ -322,11 +409,30 @@ def parse_rubricas_document(conteudo_bytes, nome_arquivo=""):
             "última vez. Confira antes de importar."
         )
 
+    mapa = mapear_colunas(ws)
+    campos_col = mapa["campos"]
+    faltando = [c for c in CAMPOS_ESSENCIAIS if c not in campos_col]
+    if faltando:
+        raise RubricasImportError(
+            f'Não encontrei na linha {LINHA_CABECALHO} da aba "{ABA_ESPERADA}" o cabeçalho de: '
+            f'{", ".join(faltando)} — a planilha pode ter mudado de layout. Confira antes de importar.'
+        )
     itens = []
     avisos = [aviso_aba] if aviso_aba else []
+    ausentes = [c for c in mapa["nao_encontrados"] if c not in CAMPOS_ESSENCIAIS]
+    if ausentes:
+        rotulos = {campo: cab for campo, cab, _p in CAMPOS_POR_CABECALHO}
+        avisos.append(
+            "Colunas não encontradas no cabeçalho da planilha (os campos ficam vazios nesta importação): "
+            + ", ".join(f'"{rotulos[c].capitalize()}"' for c in ausentes) + "."
+        )
+    col_verba = campos_col["verba_legado"]
+    col_descricao = campos_col.get("descricao_legado")
+    col_codigo = campos_col["codigo_ergon"]
+    col_nome = campos_col["nome_abreviado"]
     for r in range(LINHA_PRIMEIRA_DADOS, ws.max_row + 1):
-        verba = ws.cell(row=r, column=2).value
-        descricao = ws.cell(row=r, column=3).value
+        verba = ws.cell(row=r, column=col_verba).value
+        descricao = ws.cell(row=r, column=col_descricao).value if col_descricao else None
         # 150ª rodada — pedido do usuário (verbatim): "Quero ver a linha 302
         # Código Ergon = 515 e não achei em nosso sistema." Causa raiz: essa
         # linha (e mais 130 outras na planilha real do cliente, levantado em
@@ -338,16 +444,16 @@ def parse_rubricas_document(conteudo_bytes, nome_arquivo=""):
         # o fim da folha, sem dado nenhum). Agora só é tratada como vazia se
         # TAMBÉM não tiver Código ERGON nem Nome Abreviado — as duas colunas
         # que de fato identificam a rubrica.
-        codigo_ergon_bruto = ws.cell(row=r, column=4).value
-        nome_abreviado_bruto = ws.cell(row=r, column=5).value
+        codigo_ergon_bruto = ws.cell(row=r, column=col_codigo).value
+        nome_abreviado_bruto = ws.cell(row=r, column=col_nome).value
         if (verba is None and not _texto(descricao)
                 and codigo_ergon_bruto is None and not _texto(nome_abreviado_bruto)):
             continue  # linha em branco de verdade
 
         item = {"linha_planilha": r}
         notas = []
-        for idx, campo in COLUNAS.items():
-            v = ws.cell(row=r, column=idx + 1).value
+        for campo, coluna in campos_col.items():
+            v = ws.cell(row=r, column=coluna).value
             if campo in DATE_FIELDS:
                 iso, nota = _data_com_nota(v)
                 item[campo] = iso
@@ -366,23 +472,23 @@ def parse_rubricas_document(conteudo_bytes, nome_arquivo=""):
                 item[campo] = _texto(v)
 
         empresas = {}
-        for idx, sigla in EMPRESA_FLAG_COL.items():
-            flag = _texto(ws.cell(row=r, column=idx + 1).value)
+        for sigla, coluna in mapa["empresa_flag"].items():
+            flag = _texto(ws.cell(row=r, column=coluna).value)
             empresas.setdefault(sigla, {})["aplica"] = bool(flag) and flag.upper() == "SIM"
-        for idx, sigla in EMPRESA_CODIGO_COL.items():
-            codigo = _texto(ws.cell(row=r, column=idx + 1).value)
+        for sigla, coluna in mapa["empresa_codigo"].items():
+            codigo = _texto(ws.cell(row=r, column=coluna).value)
             if codigo:
                 empresas.setdefault(sigla, {})["codigo"] = codigo
         item["empresas"] = {k: v for k, v in empresas.items() if v.get("aplica") or v.get("codigo")}
 
         incidencias = {}
-        for idx, chave in INCIDENCIA_COL.items():
-            v = _texto(ws.cell(row=r, column=idx + 1).value)
+        for chave, coluna in mapa["incidencias"].items():
+            v = _texto(ws.cell(row=r, column=coluna).value)
             if v:
                 incidencias[chave] = v
         item["incidencias"] = incidencias
 
-        if _linha_tachada(ws, r):
+        if _linha_tachada(ws, r, (col_verba, col_descricao or col_verba, col_codigo, col_nome)):
             item["status"] = "Excluída"
             identificacao = item.get("codigo_ergon") or item.get("nome_abreviado") or f"linha {r}"
             avisos.append(

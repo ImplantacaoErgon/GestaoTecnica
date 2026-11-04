@@ -100,7 +100,7 @@ def _executar_atualizacao(projeto_id, janela):
         conteudo, nome_arquivo, _modificado_em = drive_rubricas.baixar_planilha_mais_recente()
         resultado = rubricas_import.parse_rubricas_document(conteudo, nome_arquivo or "")
         itens = [it for it in (resultado.get("itens") or []) if it.get("linha_planilha")]
-        inseridos, atualizados = upsert_rubricas(projeto_id, itens) if itens else (0, 0)
+        inseridos, atualizados = upsert_rubricas(projeto_id, itens, usuario=None, origem="atualização automática") if itens else (0, 0)
         # 156ª rodada -- mesmo caminho do botão manual (ver docstring do
         # módulo): a atualização automática também usa a planilha mais
         # recente como fonte de verdade de "o que ainda existe", então uma

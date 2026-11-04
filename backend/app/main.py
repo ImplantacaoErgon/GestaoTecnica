@@ -180,7 +180,7 @@ RUBRICA_UPSERT_COLUMNS = [
     "outras_condicoes", "incompatibilidade", "periodicidade", "totalizacao", "regra_negocio",
     "empresas", "incidencias",
     "status", "situacao_planilha", "data_levantamento", "revisado_por",
-    "questionamentos_juridico", "data_envio_techne", "consultor_techne",
+    "questionamentos_juridico", "data_envio_techne", "motivo_envio_techne", "consultor_techne",
     "data_liberacao_testes", "observacoes_liberacao", "condicoes_minimas_testes",
     "questionamentos_consultor", "responsavel_homologacao", "data_inicio_homologacao",
     "data_homologacao", "observacoes_homologacao", "observacoes_finais", "notas_importacao",
@@ -189,6 +189,61 @@ RUBRICA_UPSERT_COLUMNS = [
 # atividade_id (vínculo com a Frente de Trabalho/atividade, que a importação não seta
 # sozinha) e sem linha_planilha (só a importação atribui isso).
 RUBRICA_FIELDS = ["projeto_id", "atividade_id"] + RUBRICA_UPSERT_COLUMNS
+
+# 170ª rodada — colunas que só existem depois de db/migration_048 (aplicada à mão
+# no Supabase, então o deploy pode chegar ANTES da migração). Enquanto a coluna
+# não existe, o código as tira das listas de gravação em vez de falhar com
+# "column does not exist" em toda importação/edição de rubrica.
+RUBRICA_COLUNAS_POS_MIGRACAO = ("motivo_envio_techne",)
+_rubricas_colunas_pos_migracao_ok = False
+
+
+def rubricas_motivo_envio_disponivel():
+    """True se rubricas.motivo_envio_techne (migration_048) já existe. Só
+    cacheia o True (depois de aplicada a migração a coluna não some); enquanto
+    False, reconsulta o information_schema a cada chamada — barato, e a
+    migração passa a valer sem precisar reiniciar o servidor."""
+    global _rubricas_colunas_pos_migracao_ok
+    if _rubricas_colunas_pos_migracao_ok:
+        return True
+    try:
+        row = db.fetch_one(
+            "SELECT 1 AS ok FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = 'rubricas' "
+            "AND column_name = 'motivo_envio_techne'"
+        )
+    except Exception:
+        return False
+    _rubricas_colunas_pos_migracao_ok = bool(row)
+    return _rubricas_colunas_pos_migracao_ok
+
+
+def _rubrica_campos_gravaveis(campos):
+    """Remove de `campos` as colunas pós-migração ainda inexistentes."""
+    if rubricas_motivo_envio_disponivel():
+        return list(campos)
+    return [c for c in campos if c not in RUBRICA_COLUNAS_POS_MIGRACAO]
+
+
+def _validar_motivo_rubrica(data):
+    """Erro claro (em vez de 'column does not exist') se alguém tenta gravar um
+    motivo de envio à Techne antes da migration_048 ser aplicada."""
+    if (data.get("motivo_envio_techne") or "").strip() and not rubricas_motivo_envio_disponivel():
+        raise ValueError(
+            "A coluna 'Motivo de envio à Techne' ainda não existe no banco — "
+            "rode db/migration_048_rubricas_motivo_envio_techne.sql no Supabase antes de preenchê-la."
+        )
+
+
+def _prelude_autoria_rubricas(usuario, origem):
+    """SET LOCAL lido pelo trigger de histórico de envio à Techne
+    (migration_048): quem mudou e por qual caminho."""
+    partes = []
+    if usuario:
+        partes.append(f"SET LOCAL app.usuario_atual = {db.q(usuario)};")
+    if origem:
+        partes.append(f"SET LOCAL app.origem_mudanca = {db.q(origem)};")
+    return "\n".join(partes)
 RECURSO_FIELDS = ["nome", "tipo_vinculo", "empresa", "cargo", "email", "telefone", "controla_horas", "ativo"]
 ETAPA_FIELDS = ["projeto_id", "numero", "nome", "descricao", "data_inicio_prev", "data_fim_prev"]
 FRENTE_FIELDS = ["projeto_id", "nome", "descricao", "cor_hex", "ordem", "ativo"]
@@ -336,14 +391,21 @@ def upsert_requisitos(projeto_id, linhas):
     return inseridos, atualizados
 
 
-def upsert_rubricas(projeto_id, linhas):
+def upsert_rubricas(projeto_id, linhas, usuario=None, origem="importação de planilha"):
     """linhas: lista de dicts com chaves de RUBRICA_UPSERT_COLUMNS + "linha_planilha"
     (ausentes -> NULL). Faz upsert por (projeto_id, linha_planilha) — reimportar a
     mesma planilha atualiza em vez de duplicar (ver comentário em
     db/migration_029_rubricas.sql sobre por que NÃO é por código ERGON/verba: a mesma
     regra pode aparecer em mais de uma linha, uma por empresa). Deduplica
     linha_planilha repetida dentro do próprio lote pelo mesmo motivo que
-    upsert_requisitos deduplica código. Retorna (inseridos, atualizados)."""
+    upsert_requisitos deduplica código. Retorna (inseridos, atualizados).
+
+    170ª rodada: `motivo_envio_techne` só entra no INSERT/SET quando (a) a
+    migration_048 já foi aplicada e (b) a planilha importada TEM essa coluna
+    (o importador só põe a chave no item quando o cabeçalho existe) — assim um
+    arquivo no layout antigo não apaga motivos já preenchidos. `usuario`/`origem`
+    vão por SET LOCAL na mesma transação, pro trigger de histórico saber quem
+    e por onde mudou o envio à Techne."""
     por_linha = {}
     for l in linhas:
         if l.get("linha_planilha"):
@@ -361,18 +423,24 @@ def upsert_rubricas(projeto_id, linhas):
     inseridos = sum(1 for l in linhas if l["linha_planilha"] not in existentes)
     atualizados = len(linhas) - inseridos
 
-    colunas = ["linha_planilha"] + RUBRICA_UPSERT_COLUMNS
+    upsert_cols = _rubrica_campos_gravaveis(RUBRICA_UPSERT_COLUMNS)
+    if not any("motivo_envio_techne" in l for l in linhas):
+        upsert_cols = [c for c in upsert_cols if c != "motivo_envio_techne"]
+    colunas = ["linha_planilha"] + upsert_cols
     values_sql = ", ".join(
         "(" + db.q(projeto_id) + ", " + ", ".join(_valor_sql(l.get(col)) for col in colunas) + ")"
         for l in linhas
     )
-    set_clause = ", ".join(f"{col} = EXCLUDED.{col}" for col in RUBRICA_UPSERT_COLUMNS)
+    set_clause = ", ".join(f"{col} = EXCLUDED.{col}" for col in upsert_cols)
     sql = (
         f"INSERT INTO rubricas (projeto_id, {', '.join(colunas)}) VALUES "
         + values_sql
         + f" ON CONFLICT (projeto_id, linha_planilha) WHERE linha_planilha IS NOT NULL "
         + f"DO UPDATE SET {set_clause}"
     )
+    prelude = _prelude_autoria_rubricas(usuario, origem)
+    if prelude:
+        sql = f"BEGIN;\n{prelude}\n{sql};\nCOMMIT"
     db.execute(sql, timeout=120)
     return inseridos, atualizados
 
@@ -392,6 +460,44 @@ def _rubricas_preview_resultado(projeto_id, conteudo_bytes, nome_arquivo):
     existentes = {r["linha_planilha"] for r in existentes_rows}
     for it in resultado["itens"]:
         it["ja_existe"] = it["linha_planilha"] in existentes
+
+    # 170ª rodada — coluna "Motivo de Envio à Techne": avisos de migração
+    # pendente, de linhas enviadas sem motivo e de motivos que vão mudar.
+    planilha_tem_motivo = any("motivo_envio_techne" in it for it in resultado["itens"])
+    if planilha_tem_motivo:
+        if not rubricas_motivo_envio_disponivel():
+            resultado["avisos"].append(
+                "A planilha tem a coluna \"Motivo de envio à Techne\", mas o banco ainda não — rode "
+                "db/migration_048_rubricas_motivo_envio_techne.sql no Supabase. Até lá o motivo NÃO será gravado."
+            )
+        else:
+            atuais = {
+                r["linha_planilha"]: (r.get("motivo_envio_techne") or "").strip()
+                for r in db.fetch_all(
+                    "SELECT linha_planilha, motivo_envio_techne FROM rubricas "
+                    f"WHERE projeto_id = {db.q(projeto_id)} AND linha_planilha IS NOT NULL"
+                )
+            }
+            mudam = [
+                it for it in resultado["itens"]
+                if it["ja_existe"] and (it.get("motivo_envio_techne") or "").strip() != atuais.get(it["linha_planilha"], "")
+            ]
+            sem_motivo = [
+                it for it in resultado["itens"]
+                if it.get("status") in ("Enviada à Techne", "Liberada para testes", "Em homologação")
+                and not (it.get("motivo_envio_techne") or "").strip()
+            ]
+            resultado["resumo"]["motivo_envio_alterado"] = len(mudam)
+            resultado["resumo"]["enviadas_sem_motivo"] = len(sem_motivo)
+            if mudam:
+                resultado["avisos"].append(
+                    f"{len(mudam)} rubrica(s) terão o \"Motivo de envio à Techne\" alterado nesta importação "
+                    "(a mudança fica registrada no histórico de envios à Techne)."
+                )
+            if sem_motivo:
+                resultado["avisos"].append(
+                    f"{len(sem_motivo)} rubrica(s) em poder da Techne (enviada / liberada para testes / em homologação) estão sem \"Motivo de envio à Techne\" preenchido."
+                )
 
     # 156ª rodada — pedido do usuário (verbatim): "caso uma linha da
     # planilha tenha sumido considere que essa linha foi excluída, crie esse
@@ -643,7 +749,7 @@ def _valor_sql(v):
     return db.q(v)
 
 
-def insert_row(table, data, allowed):
+def insert_row(table, data, allowed, prelude=""):
     cols, vals = [], []
     for f in allowed:
         if f in data and data[f] not in (None, ""):
@@ -652,7 +758,7 @@ def insert_row(table, data, allowed):
     if not cols:
         raise ValueError("Nenhum campo válido informado.")
     sql = f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join(vals)}) RETURNING *"
-    row = db.execute_returning_one(sql)
+    row = db.execute_returning_one(sql, prelude=prelude)
     # Gancho de auditoria (32ª rodada) — ver auditoria.py. Ponto único: cobre
     # toda criação que passa por aqui, sem precisar tocar em cada rota.
     auditoria.registrar_criacao(table, row)
@@ -3173,7 +3279,16 @@ def create_app():
             condicoes.append(
                 "(r.nome_abreviado ILIKE '%" + termo + "%' OR r.nome_extenso ILIKE '%" + termo + "%' "
                 "OR r.codigo_ergon ILIKE '%" + termo + "%' OR r.verba_legado ILIKE '%" + termo + "%' "
-                "OR r.descricao_legado ILIKE '%" + termo + "%')"
+                "OR r.descricao_legado ILIKE '%" + termo + "%'"
+                + (" OR r.motivo_envio_techne ILIKE '%" + termo + "%'" if rubricas_motivo_envio_disponivel() else "")
+                + ")"
+            )
+        if request.args.get("sem_motivo_envio") and rubricas_motivo_envio_disponivel():
+            # 170ª rodada — rubricas hoje em poder da Techne (enviada / liberada para
+            # testes / em homologação) mas sem o motivo informado.
+            condicoes.append(
+                "r.status IN ('Enviada à Techne', 'Liberada para testes', 'Em homologação') "
+                "AND COALESCE(btrim(r.motivo_envio_techne), '') = ''"
             )
         sql = f"""
             SELECT r.*, a.codigo_wbs AS atividade_codigo, a.nome AS atividade_nome
@@ -3226,14 +3341,43 @@ def create_app():
 
     @app.post("/api/rubricas")
     def create_rubrica():
-        return jsonify(insert_row("rubricas", request.get_json(force=True), RUBRICA_FIELDS)), 201
+        data = request.get_json(force=True)
+        try:
+            _validar_motivo_rubrica(data)
+        except ValueError as e:
+            return jsonify({"erro": str(e)}), 400
+        prelude = _prelude_autoria_rubricas(request.headers.get("X-Usuario", ""), "edição na tela")
+        return jsonify(insert_row("rubricas", data, _rubrica_campos_gravaveis(RUBRICA_FIELDS), prelude=prelude)), 201
 
     @app.put("/api/rubricas/<id>")
     def update_rubrica(id):
-        row = patch_row("rubricas", id, request.get_json(force=True), RUBRICA_FIELDS)
+        data = request.get_json(force=True)
+        try:
+            _validar_motivo_rubrica(data)
+        except ValueError as e:
+            return jsonify({"erro": str(e)}), 400
+        prelude = _prelude_autoria_rubricas(request.headers.get("X-Usuario", ""), "edição na tela")
+        row = patch_row("rubricas", id, data, _rubrica_campos_gravaveis(RUBRICA_FIELDS), prelude=prelude)
         if not row:
             abort(404)
         return jsonify(row)
+
+    @app.get("/api/rubricas/<id>/envios-techne-historico")
+    def rubrica_envios_techne_historico(id):
+        """170ª rodada — histórico (temporalidade) do envio à Techne: cada vez que a
+        data de envio ou o motivo mudou (planilha, atualização automática ou
+        tela). Vazio + `disponivel: false` enquanto a migration_048 não foi
+        aplicada."""
+        try:
+            itens = db.fetch_all(
+                "SELECT id, data_envio_techne, motivo_envio_techne, data_envio_anterior, "
+                "motivo_anterior, registrado_em, registrado_por, origem "
+                f"FROM rubricas_envios_techne_historico WHERE rubrica_id = {db.q(id)} "
+                "ORDER BY registrado_em DESC, id"
+            )
+        except db.DbError:
+            return jsonify({"disponivel": False, "itens": []})
+        return jsonify({"disponivel": True, "itens": itens})
 
     @app.delete("/api/rubricas/<id>")
     def delete_rubrica(id):
@@ -3366,7 +3510,9 @@ def create_app():
         linhas = [it for it in itens if it.get("linha_planilha")]
         if not linhas:
             return jsonify({"erro": "Nenhum item válido para importar."}), 400
-        inseridos, atualizados = upsert_rubricas(projeto_id, linhas)
+        inseridos, atualizados = upsert_rubricas(
+            projeto_id, linhas, usuario=request.headers.get("X-Usuario", ""), origem="importação de planilha"
+        )
         linhas_planilha_atual = data.get("linhas_planilha_atual") or []
         excluidas = marcar_rubricas_ausentes_como_excluidas(projeto_id, linhas_planilha_atual)
         aba_excluidas_qtd = data.get("aba_excluidas_qtd")
