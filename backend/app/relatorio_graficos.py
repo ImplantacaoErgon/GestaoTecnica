@@ -22,12 +22,41 @@ claro — o PDF é sempre "modo claro", não tem alternância de tema):
 --ok, --danger, --warn, --text/--text-muted/--text-faint, --border,
 --series-1/--series-2 (ver frontend/index.html, bloco ":root").
 """
+import functools
+import threading
 from io import BytesIO
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-from matplotlib.patches import Patch
+# 171ª rodada — matplotlib (+ numpy) custava ~40MB por worker do gunicorn só pra
+# ser importado, mesmo em quem nunca gera PDF; com 4 workers num servidor de
+# 512MB isso era uma das causas do "OOM killed" recorrente no Render. Agora é
+# importado só na PRIMEIRA vez que um gráfico é gerado (ver _LazyPlt/Patch).
+# O pyplot não é thread-safe e o servidor usa threads (--threads no Dockerfile),
+# então a geração de gráficos é serializada por _MPL_LOCK (decorator _serializado).
+_MPL_LOCK = threading.RLock()
+
+
+class _LazyPlt:
+    def __getattr__(self, nome):
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as _plt
+        return getattr(_plt, nome)
+
+
+plt = _LazyPlt()
+
+
+def Patch(*args, **kwargs):
+    from matplotlib.patches import Patch as _Patch
+    return _Patch(*args, **kwargs)
+
+
+def _serializado(fn):
+    @functools.wraps(fn)
+    def _wrap(*args, **kwargs):
+        with _MPL_LOCK:
+            return fn(*args, **kwargs)
+    return _wrap
 
 _COR_OK = "#1f7a4d"
 _COR_DANGER = "#ab2f2f"
@@ -74,6 +103,7 @@ def _fig_para_png(fig, dpi=170):
 # destaque — mesmo critério de "uma série é o ponto, a outra é contexto" da
 # skill de dataviz), com uma linha vertical tracejada em "hoje" quando ainda
 # sobra pelo menos 1 mês de plano depois dela.
+@_serializado
 def grafico_curva_s(meses, planejado, realizado, hoje_mes, hoje_data=None):
     if not meses or len(meses) < 2:
         return None
@@ -141,6 +171,7 @@ def grafico_curva_s(meses, planejado, realizado, hoje_mes, hoje_data=None):
 # 1 barra horizontal por frente, com a cor PRÓPRIA da frente (frentes_trabalho.
 # cor_hex, identidade categórica real, cadastrada pelo usuário — não um token
 # de status), largura = % concluído, rótulo "concluídas/total" no fim da barra.
+@_serializado
 def grafico_frentes(frentes):
     """frentes: lista (JÁ na ordem a desenhar, de cima pra baixo — mesma
     ordem de frentes_trabalho.ordem usada na tela) de
@@ -171,6 +202,7 @@ def grafico_frentes(frentes):
     return _fig_para_png(fig)
 
 
+@_serializado
 def grafico_evolucao_migracao(nome_item, ciclos):
     """ciclos: lista em ordem CRONOLÓGICA (mais antigo -> mais recente, até 5) de
     {numero, carregado, rejeitado, extraido}. Replica o gráfico de barras
@@ -215,6 +247,7 @@ def grafico_evolucao_migracao(nome_item, ciclos):
     return _fig_para_png(fig)
 
 
+@_serializado
 def grafico_convergencia_folha(competencias, por_tiporubr):
     """Um donut por competência (Convergente/Divergente/Não programada), igual ao
     'Gráfico A' da Comparação Folha × Ergon na Visão Executiva (ver
@@ -272,6 +305,7 @@ def grafico_convergencia_folha(competencias, por_tiporubr):
     return _fig_para_png(fig)
 
 
+@_serializado
 def grafico_tipo_rubrica_folha(competencias, por_tiporubr):
     """% convergente por Tipo de Rubrica (Vantagem × Desconto) ao longo das
     competências — 'Gráfico B' da Comparação Folha × Ergon (ver

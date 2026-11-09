@@ -33,7 +33,7 @@ manualmente pela equipe do cliente num ritmo próprio (diferente de, por
 exemplo, uma importação de cronograma, que o usuário revisa linha a linha
 de propósito).
 
-Concorrência entre os workers do gunicorn (`-w 4`, ver Dockerfile): cada um
+Concorrência entre os workers do gunicorn (`-w 2`, ver Dockerfile): cada um
 dos 4 processos liga sua própria thread de agendamento (mais simples do que
 coordenar uma única thread entre processos diferentes, e não exige
 dependência nova). A trava que evita 4 disparos simultâneos por hora é o

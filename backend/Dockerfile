@@ -52,4 +52,14 @@ EXPOSE 8000
 # não é definida, então cai no padrão 8000, que é o que o compose já expõe.
 # Forma "shell" do CMD (sem colchetes) porque só ela expande variáveis de
 # ambiente; com a forma "exec" ("${PORT}" ficaria literal).
-CMD gunicorn -w 4 -b 0.0.0.0:${PORT:-8000} --timeout 900 run:app
+#
+# 171ª rodada — `-w 4` (4 processos, ~100MB cada só de imports) num servidor de
+# 512MB (Render) deixava ~410MB ocupados em repouso; a atualização automática de
+# Rubricas (de hora em hora), uma carga da Comparação Folha ou um PDF empurravam
+# acima do limite e o Render matava a instância ("OOM killed", várias vezes por
+# dia) — enquanto isso, todo /api/* devolvia 500 (psql estourando os 60s). Agora:
+# 2 processos x 4 threads (worker gthread): a capacidade de atender pedidos em
+# paralelo continua parecida (as rotas ficam esperando o Postgres/psql, não CPU),
+# mas a memória base cai pra ~125MB (matplotlib também passou a ser importado
+# só quando um gráfico é gerado — ver app/relatorio_graficos.py).
+CMD gunicorn -w 2 --threads 4 -b 0.0.0.0:${PORT:-8000} --timeout 900 run:app
