@@ -12,7 +12,7 @@ from datetime import datetime, date, timedelta
 
 from flask import Flask, request, jsonify, send_from_directory, send_file, abort, session
 
-from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_renumeracao, cronograma_anomalias, cronograma_export, cronograma_export_xml, cronograma_comparacao, relatorio_executivo, relatorio_pdf, dashboard_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, rubricas_depara_analise, drive_rubricas, rubricas_auto_update, comparacao_folha, comparacao_folha_import, comparacao_folha_dashboard_snapshots, comparacao_folha_rubrica_situacao_export, google_drive, migracao_quadro_export, requisitos_ia, migracao_rejeicoes, migracao_rejeicoes_import, ciclos_migracao_import
+from . import db, cpm, tr_parser, cronograma_import, cronograma_versoes, cronograma_replanejamento, cronograma_edicao_lote, cronograma_renumeracao, cronograma_anomalias, cronograma_export, cronograma_export_xml, cronograma_export_monday, cronograma_comparacao, relatorio_executivo, relatorio_pdf, dashboard_pdf, auth, minhas_atividades, relatorio_atividades, manuais, auditoria, rubricas_import, rubricas_depara_analise, drive_rubricas, rubricas_auto_update, comparacao_folha, comparacao_folha_import, comparacao_folha_dashboard_snapshots, comparacao_folha_rubrica_situacao_export, google_drive, migracao_quadro_export, requisitos_ia, migracao_rejeicoes, migracao_rejeicoes_import, ciclos_migracao_import
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 FRONTEND_DIR = os.environ.get(
@@ -4272,6 +4272,56 @@ def create_app():
             mimetype="application/xml",
             as_attachment=True, download_name=nome_arquivo,
         )
+
+    @app.get("/api/cronograma/exportar-monday")
+    def cronograma_exportar_monday():
+        """172ª rodada — "Exportar para monday.com": cronograma INTEIRO do projeto
+        (sem filtros: um recorte quebraria as referências de predecessoras) numa
+        planilha .xlsx no formato que a importação do monday aceita, com % de
+        conclusão, sequência (ordem do WBS) e predecessoras. Ver
+        app/cronograma_export_monday.py (limites do monday e as 2 camadas do
+        arquivo: aba "monday" + aba "Dependências")."""
+        projeto_id = request.args.get("projeto_id")
+        if not projeto_id:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        projeto = db.fetch_one(f"SELECT nome, sigla FROM projetos WHERE id = {db.q(projeto_id)}")
+        if not projeto:
+            abort(404)
+        sql = (ATIVIDADE_SELECT + f" WHERE a.projeto_id = {db.q(projeto_id)} "
+               "ORDER BY codigo_wbs_chave_ordenacao(a.codigo_wbs) NULLS LAST, a.nome")
+        atividades = db.fetch_all(sql)
+        marcos = db.fetch_all(
+            f"SELECT * FROM marcos WHERE projeto_id = {db.q(projeto_id)} ORDER BY data_prevista, nome"
+        )
+        deps_rows = db.fetch_all(
+            "SELECT ad.atividade_id, ad.predecessora_id, ad.tipo, ad.lag_horas "
+            "FROM atividade_dependencia ad "
+            "JOIN atividades s ON s.id = ad.atividade_id "
+            "JOIN atividades p ON p.id = ad.predecessora_id "
+            f"WHERE s.projeto_id = {db.q(projeto_id)} AND p.projeto_id = {db.q(projeto_id)}"
+        )
+        deps_por_atividade = {}
+        for r in deps_rows:
+            deps_por_atividade.setdefault(r["atividade_id"], []).append(r)
+        try:
+            xlsx_bytes, resumo = cronograma_export_monday.gerar_planilha_bytes(
+                atividades, marcos, deps_por_atividade, projeto
+            )
+        except Exception as e:
+            print(f"[cronograma_export_monday] erro ao gerar planilha: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            return jsonify({"erro": f"Falha ao gerar a planilha para o monday: {e}"}), 500
+        base = (projeto.get("sigla") or projeto.get("nome") or "projeto").strip()
+        base = "".join(c if c.isalnum() or c in "-_" else "-" for c in base).strip("-") or "projeto"
+        nome_arquivo = f"cronograma-{base}-monday-{date.today().isoformat()}.xlsx"
+        resp = send_file(
+            io.BytesIO(xlsx_bytes),
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True, download_name=nome_arquivo,
+        )
+        resp.headers["X-Exportacao-Resumo"] = json.dumps(resumo)
+        return resp
 
     @app.post("/api/cronograma/remover-tudo")
     def cronograma_remover_tudo():

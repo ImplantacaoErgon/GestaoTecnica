@@ -1297,6 +1297,7 @@
         <button class="btn secondary small" id="btn-exportar-cronograma" title="Exporta as atividades numa planilha Excel — com filtros opcionais de Etapa, Frente e período">📤 Exportar Cronograma (Excel)</button>
         <button class="btn secondary small" id="btn-exportar-cronograma-xml" title="Exporta o cronograma inteiro (com dependências e % concluído) num XML para abrir no ProjectLibre">📤 Exportar XML (ProjectLibre)</button>
         <button class="btn secondary small" id="btn-exportar-cronograma-xml-msproject" title="Exporta o cronograma inteiro (com dependências e % concluído) num XML para abrir no Microsoft Project">📤 Exportar XML (Microsoft Project)</button>
+        <button class="btn secondary small" id="btn-exportar-cronograma-monday" title="Exporta o cronograma inteiro (sequência do WBS, predecessoras e % concluído) numa planilha pronta para importar no monday.com — inclui a aba Dependências para ligar as predecessoras depois da importação">📤 Exportar para monday.com</button>
         <button class="btn secondary small" id="btn-versoes-cronograma" title="Gera e consulta fotos completas do cronograma ao longo do tempo">🕘 Versões do cronograma</button>
         <button class="btn secondary small" id="btn-replanejar-cronograma" title="Recalcula as datas previstas das atividades incompletas, respeitando as dependências">🔄 Replanejar cronograma</button>
         <button class="btn secondary small" id="btn-edicao-lote-cronograma" title="Edita várias atividades de uma vez, tipo planilha, propagando o efeito em datas/esforço pelas dependentes">📝 Editar em massa</button>
@@ -10096,6 +10097,12 @@ function wireExportarCronogramaXml(){
   $("btn-exportar-cronograma-xml").addEventListener("click", ()=>{
     const params = new URLSearchParams({ projeto_id: PROJETO.id, alvo: "projectlibre" });
     window.open(`${API}/cronograma/exportar-xml?${params.toString()}`, "_blank");
+  });
+  // 172ª rodada — "Exportar para monday.com": mesmo padrão de download dos botões
+  // de XML (cronograma INTEIRO, sem filtros). Ver app/cronograma_export_monday.py.
+  $("btn-exportar-cronograma-monday").addEventListener("click", ()=>{
+    const params = new URLSearchParams({ projeto_id: PROJETO.id });
+    window.open(`${API}/cronograma/exportar-monday?${params.toString()}`, "_blank");
   });
   $("btn-exportar-cronograma-xml-msproject").addEventListener("click", ()=>{
     const params = new URLSearchParams({ projeto_id: PROJETO.id, alvo: "msproject" });
