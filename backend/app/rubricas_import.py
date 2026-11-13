@@ -107,6 +107,16 @@ CAMPOS_POR_CABECALHO = (
     ("data_homologacao", "data da homologacao", False),
     ("observacoes_homologacao", "observacoes", False),
 )
+# 174ª rodada — nomes alternativos aceitos pros campos essenciais (além do texto
+# de CAMPOS_POR_CABECALHO, que continua sendo o preferido): o cliente às vezes
+# reescreve o cabeçalho ("CÓDIGO ERGON" em vez de "RUBRICA ERGON", "Verba E07"...).
+# Comparados após _normaliza_cabecalho; `prefixo` = basta começar com o texto.
+ALIASES_CABECALHO = {
+    "verba_legado": [("verba", True)],
+    "codigo_ergon": [("codigo ergon", True), ("cod ergon", True), ("cod. ergon", True),
+                     ("rubrica ergon", True), ("rubrica", False)],
+    "nome_abreviado": [("nome abrev", True), ("nome curto", True)],
+}
 # Sem estes a planilha não é a esperada — a importação é barrada (os demais
 # só geram um aviso e o campo fica vazio).
 CAMPOS_ESSENCIAIS = ("verba_legado", "codigo_ergon", "nome_abreviado")
@@ -158,6 +168,13 @@ def mapear_colunas(ws, linha_cabecalho=None):
         achada = next((c for c, h in cabecalhos if c not in usadas and h == esperado), None)
         if achada is None and por_prefixo:
             achada = next((c for c, h in cabecalhos if c not in usadas and h.startswith(esperado)), None)
+        if achada is None:
+            for alias, prefixo_alias in ALIASES_CABECALHO.get(campo, []):
+                achada = next(
+                    (c for c, h in cabecalhos if c not in usadas
+                     and (h.startswith(alias) if prefixo_alias else h == alias)), None)
+                if achada is not None:
+                    break
         if achada is not None:
             campos[campo] = achada
             usadas.add(achada)
@@ -367,6 +384,23 @@ def _derivar_status(item):
     return melhor[2] if melhor else "Em levantamento"
 
 
+def _resumo_cabecalhos(ws, linha=None, limite=14):
+    """"B='Verba 07', C='DESCRIÇÃO E07', ..." — o que foi realmente lido na linha de
+    cabeçalho, pra diagnosticar sem precisar do arquivo (primeiras `limite` células)."""
+    linha = linha or LINHA_CABECALHO
+    partes = []
+    for col in range(1, (ws.max_column or 0) + 1):
+        v = ws.cell(row=linha, column=col).value
+        if v in (None, ""):
+            continue
+        txt = " ".join(str(v).split())[:28]
+        partes.append(f"{openpyxl.utils.get_column_letter(col)}='{txt}'")
+        if len(partes) >= limite:
+            partes.append("...")
+            break
+    return ", ".join(partes) if partes else f"(linha {linha} vazia; dimensão da aba: {ws.max_row}x{ws.max_column})"
+
+
 def _linha_tem_cabecalho_verba(ws, linha):
     for col in range(1, (ws.max_column or 0) + 1):
         h = _normaliza_cabecalho(ws.cell(row=linha, column=col).value)
@@ -462,8 +496,9 @@ def parse_rubricas_document(conteudo_bytes, nome_arquivo=""):
     faltando = [c for c in CAMPOS_ESSENCIAIS if c not in campos_col]
     if faltando:
         raise RubricasImportError(
-            f'Não encontrei na linha {LINHA_CABECALHO} da aba "{ABA_ESPERADA}" o cabeçalho de: '
-            f'{", ".join(faltando)} — a planilha pode ter mudado de layout. Confira antes de importar.'
+            f'Não encontrei na linha {LINHA_CABECALHO} da aba "{ws.title}" o cabeçalho de: '
+            f'{", ".join(faltando)} — a planilha pode ter mudado de layout. '
+            f'Cabeçalhos lidos na linha {LINHA_CABECALHO}: {_resumo_cabecalhos(ws)}. Confira antes de importar.'
         )
     itens = []
     avisos = [aviso_aba] if aviso_aba else []
