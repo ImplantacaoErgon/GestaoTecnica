@@ -3578,6 +3578,28 @@ def create_app():
             return jsonify({"erro": "projeto_id é obrigatório"}), 400
         return jsonify(rubricas_auto_update.ultima_execucao(pid))
 
+    @app.delete("/api/rubricas/auto-update/status")
+    def rubricas_auto_update_limpar_erros():
+        """176ª rodada — pedido do usuário: "permita de alguma forma limpar essa
+        mensagem" (aviso vermelho/amarelo "A última atualização automática falhou…"
+        na tela de Rubricas). Apaga só as execuções com status 'erro' do projeto
+        (nunca as concluídas nem uma em andamento); a tela passa a mostrar a última
+        execução concluída. A próxima falha, se houver, volta a aparecer normalmente."""
+        pid = request.args.get("projeto_id")
+        if not pid:
+            return jsonify({"erro": "projeto_id é obrigatório"}), 400
+        # execute_returning_one embrulha o DELETE num WITH e devolve UMA linha em JSON;
+        # aqui interessa só limpar — conta as linhas removidas antes, no mesmo critério.
+        antes = db.fetch_one(
+            "SELECT count(*) AS n FROM rubricas_auto_update_execucoes "
+            f"WHERE projeto_id = {db.q(pid)} AND status = 'erro'"
+        )
+        db.execute(
+            "DELETE FROM rubricas_auto_update_execucoes "
+            f"WHERE projeto_id = {db.q(pid)} AND status = 'erro'"
+        )
+        return jsonify({"removidas": int((antes or {}).get("n") or 0)})
+
     # ------------------------------------------------------------- comparação folha
     # 55ª rodada: aba "Comparação Folha" (dentro de Folha de Pagamento, junto
     # de Rubricas) — resultado já calculado (pelo cliente) da comparação

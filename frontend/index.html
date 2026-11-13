@@ -8152,7 +8152,17 @@ function renderRubricasAutoUpdateStatus(){
     const msgExcluidas = s.excluidas ? `, ${s.excluidas} marcada(s) como Excluída` : "";
     el.innerHTML = `🔄 Última atualização automática: <b>${esc(quando)}</b> — ${s.inseridos||0} nova(s), ${s.atualizados||0} atualizada(s)${msgExcluidas}.`;
   }else if(s.status === "erro"){
-    el.innerHTML = `⚠️ A última atualização automática (${esc(quando)}) falhou: ${esc(s.mensagem_erro||"erro desconhecido")}.`;
+    // 176ª rodada — botão pra dispensar o aviso (apaga as execuções com erro; ver
+    // DELETE /api/rubricas/auto-update/status).
+    el.innerHTML = `⚠️ A última atualização automática (${esc(quando)}) falhou: ${esc(s.mensagem_erro||"erro desconhecido")}. `
+      + `<button class="btn ghost small" id="btn-rub-auto-update-limpar" title="Remove este aviso (a próxima falha, se houver, aparece de novo)">✕ Limpar aviso</button>`;
+    $("btn-rub-auto-update-limpar").addEventListener("click", async ()=>{
+      try{
+        await api(`/rubricas/auto-update/status?projeto_id=${PROJETO.id}`, {method:"DELETE"});
+        await loadRubricasAutoUpdateStatus(); renderRubricasAutoUpdateStatus();
+        toast("Aviso removido.");
+      }catch(e){}
+    });
   }else{
     el.innerHTML = `🔄 Atualização automática em andamento desde ${esc(quando)}…`;
   }
