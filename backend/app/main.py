@@ -445,6 +445,39 @@ def upsert_rubricas(projeto_id, linhas, usuario=None, origem="importação de pl
     return inseridos, atualizados
 
 
+def divergencia_chaves_rubricas(existentes_rows, itens):
+    """175ª rodada — proteção contra DESLOCAMENTO DE LINHAS. `linha_planilha` (número
+    da linha) é a chave do upsert (ver upsert_rubricas): se alguém apaga/insere linhas
+    no meio da planilha do cliente, todas as linhas abaixo mudam de chave e a
+    importação sobrescreve, em silêncio, o conteúdo de rubricas que já existem (com o
+    mesmo id, atividades vinculadas etc.) por outras. Compara, pras linhas presentes
+    nos dois lados, a identificação (código ERGON + nome abreviado) cadastrada com a da
+    planilha. Retorna (comparadas, divergentes, exemplos[:3])."""
+    def ident(codigo, nome):
+        return ((codigo or "").strip().lower(), (nome or "").strip().lower())
+    atuais = {r["linha_planilha"]: ident(r.get("codigo_ergon"), r.get("nome_abreviado")) for r in existentes_rows}
+    comparadas = divergentes = 0
+    exemplos = []
+    for it in itens:
+        antes = atuais.get(it.get("linha_planilha"))
+        if antes is None:
+            continue
+        comparadas += 1
+        agora = ident(it.get("codigo_ergon"), it.get("nome_abreviado"))
+        if agora != antes:
+            divergentes += 1
+            if len(exemplos) < 3:
+                exemplos.append(f'linha {it["linha_planilha"]}: "{antes[1] or antes[0]}" -> "{agora[1] or agora[0]}"')
+    return comparadas, divergentes, exemplos
+
+
+LIMITE_DIVERGENCIA_CHAVES = 0.10  # fração das linhas já cadastradas
+
+
+def divergencia_chaves_excessiva(comparadas, divergentes):
+    return comparadas >= 20 and divergentes >= 10 and divergentes / comparadas > LIMITE_DIVERGENCIA_CHAVES
+
+
 def _rubricas_preview_resultado(projeto_id, conteudo_bytes, nome_arquivo):
     """Lógica de prévia compartilhada pelos dois jeitos de importar
     rubricas (upload manual e busca automática no Google Drive — 54ª
@@ -460,6 +493,16 @@ def _rubricas_preview_resultado(projeto_id, conteudo_bytes, nome_arquivo):
     existentes = {r["linha_planilha"] for r in existentes_rows}
     for it in resultado["itens"]:
         it["ja_existe"] = it["linha_planilha"] in existentes
+
+    # 175ª rodada — aviso de deslocamento de linhas (ver divergencia_chaves_rubricas).
+    comparadas, divergentes, exemplos = divergencia_chaves_rubricas(existentes_rows, resultado["itens"])
+    resultado["resumo"]["linhas_com_identificacao_diferente"] = divergentes
+    if divergencia_chaves_excessiva(comparadas, divergentes):
+        resultado["avisos"].insert(0, (
+            f"ATENÇÃO: em {divergentes} de {comparadas} linhas já cadastradas o Código ERGON/nome da planilha é "
+            f"diferente do cadastrado ({'; '.join(exemplos)}). Isso indica que linhas foram inseridas ou apagadas no "
+            "meio da planilha, e confirmar vai SOBRESCREVER essas rubricas com outras. Confira a planilha antes de confirmar."
+        ))
 
     # 170ª rodada — coluna "Motivo de Envio à Techne": avisos de migração
     # pendente, de linhas enviadas sem motivo e de motivos que vão mudar.

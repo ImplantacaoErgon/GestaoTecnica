@@ -172,7 +172,8 @@ def mapear_colunas(ws, linha_cabecalho=None):
             for alias, prefixo_alias in ALIASES_CABECALHO.get(campo, []):
                 achada = next(
                     (c for c, h in cabecalhos if c not in usadas
-                     and (h.startswith(alias) if prefixo_alias else h == alias)), None)
+                     and (h.startswith(alias) if prefixo_alias else h == alias)
+                     and (campo != "verba_legado" or len(h) <= 12)), None)  # não confunde com "Verbas salariais"
                 if achada is not None:
                     break
         if achada is not None:
@@ -404,45 +405,32 @@ def _resumo_cabecalhos(ws, linha=None, limite=14):
 def _linha_tem_cabecalho_verba(ws, linha):
     for col in range(1, (ws.max_column or 0) + 1):
         h = _normaliza_cabecalho(ws.cell(row=linha, column=col).value)
-        if h.startswith("verba"):
+        if h.startswith("verba") and len(h) <= 12:  # "verba 07"; não confunde com o dado "Verbas salariais"
             return True
     return False
 
 
-def _mensagem_cabecalho_nao_bateu(ws):
-    """Mensagem de diagnóstico: onde o cabeçalho "Verba..." foi parar (se achar nas
-    primeiras linhas) ou o que há de fato na linha esperada."""
-    achada = None
-    for linha in range(1, 16):
-        if linha == LINHA_CABECALHO:
+def _detectar_linha_cabecalho(ws):
+    """173/175ª rodada — procura (linhas 1 a 8) a linha que é de fato o cabeçalho:
+    a primeira (começando pela esperada, LINHA_CABECALHO) em que dá pra mapear
+    verba, código ERGON e nome abreviado e que tem o cabeçalho "Verba 07".
+    Visto em produção (13/11/2026): alguém apagou a linha de nota solta que ficava
+    acima do cabeçalho, e o cabeçalho passou da linha 2 pra 1 — as colunas continuavam
+    idênticas, mas o sistema lia a 1ª rubrica como cabeçalho e barrava tudo."""
+    for linha in [LINHA_CABECALHO] + [l for l in range(1, 9) if l != LINHA_CABECALHO]:
+        if not _linha_tem_cabecalho_verba(ws, linha):
             continue
-        for col in range(1, min(ws.max_column or 0, 60) + 1):
-            h = _normaliza_cabecalho(ws.cell(row=linha, column=col).value)
-            if h.startswith("verba") and len(h) <= 10:  # "verba 07" — não confunde com texto livre
-                achada = (linha, col)
-                break
-        if achada:
-            break
-    base = (
-        f'O cabeçalho "Verba 07" não está na linha {LINHA_CABECALHO} da aba "{ws.title}" '
-    )
-    if achada:
-        letra = openpyxl.utils.get_column_letter(achada[1])
-        return (
-            base + f'— ele foi encontrado na linha {achada[0]} (coluna {letra}). Uma linha foi inserida/removida '
-            "acima do cabeçalho, o que mudaria o número de linha de TODAS as rubricas (a chave da "
-            "atualização) — importação barrada para não duplicar nem marcar rubricas como Excluídas por engano. "
-            "Restaure o cabeçalho na linha 2 ou avise para ajustarmos o sistema."
-        )
-    lidas = [
-        str(ws.cell(row=LINHA_CABECALHO, column=c).value).strip()
-        for c in range(1, min(ws.max_column or 0, 8) + 1)
-        if ws.cell(row=LINHA_CABECALHO, column=c).value not in (None, "")
-    ]
-    lidas_txt = ", ".join(f'"{t[:30]}"' for t in lidas) if lidas else "(linha vazia)"
+        campos = mapear_colunas(ws, linha)["campos"]
+        if all(c in campos for c in CAMPOS_ESSENCIAIS):
+            return linha
+    return None
+
+
+def _mensagem_cabecalho_nao_bateu(ws):
+    """Mensagem de diagnóstico quando nenhuma das linhas 1-8 serve de cabeçalho."""
     return (
-        base + f"e não o encontrei nas 15 primeiras linhas. Primeiras células lidas da linha {LINHA_CABECALHO}: "
-        f"{lidas_txt}. A planilha pode ter mudado de layout ou ser outro arquivo — confira antes de importar."
+        f'Não consegui localizar o cabeçalho (Verba 07, Rubrica/Código ERGON e Nome Abreviado) nas 8 primeiras '
+        f'linhas da aba "{ws.title}" — a planilha pode ter mudado de layout ou ser outro arquivo. Confira antes de importar.'
     )
 
 
@@ -488,20 +476,28 @@ def parse_rubricas_document(conteudo_bytes, nome_arquivo=""):
     # chave (duplicaria as existentes e marcaria as antigas como Excluídas), então
     # nesse caso a importação é barrada, com a mensagem dizendo onde o cabeçalho
     # foi encontrado.
-    if not _linha_tem_cabecalho_verba(ws, LINHA_CABECALHO):
-        raise RubricasImportError(_mensagem_cabecalho_nao_bateu(ws))
-
-    mapa = mapear_colunas(ws)
-    campos_col = mapa["campos"]
-    faltando = [c for c in CAMPOS_ESSENCIAIS if c not in campos_col]
-    if faltando:
+    linha_cab = _detectar_linha_cabecalho(ws)
+    if linha_cab is None:
         raise RubricasImportError(
-            f'Não encontrei na linha {LINHA_CABECALHO} da aba "{ws.title}" o cabeçalho de: '
-            f'{", ".join(faltando)} — a planilha pode ter mudado de layout. '
-            f'Cabeçalhos lidos na linha {LINHA_CABECALHO}: {_resumo_cabecalhos(ws)}. Confira antes de importar.'
+            _mensagem_cabecalho_nao_bateu(ws)
+            + f" Cabeçalhos lidos na linha {LINHA_CABECALHO}: {_resumo_cabecalhos(ws)}."
         )
+    # `linha_planilha` (chave do upsert, ver upsert_rubricas) é sempre expressa no
+    # sistema de numeração ORIGINAL (cabeçalho na linha 2): se o cabeçalho foi
+    # achado em outra linha, todas as linhas ganham o deslocamento, pra uma rubrica
+    # já cadastrada continuar com a MESMA chave (senão duplicaria tudo e marcaria as
+    # antigas como Excluídas). Linha real da planilha = linha_planilha - deslocamento.
+    deslocamento = LINHA_CABECALHO - linha_cab
+    mapa = mapear_colunas(ws, linha_cab)
+    campos_col = mapa["campos"]
     itens = []
     avisos = [aviso_aba] if aviso_aba else []
+    if deslocamento:
+        avisos.append(
+            f"O cabeçalho da planilha está na linha {linha_cab} (o esperado era a {LINHA_CABECALHO}). Os números de linha "
+            f"foram ajustados em {deslocamento:+d} para continuarem batendo com as rubricas já cadastradas "
+            f"(\"linha N\" nas mensagens = linha real {'+' if deslocamento > 0 else '-'} {abs(deslocamento)})."
+        )
     ausentes = [c for c in mapa["nao_encontrados"] if c not in CAMPOS_ESSENCIAIS]
     if ausentes:
         rotulos = {campo: cab for campo, cab, _p in CAMPOS_POR_CABECALHO}
@@ -513,7 +509,8 @@ def parse_rubricas_document(conteudo_bytes, nome_arquivo=""):
     col_descricao = campos_col.get("descricao_legado")
     col_codigo = campos_col["codigo_ergon"]
     col_nome = campos_col["nome_abreviado"]
-    for r in range(LINHA_PRIMEIRA_DADOS, ws.max_row + 1):
+    for r in range(linha_cab + 1, ws.max_row + 1):
+        lp = r + deslocamento  # chave `linha_planilha` (ver acima)
         verba = ws.cell(row=r, column=col_verba).value
         descricao = ws.cell(row=r, column=col_descricao).value if col_descricao else None
         # 150ª rodada — pedido do usuário (verbatim): "Quero ver a linha 302
@@ -533,7 +530,7 @@ def parse_rubricas_document(conteudo_bytes, nome_arquivo=""):
                 and codigo_ergon_bruto is None and not _texto(nome_abreviado_bruto)):
             continue  # linha em branco de verdade
 
-        item = {"linha_planilha": r}
+        item = {"linha_planilha": lp}
         notas = []
         for campo, coluna in campos_col.items():
             v = ws.cell(row=r, column=coluna).value
@@ -544,7 +541,7 @@ def parse_rubricas_document(conteudo_bytes, nome_arquivo=""):
                     notas.append(f"{DATE_FIELD_LABEL[campo]} (texto original da planilha): {nota}")
                     if iso is None:
                         avisos.append(
-                            f"Linha {r}: não consegui extrair uma data válida de "
+                            f"Linha {lp}: não consegui extrair uma data válida de "
                             f'"{DATE_FIELD_LABEL[campo]}" — texto ficou em notas_importacao, revise manualmente.'
                         )
             elif campo in ("verba_legado", "codigo_ergon"):
@@ -573,9 +570,9 @@ def parse_rubricas_document(conteudo_bytes, nome_arquivo=""):
 
         if _linha_tachada(ws, r, (col_verba, col_descricao or col_verba, col_codigo, col_nome)):
             item["status"] = "Excluída"
-            identificacao = item.get("codigo_ergon") or item.get("nome_abreviado") or f"linha {r}"
+            identificacao = item.get("codigo_ergon") or item.get("nome_abreviado") or f"linha {lp}"
             avisos.append(
-                f'Linha {r} ("{identificacao}") está tachada (riscada) na planilha — marcada como '
+                f'Linha {lp} ("{identificacao}") está tachada (riscada) na planilha — marcada como '
                 "Excluída."
             )
         else:
@@ -583,14 +580,14 @@ def parse_rubricas_document(conteudo_bytes, nome_arquivo=""):
         item["notas_importacao"] = "; ".join(notas) or None
 
         if not item.get("nome_abreviado") and not item.get("descricao_legado"):
-            avisos.append(f"Linha {r}: sem nome nem descrição — confira se não é uma linha em branco/mesclada.")
+            avisos.append(f"Linha {lp}: sem nome nem descrição — confira se não é uma linha em branco/mesclada.")
 
         itens.append(item)
 
     if not itens:
         raise RubricasImportError(
             f'Nenhuma linha de rubrica encontrada na aba "{ABA_ESPERADA}" — confira se os dados '
-            f"realmente começam na linha {LINHA_PRIMEIRA_DADOS}."
+            f"realmente começam na linha {linha_cab + 1}."
         )
 
     resumo = {"total": len(itens), "por_status": {}}

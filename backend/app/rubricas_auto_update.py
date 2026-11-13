@@ -100,6 +100,21 @@ def _executar_atualizacao(projeto_id, janela):
         conteudo, nome_arquivo, _modificado_em = drive_rubricas.baixar_planilha_mais_recente()
         resultado = rubricas_import.parse_rubricas_document(conteudo, nome_arquivo or "")
         itens = [it for it in (resultado.get("itens") or []) if it.get("linha_planilha")]
+        # 175ª rodada — sem ninguém pra revisar a prévia, barra a atualização se a
+        # planilha parece ter linhas inseridas/apagadas no meio (as rubricas já
+        # cadastradas seriam sobrescritas por outras) — ver divergencia_chaves_rubricas.
+        from .main import divergencia_chaves_rubricas, divergencia_chaves_excessiva
+        existentes_rows = db.fetch_all(
+            "SELECT linha_planilha, codigo_ergon, nome_abreviado FROM rubricas "
+            f"WHERE projeto_id = {db.q(projeto_id)} AND linha_planilha IS NOT NULL"
+        )
+        comparadas, divergentes, exemplos = divergencia_chaves_rubricas(existentes_rows, itens)
+        if divergencia_chaves_excessiva(comparadas, divergentes):
+            raise RuntimeError(
+                f"Atualização automática NÃO aplicada: em {divergentes} de {comparadas} linhas já cadastradas o "
+                f"Código ERGON/nome da planilha mudou ({'; '.join(exemplos)}) — provável inserção/remoção de linhas "
+                'na planilha do Drive. Use "Atualizar Rubricas" (com prévia) para revisar e confirmar manualmente.'
+            )
         inseridos, atualizados = upsert_rubricas(projeto_id, itens, usuario=None, origem="atualização automática") if itens else (0, 0)
         # 156ª rodada -- mesmo caminho do botão manual (ver docstring do
         # módulo): a atualização automática também usa a planilha mais
