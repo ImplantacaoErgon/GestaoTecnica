@@ -115,12 +115,22 @@ def _executar_atualizacao(projeto_id, janela):
         # módulo): a atualização automática também recalcula a contagem da
         # aba "Excluídas" da planilha a cada rodada.
         atualizar_contagem_aba_excluidas_rubricas(projeto_id, resultado.get("aba_excluidas_qtd"))
-        db.execute(
+        base_sql = (
             "UPDATE rubricas_auto_update_execucoes SET status = 'concluido', "
             f"nome_arquivo = {db.q(nome_arquivo)}, inseridos = {db.q(inseridos)}, "
-            f"atualizados = {db.q(atualizados)}, excluidas = {db.q(excluidas)}, concluido_em = now() "
-            f"WHERE projeto_id = {db.q(projeto_id)} AND janela = {db.q(janela)}"
+            f"atualizados = {db.q(atualizados)}, "
         )
+        where_sql = f" concluido_em = now() WHERE projeto_id = {db.q(projeto_id)} AND janela = {db.q(janela)}"
+        try:
+            db.execute(base_sql + f"excluidas = {db.q(excluidas)}," + where_sql)
+        except db.DbError as e_upd:
+            # 173ª rodada — visto em produção: migration_043 (coluna `excluidas`) não
+            # tinha sido aplicada no Supabase, e a execução aparecia como "falhou"
+            # mesmo com a planilha já importada. Sem a coluna, grava o resto.
+            if "excluidas" not in str(e_upd):
+                raise
+            logger.warning("Coluna rubricas_auto_update_execucoes.excluidas ausente — aplique db/migration_043.")
+            db.execute(base_sql + where_sql)
         logger.info(
             "Atualização automática de Rubricas concluída (janela %s): %s nova(s), %s atualizada(s), %s excluída(s).",
             janela, inseridos, atualizados, excluidas,

@@ -367,6 +367,51 @@ def _derivar_status(item):
     return melhor[2] if melhor else "Em levantamento"
 
 
+def _linha_tem_cabecalho_verba(ws, linha):
+    for col in range(1, (ws.max_column or 0) + 1):
+        h = _normaliza_cabecalho(ws.cell(row=linha, column=col).value)
+        if h.startswith("verba"):
+            return True
+    return False
+
+
+def _mensagem_cabecalho_nao_bateu(ws):
+    """Mensagem de diagnóstico: onde o cabeçalho "Verba..." foi parar (se achar nas
+    primeiras linhas) ou o que há de fato na linha esperada."""
+    achada = None
+    for linha in range(1, 16):
+        if linha == LINHA_CABECALHO:
+            continue
+        for col in range(1, min(ws.max_column or 0, 60) + 1):
+            h = _normaliza_cabecalho(ws.cell(row=linha, column=col).value)
+            if h.startswith("verba") and len(h) <= 10:  # "verba 07" — não confunde com texto livre
+                achada = (linha, col)
+                break
+        if achada:
+            break
+    base = (
+        f'O cabeçalho "Verba 07" não está na linha {LINHA_CABECALHO} da aba "{ws.title}" '
+    )
+    if achada:
+        letra = openpyxl.utils.get_column_letter(achada[1])
+        return (
+            base + f'— ele foi encontrado na linha {achada[0]} (coluna {letra}). Uma linha foi inserida/removida '
+            "acima do cabeçalho, o que mudaria o número de linha de TODAS as rubricas (a chave da "
+            "atualização) — importação barrada para não duplicar nem marcar rubricas como Excluídas por engano. "
+            "Restaure o cabeçalho na linha 2 ou avise para ajustarmos o sistema."
+        )
+    lidas = [
+        str(ws.cell(row=LINHA_CABECALHO, column=c).value).strip()
+        for c in range(1, min(ws.max_column or 0, 8) + 1)
+        if ws.cell(row=LINHA_CABECALHO, column=c).value not in (None, "")
+    ]
+    lidas_txt = ", ".join(f'"{t[:30]}"' for t in lidas) if lidas else "(linha vazia)"
+    return (
+        base + f"e não o encontrei nas 15 primeiras linhas. Primeiras células lidas da linha {LINHA_CABECALHO}: "
+        f"{lidas_txt}. A planilha pode ter mudado de layout ou ser outro arquivo — confira antes de importar."
+    )
+
+
 def parse_rubricas_document(conteudo_bytes, nome_arquivo=""):
     """Lê a aba "Levantamento Rubricas" e devolve
     {"itens": [...], "avisos": [...], "resumo": {...}} — não grava nada no
@@ -401,13 +446,16 @@ def parse_rubricas_document(conteudo_bytes, nome_arquivo=""):
             f'{", ".join(wb.sheetnames)}). Confirme se é o arquivo certo.'
         )
 
-    cabecalho_verba = ws.cell(row=LINHA_CABECALHO, column=2).value
-    if not (cabecalho_verba and "verba" in str(cabecalho_verba).lower()):
-        raise RubricasImportError(
-            f'O cabeçalho esperado na linha {LINHA_CABECALHO} da aba "{ABA_ESPERADA}" não bateu '
-            "(a coluna B deveria ser \"Verba 07\") — a planilha pode ter mudado de layout desde a "
-            "última vez. Confira antes de importar."
-        )
+    # 173ª rodada — antes só aceitava "Verba" na coluna B. Agora aceita em QUALQUER
+    # coluna da linha de cabeçalho (as colunas são mapeadas pelo nome desde a 170ª
+    # rodada, então uma coluna inserida antes de "Verba 07" é inofensiva). A LINHA
+    # do cabeçalho continua fixa de propósito: `linha_planilha` (número da linha) é a
+    # chave do upsert — se o cabeçalho descer uma linha, TODA rubrica mudaria de
+    # chave (duplicaria as existentes e marcaria as antigas como Excluídas), então
+    # nesse caso a importação é barrada, com a mensagem dizendo onde o cabeçalho
+    # foi encontrado.
+    if not _linha_tem_cabecalho_verba(ws, LINHA_CABECALHO):
+        raise RubricasImportError(_mensagem_cabecalho_nao_bateu(ws))
 
     mapa = mapear_colunas(ws)
     campos_col = mapa["campos"]
