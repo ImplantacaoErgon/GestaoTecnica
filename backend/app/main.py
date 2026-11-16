@@ -2994,6 +2994,8 @@ def create_app():
             "total_extraido": 0, "total_carregado": 0,
         })
 
+    MODO_ULTIMO_CICLO = "ultimo"
+
     def _montar_quadro_ciclo(pid, numero_ciclo_arg):
         """78ª/79ª rodada: monta o "quadro" de carga por ciclo — usado tanto
         pelo endpoint JSON (tela) quanto pelo export em Excel, pra nunca
@@ -3009,7 +3011,14 @@ def create_app():
         """)
         ciclos_disponiveis = [r["numero_ciclo"] for r in disponiveis]
 
-        if numero_ciclo_arg not in (None, ""):
+        # 177ª rodada — pedido do usuário: "posso ter migrações em ciclos diferentes,
+        # pode manter o ciclo, mas habilite uma forma de gerar o quadro com o último
+        # ciclo de cada migração, sem fixar um número". numero_ciclo=ultimo -> uma linha
+        # por item de migração, com o MAIOR ciclo registrado DAQUELE item (cada linha
+        # mostra o seu próprio número de ciclo e data); numero_ciclo devolvido = "ultimo".
+        if numero_ciclo_arg == MODO_ULTIMO_CICLO:
+            numero_ciclo = MODO_ULTIMO_CICLO
+        elif numero_ciclo_arg not in (None, ""):
             try:
                 numero_ciclo = int(numero_ciclo_arg)
             except ValueError:
@@ -3018,9 +3027,19 @@ def create_app():
             numero_ciclo = ciclos_disponiveis[0] if ciclos_disponiveis else None
 
         linhas = []
-        if numero_ciclo is not None:
+        if numero_ciclo == MODO_ULTIMO_CICLO:
+            filtro_ciclo = ""
+            distinct = "DISTINCT ON (im.id)"
+            ordem = "im.id, c.numero_ciclo DESC, c.data_execucao DESC NULLS LAST"
+        elif numero_ciclo is not None:
+            filtro_ciclo = f" AND c.numero_ciclo = {db.q(numero_ciclo)}"
+            distinct = ""
+            ordem = None
+        else:
+            filtro_ciclo = None
+        if filtro_ciclo is not None:
             linhas = db.fetch_all(f"""
-                SELECT im.id AS item_migracao_id,
+                SELECT {distinct} im.id AS item_migracao_id,
                        im.nome_tabela_legado, im.nome_tabela_destino, im.sistema_origem,
                        c.numero_ciclo, c.data_execucao,
                        COALESCE(c.qtd_registros_extraidos, 0) AS total_a_carregar,
@@ -3032,9 +3051,13 @@ def create_app():
                        c.percentual_rejeicao
                 FROM ciclos_migracao c
                 JOIN itens_migracao im ON im.id = c.item_migracao_id
-                WHERE im.projeto_id = {db.q(pid)} AND c.numero_ciclo = {db.q(numero_ciclo)}
-                ORDER BY im.nome_tabela_legado
+                WHERE im.projeto_id = {db.q(pid)}{filtro_ciclo}
+                {"ORDER BY " + ordem if ordem else "ORDER BY im.nome_tabela_legado"}
             """)
+            if numero_ciclo == MODO_ULTIMO_CICLO:
+                # DISTINCT ON exige ordenar por im.id primeiro; reordena pro mesmo
+                # critério do modo por ciclo (nome da tabela de origem).
+                linhas.sort(key=lambda l: (l.get("nome_tabela_legado") or "").lower())
 
         return numero_ciclo, ciclos_disponiveis, linhas, None
 
@@ -3101,7 +3124,10 @@ def create_app():
             return jsonify({"erro": f"Falha ao gerar a planilha: {e}"}), 500
         base = (projeto.get("sigla") or projeto.get("nome") or "projeto").strip()
         base = "".join(c if c.isalnum() or c in "-_" else "-" for c in base).strip("-") or "projeto"
-        sufixo_ciclo = f"-ciclo{numero_ciclo}" if numero_ciclo is not None else ""
+        if numero_ciclo == MODO_ULTIMO_CICLO:
+            sufixo_ciclo = "-ultimo-ciclo"
+        else:
+            sufixo_ciclo = f"-ciclo{numero_ciclo}" if numero_ciclo is not None else ""
         nome_arquivo = f"quadro-carga-migracao-{base}{sufixo_ciclo}-{date.today().isoformat()}.xlsx"
         return send_file(
             io.BytesIO(xlsx_bytes),

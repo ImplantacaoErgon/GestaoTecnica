@@ -7772,8 +7772,11 @@ function renderQuadroCiclo(res){
   // Preserva a seleção atual do filtro (o ciclo escolhido pelo usuário, ou o
   // último por padrão na primeira carga) — repopular o <select> a cada troca
   // é o que permite trocar de ciclo sem fechar/reabrir o modal.
+  // 177ª rodada — opção "Último ciclo de cada migração" (value "ultimo"): uma
+  // linha por item, cada uma com o seu maior ciclo; não fixa um número.
   $("qc-ciclo-filtro").innerHTML = disponiveis.length
-    ? disponiveis.map(n=>`<option value="${n}" ${n===numeroCiclo?"selected":""}>Ciclo ${n}</option>`).join("")
+    ? `<option value="ultimo" ${numeroCiclo==="ultimo"?"selected":""}>Último ciclo de cada migração</option>`
+      + disponiveis.map(n=>`<option value="${n}" ${n===numeroCiclo?"selected":""}>Ciclo ${n}</option>`).join("")
     : `<option value="">—</option>`;
 
   $("qc-vazio").hidden = disponiveis.length > 0;
@@ -7785,7 +7788,7 @@ function renderQuadroCiclo(res){
   if(!disponiveis.length) return;
 
   if(!linhas.length){
-    $("qc-tbody").innerHTML = `<tr class="empty-row"><td colspan="8">Nenhum item de migração tem um ciclo nº ${esc(numeroCiclo)} registrado.</td></tr>`;
+    $("qc-tbody").innerHTML = `<tr class="empty-row"><td colspan="8">${numeroCiclo==="ultimo" ? "Nenhum item de migração tem ciclo registrado." : `Nenhum item de migração tem um ciclo nº ${esc(numeroCiclo)} registrado.`}</td></tr>`;
     $("qc-tfoot").innerHTML = "";
     return;
   }
@@ -7834,7 +7837,7 @@ function wireQuadroCicloModal(){
   $("overlay-quadro-ciclo").addEventListener("click", e=>{ if(e.target.id==="overlay-quadro-ciclo") closeQuadroCicloModal(); });
   $("qc-ciclo-filtro").addEventListener("change", ()=>{
     const v = $("qc-ciclo-filtro").value;
-    carregarQuadroCiclo(v===""?null:Number(v));
+    carregarQuadroCiclo(v===""?null:(v==="ultimo"?"ultimo":Number(v)));
   });
   // 79ª rodada — exporta exatamente o ciclo que está na tela no momento
   // (mesmo filtro selecionado); o backend recalcula os mesmos números com a

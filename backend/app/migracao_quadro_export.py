@@ -63,7 +63,10 @@ def gerar_planilha_bytes(numero_ciclo, linhas, totais):
     total geral exibido na tela — não é recalculado aqui de novo)."""
     wb = Workbook()
     ws = wb.active
-    ws.title = f"Ciclo {numero_ciclo}" if numero_ciclo is not None else "Quadro"
+    if numero_ciclo == "ultimo":  # 177ª rodada — último ciclo de cada migração (cada linha tem o seu)
+        ws.title = "Último ciclo"
+    else:
+        ws.title = f"Ciclo {numero_ciclo}" if numero_ciclo is not None else "Quadro"
 
     ws.append(CABECALHO)
     for col in range(1, len(CABECALHO) + 1):
